@@ -9,6 +9,9 @@ description = "The Brain: imports Addon data and runs the Decision Engine offlin
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+brain = "brain.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 

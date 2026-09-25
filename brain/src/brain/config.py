@@ -31,12 +31,17 @@ class Install:
 DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 48 * 60)
 
 
+DEFAULT_HISTORY_FILE = "history.sqlite"
+
+
 @dataclass(frozen=True)
 class Config:
     installs: tuple[Install, ...]
     # Index 0 is bucket 1. Used to rule out Listing matches that couldn't have lasted
     # the time between two Scans.
     time_left_max_seconds: tuple[int, ...] = tuple(m * 60 for m in DEFAULT_TIME_LEFT_MAX_MINUTES)
+    # The SQLite history. A relative path in the file is relative to the config file.
+    history_path: Path = Path(DEFAULT_HISTORY_FILE)
 
 
 def load_config(path: Path) -> Config:
@@ -60,7 +65,15 @@ def load_config(path: Path) -> Config:
     minutes = _parse_time_left(
         path, raw.get("time_left_max_minutes", DEFAULT_TIME_LEFT_MAX_MINUTES)
     )
-    return Config(installs=installs, time_left_max_seconds=tuple(m * 60 for m in minutes))
+    history = raw.get("history_path", DEFAULT_HISTORY_FILE)
+    if not isinstance(history, str) or not history:
+        raise ConfigError(f"{path}: history_path must be a file path, got {history!r}")
+
+    return Config(
+        installs=installs,
+        time_left_max_seconds=tuple(m * 60 for m in minutes),
+        history_path=path.parent / history,
+    )
 
 
 def _parse_time_left(config_path: Path, value: object) -> tuple[int, ...]:

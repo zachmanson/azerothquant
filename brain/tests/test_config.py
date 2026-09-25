@@ -139,3 +139,15 @@ def test_rejects_bad_time_left_buckets(tmp_path, value):
 
     with pytest.raises(ConfigError, match="time_left_max_minutes"):
         load_config(path)
+
+
+def test_history_defaults_to_a_file_next_to_the_config(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.history_path == tmp_path / "history.sqlite"
+
+
+def test_history_path_can_be_set_relative_to_the_config(tmp_path):
+    config = load_config(write_config(tmp_path, "history_path = 'data/h.sqlite'" + INSTALL))
+
+    assert config.history_path == tmp_path / "data" / "h.sqlite"

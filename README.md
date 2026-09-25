@@ -32,6 +32,18 @@ The Brain reads `brain/config.toml`, which maps each WoW install folder to its E
 Copy-Item brain\config.example.toml brain\config.toml
 ```
 
+### Running the Brain
+
+Installing the Brain (above) adds a `brain` command. Run it from `brain/` (or pass `--config <path>`):
+
+```powershell
+cd brain
+..\.venv\Scripts\brain import   # import every SavedVariables file once
+..\.venv\Scripts\brain watch    # keep running; import whenever the game rewrites the file
+```
+
+It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan a few seconds after you `/reload`. Stop it with Ctrl+C.
+
 ### Addon (Lua)
 
 WoW runs Lua 5.1, and busted needs a few C modules, so the easiest route on Windows is to build a local Lua 5.1 + LuaRocks into `.lua/` (gitignored) with [hererocks](https://github.com/luarocks/hererocks), using the MSVC compiler.
