@@ -1,0 +1,16 @@
+# Brain config. Copy this to brain/config.toml and edit the paths for your PC.
+#
+# Each [[installs]] entry is one WoW install folder the Brain reads from, and the
+# Era its data belongs to ("beta" or "live"). Beta and Live data are never mixed,
+# so every folder must be listed once, with exactly one Era.
+#
+# Use single quotes so Windows backslashes are taken literally.
+
+[[installs]]
+path = 'C:\Program Files (x86)\World of Warcraft\_classic_beta_'
+era = "beta"
+
+# Add the Live install once its folder name is known at launch:
+# [[installs]]
+# path = 'C:\Program Files (x86)\World of Warcraft\<live folder>'
+# era = "live"
