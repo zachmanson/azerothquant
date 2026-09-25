@@ -30,7 +30,7 @@ _Avoid_: server, AH (when you mean the data scope)
 Relative value learned from Beta (price ratios, turnover rank) that the Decision Engine uses early in Live, while Live history is still thin. It stops being used a few weeks after launch.
 
 **Scan**:
-One full pass over every listing on the Auction House at a single point in time.
+One full pass over every Listing on the Auction House, as it stood at the moment the Scan was requested.
 _Avoid_: snapshot, dump
 
 **Item Key**:
@@ -38,11 +38,14 @@ The identity used for pricing: itemID plus random suffix, so "of the Monkey" and
 _Avoid_: item (when you mean the priced identity), itemID
 
 **Listing**:
-One auction on the Auction House: an Item Key, stack size, unit buyout and seller, tracked across the Scans it appears in.
-_Avoid_: auction, post, order
+One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key and unit buyout, and identical Listings are interchangeable. Its quantity can only go down. Bids are ignored; buyout is the only price.
+_Avoid_: auction, post, order, stack (a Listing can hold more than one stack)
 
 **Disappearance**:
 A Listing that was in one Scan and missing from the next. It was sold, cancelled or expired, and the game doesn't say which.
+
+**Partial Sale**:
+A drop in a Listing's quantity between two Scans. It is always a sale, since cancelling and expiring remove the whole Listing.
 
 **Probable Sale**:
 A Disappearance treated as a sale because the Listing was far from expiring and priced near or below Fair Value.
@@ -52,7 +55,7 @@ The price an Item Key can realistically be sold at in its Market, based on the c
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
-Probable Sales per day for an Item Key in a Market; the Decision Engine's measure of liquidity.
+Units sold per day for an Item Key in a Market, counted from Partial Sales and Probable Sales; the Decision Engine's measure of liquidity.
 _Avoid_: volume, velocity
 
 **Vendor Price**:
