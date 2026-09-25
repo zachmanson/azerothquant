@@ -26,6 +26,8 @@ cd brain
 cd ..
 ```
 
+One test also loads the Lua the Brain writes into real Lua 5.1. It is skipped unless `lua` is on PATH or `$env:LUA` points at one, e.g. `$env:LUA = "..\.lua\bin\lua.exe"` after the Addon setup below.
+
 The Brain reads `brain/config.toml`, which maps each WoW install folder to its Era. It is per-machine and not committed:
 
 ```powershell
@@ -43,6 +45,8 @@ cd brain
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan a few seconds after you `/reload`. Stop it with Ctrl+C.
+
+After each import it rewrites `Interface\AddOns\AzerothQuant\Recommendations.lua` in every install that has the Addon. The game reads it on the next `/reload` or login, and the Addon then deletes the Scans the Brain has already imported from SavedVariables. So a Scan leaves SavedVariables one `/reload` after the Brain imports it.
 
 ### Addon (Lua)
 
@@ -66,6 +70,8 @@ Run the specs:
 ```
 
 To try the Addon in game, copy (or symlink) `addon\AzerothQuant` into `<WoW>\_classic_beta_\Interface\AddOns\`.
+
+The Addon ships a stub `Recommendations.lua`, because the game only loads files that existed when it started. The Brain overwrites that file, so with a symlink it shows up as changed in git. Hide that with `git update-index --skip-worktree addon/AzerothQuant/Recommendations.lua`.
 
 #### Troubleshooting the Lua setup
 

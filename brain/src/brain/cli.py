@@ -18,6 +18,7 @@ from pathlib import Path
 
 from brain.config import Config, ConfigError, load_config
 from brain.history import ImportFileError, ImportReport, import_file, open_history
+from brain.recommendations import write_recommendations
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
 
@@ -72,7 +73,24 @@ def run_import(config: Config, paths: list[Path]) -> list[FileResult]:
                 results.append(FileResult(path, error=str(e)))
             else:
                 results.append(FileResult(path, report=report))
+        _write_recommendations(conn, config)
     return results
+
+
+def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
+    """Rewrite every install's Recommendations.lua from the history.
+
+    Every install, not only those just imported: it is cheap, and it also fixes a file
+    a previous write couldn't replace (say the client had it open).
+    """
+    for install in config.installs:
+        try:
+            path = write_recommendations(conn, install)
+        except (OSError, sqlite3.Error) as e:
+            log.error("Couldn't write Recommendations for %s: %s", install.path, e)
+            continue
+        if path is None:
+            log.warning("The Addon isn't installed in %s; no Recommendations written", install.path)
 
 
 def _log_results(results: list[FileResult]) -> None:

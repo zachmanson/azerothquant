@@ -4,9 +4,14 @@
 ## Version: 0.1.0
 ## SavedVariables: AzerothQuantDB
 
+# Written by the Brain (never edit). It must exist when the client starts, since new
+# files aren't picked up on /reload, so the Addon ships a stub.
+Recommendations.lua
+
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
 Money.lua
 Scan.lua
+Prune.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua

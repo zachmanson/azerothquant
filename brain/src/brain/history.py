@@ -315,3 +315,14 @@ def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]
         _market_params(market),
     )
     return [PartialSale(k, u, bool(o), at, n) for k, u, o, at, n in rows]
+
+
+def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
+    """requested_at of the latest Scan imported for each Market in the Era."""
+    rows = conn.execute(
+        "SELECT m.realm, m.faction, MAX(s.requested_at) FROM scan s"
+        " JOIN market m ON m.id = s.market_id"
+        " WHERE m.era = ? GROUP BY m.id ORDER BY m.realm, m.faction",
+        (era.value,),
+    )
+    return {Market(realm, faction, era): at for realm, faction, at in rows}

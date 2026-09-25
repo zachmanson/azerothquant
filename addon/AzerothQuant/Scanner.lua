@@ -1,10 +1,12 @@
 -- WoW glue for the full Scan: a "Scan" button on the Auction House that runs
 -- C_AuctionHouse.ReplicateItems and saves the result to AzerothQuantDB.scans.
 -- All shaping happens in Scan.lua; this file only talks to the WoW API.
+-- On load it also deletes the Scans the Brain has imported (Prune.lua).
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
 local Scan = ns.Scan
+local Prune = ns.Prune
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
@@ -150,6 +152,11 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       db = AzerothQuantDB
       db.scans = db.scans or {}
       db.nextScanId = db.nextScanId or 1
+      -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
+      local pruned = Prune.importedScans(db.scans, AzerothQuantRecommendations)
+      if pruned > 0 then
+        say(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))
+      end
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
