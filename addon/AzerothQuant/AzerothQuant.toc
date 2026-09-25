@@ -2,6 +2,11 @@
 ## Title: AzerothQuant
 ## Notes: Records Auction House data for the azerothquant Brain and shows its Recommendations. Read-only: never buys, posts or cancels.
 ## Version: 0.1.0
+## SavedVariables: AzerothQuantDB
 
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
 Money.lua
+Scan.lua
+
+# WoW glue (thin; not unit tested)
+Scanner.lua
