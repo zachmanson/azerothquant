@@ -1,0 +1,3 @@
+# The Addon only reads and displays; it never buys, posts or cancels
+
+The Addon never calls Auction House actions (buying, bidding, posting, cancelling) or mail-looting APIs, even from a button the player clicks, and nothing in the project touches the game process, its memory, its network traffic, or simulates input. Blizzard's policy would allow one protected action per player click (TSM and similar addons do this), but we deliberately stay stricter: the player performs every trade through Blizzard's own UI, and the Addon only highlights and recommends. This keeps the account-risk surface at zero and makes the boundary easy to check: any use of those APIs is a bug.
