@@ -111,3 +111,31 @@ def test_rejects_installs_that_are_not_tables(tmp_path):
 
     with pytest.raises(ConfigError, match="must be a list of tables"):
         load_config(path)
+
+
+INSTALL = r"""
+[[installs]]
+path = 'C:\WoW\_classic_'
+era = "beta"
+"""
+
+
+def test_time_left_buckets_default_to_retail(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    # <30m, 30m-2h, 2-12h, 12-48h, as the longest time left in each bucket (seconds).
+    assert config.time_left_max_seconds == (30 * 60, 2 * 3600, 12 * 3600, 48 * 3600)
+
+
+def test_time_left_buckets_can_be_set(tmp_path):
+    config = load_config(write_config(tmp_path, "time_left_max_minutes = [1, 2, 3, 4]" + INSTALL))
+
+    assert config.time_left_max_seconds == (60, 120, 180, 240)
+
+
+@pytest.mark.parametrize("value", ["[30, 120, 720]", "[30, 20, 720, 2880]", "[0, 1, 2, 3]", '"x"'])
+def test_rejects_bad_time_left_buckets(tmp_path, value):
+    path = write_config(tmp_path, f"time_left_max_minutes = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match="time_left_max_minutes"):
+        load_config(path)

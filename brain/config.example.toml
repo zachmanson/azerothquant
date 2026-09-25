@@ -6,6 +6,11 @@
 #
 # Use single quotes so Windows backslashes are taken literally.
 
+# Optional: the longest time left, in minutes, in each Auction House time-left bucket
+# (shortest first). Defaults to retail's <30m, 30m-2h, 2-12h, 12-48h; still to be
+# verified on Forever. Must come before the first [[installs]].
+# time_left_max_minutes = [30, 120, 720, 2880]
+
 [[installs]]
 path = 'C:\Program Files (x86)\World of Warcraft\_classic_beta_'
 era = "beta"
