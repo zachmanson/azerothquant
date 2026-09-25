@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: AQProbe
+## Notes: azerothquant spike #1: read-only Auction House API probe. Delete when done.
+## SavedVariables: AQProbeDB
+
+AQProbe.lua
