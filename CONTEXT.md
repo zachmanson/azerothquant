@@ -38,7 +38,7 @@ The identity used for pricing: itemID plus random suffix, so "of the Monkey" and
 _Avoid_: item (when you mean the priced identity), itemID
 
 **Listing**:
-One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key and unit buyout, and identical Listings are interchangeable. Its quantity can only go down. Bids are ignored; buyout is the only price.
+One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key, unit buyout and whether it is the player's own, and identical Listings are interchangeable. Its quantity can only go down. Bids are ignored; buyout is the only price.
 _Avoid_: auction, post, order, stack (a Listing can hold more than one stack)
 
 **Disappearance**:
