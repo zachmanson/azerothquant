@@ -54,11 +54,23 @@ end
 -- buyout, bidAmount, highBidder, bidder, owner, ownerFullName, saleStatus, itemID, hasAllInfo
 local LINEN_CLOTH = 2589
 
+-- "commodity", "item" or "unknown" (item data not loaded yet). Retail enum: 0 unknown, 1 item, 2 commodity.
+local statusCache = {}
+local function commodityStatus(itemID)
+    if not itemID then return "unknown" end
+    if statusCache[itemID] then return statusCache[itemID] end
+    local ok, s = pcall(AH.GetItemCommodityStatus, itemID)
+    local name = (not ok and "missing") or (s == 2 and "commodity") or (s == 1 and "item") or "unknown"
+    if name ~= "unknown" then statusCache[itemID] = name end
+    return name
+end
+
 local function captureStats()
     local n = AH.GetNumReplicateItems()
     local st = {
         total = n, withOwner = 0, withoutAllInfo = 0, withBid = 0, withMinBid = 0,
-        noBuyout = 0, stacked = 0, maxStack = 0, linenListings = 0, linenUnits = 0,
+        noBuyout = 0, stacked = 0, maxStack = 0, maxStackLink = nil, maxStackStatus = nil,
+        linenListings = 0, linenUnits = 0,
         distinctItems = 0, ownerExamples = {}, stackExamples = {}, linenExamples = {},
     }
     local seen = {}
@@ -76,7 +88,11 @@ local function captureStats()
         if not buyout or buyout == 0 then st.noBuyout = st.noBuyout + 1 end
         if count and count > 1 then
             st.stacked = st.stacked + 1
-            if count > st.maxStack then st.maxStack = count end
+            if count > st.maxStack then
+                st.maxStack = count
+                st.maxStackLink = AH.GetReplicateItemLink(i) .. " @" .. tostring(buyout)
+                st.maxStackStatus = commodityStatus(itemID)
+            end
             if #st.stackExamples < 5 then table.insert(st.stackExamples, AH.GetReplicateItemLink(i) .. " x" .. count .. " @" .. tostring(buyout)) end
         end
         if itemID == LINEN_CLOTH then
@@ -88,6 +104,79 @@ local function captureStats()
     AQProbeDB.stats = st
     log(string.format("stats: %d listings, %d distinct items, %d with owner, %d stacked, linen %d listings",
         n, st.distinctItems, st.withOwner, st.stacked, st.linenListings))
+end
+
+-- Test 3: do full-scan owners fill in if we keep asking? Owner names resolve lazily
+-- (GUID -> name, rate-limited), so re-read every row on a ticker and log the fill curve,
+-- split by commodity vs item.
+local sellerTicker
+local SELLER_INTERVAL = 5
+local SELLER_MAX_TICKS = 180 -- 15 min
+
+local function sellerTick()
+    local n = AH.GetNumReplicateItems()
+    local p = { t = GetTime(), total = n, filled = 0,
+        commodity = 0, commodityFilled = 0, item = 0, itemFilled = 0, unknown = 0 }
+    local out = AQProbeDB.sellerFill
+    for i = 0, n - 1 do
+        local _, _, _, _, _, _, _, _, _, _, _, _, _, owner, ownerFull, _, itemID = AH.GetReplicateItemInfo(i)
+        local has = (owner ~= nil and owner ~= "") or (ownerFull ~= nil and ownerFull ~= "")
+        local s = commodityStatus(itemID)
+        if has then p.filled = p.filled + 1 end
+        if s == "commodity" then
+            p.commodity = p.commodity + 1
+            if has then
+                p.commodityFilled = p.commodityFilled + 1
+                if #out.commodityOwnerExamples < 5 then
+                    table.insert(out.commodityOwnerExamples, AH.GetReplicateItemLink(i) .. " / " .. tostring(ownerFull or owner))
+                end
+            end
+        elseif s == "item" then
+            p.item = p.item + 1
+            if has then p.itemFilled = p.itemFilled + 1 end
+        else
+            p.unknown = p.unknown + 1
+        end
+    end
+    table.insert(out.points, p)
+    log(string.format("sellers: %d/%d filled (commodity %d/%d, item %d/%d, unknown %d)",
+        p.filled, n, p.commodityFilled, p.commodity, p.itemFilled, p.item, p.unknown))
+end
+
+local function stopSellers(reason)
+    if sellerTicker then
+        sellerTicker:Cancel()
+        sellerTicker = nil
+        log("seller fill stopped: " .. reason)
+    end
+end
+
+local function startSellers()
+    stopSellers("restarted")
+    AQProbeDB.sellerFill = { interval = SELLER_INTERVAL, points = {}, commodityOwnerExamples = {} }
+    sellerTick()
+    sellerTicker = C_Timer.NewTicker(SELLER_INTERVAL, sellerTick, SELLER_MAX_TICKS)
+    log("seller fill started, every " .. SELLER_INTERVAL .. "s; keep the AH open")
+end
+
+-- Test 1: snapshot every full-scan row for one item, to diff before/after a partial buy.
+local function snapshot(itemID)
+    local n = AH.GetNumReplicateItems()
+    local snap = { t = GetTime(), date = date("%Y-%m-%d %H:%M:%S"), itemID = itemID, rows = {} }
+    for i = 0, n - 1 do
+        local _, _, count, _, _, _, _, _, _, buyout, _, _, _, owner, ownerFull, _, id = AH.GetReplicateItemInfo(i)
+        if id == itemID then
+            table.insert(snap.rows, {
+                count = count, buyout = buyout,
+                unit = (count and count > 0 and buyout) and (buyout / count) or nil,
+                timeLeft = AH.GetReplicateItemTimeLeft(i),
+                owner = ownerFull or owner,
+            })
+        end
+    end
+    AQProbeDB.snapshots = AQProbeDB.snapshots or {}
+    table.insert(AQProbeDB.snapshots, snap)
+    log(string.format("snapshot #%d: item %d, %d rows (of %d total)", #AQProbeDB.snapshots, itemID, #snap.rows, n))
 end
 
 -- Per-item search (what the default UI uses when you click an item).
@@ -170,8 +259,10 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         for _, e in ipairs(EVENTS) do pcall(frame.RegisterEvent, frame, e) end
         return
     end
+    if event == "REPLICATE_ITEM_LIST_UPDATE" and sellerTicker then return end -- too noisy while names resolve
     log("event " .. event .. (arg1 ~= nil and (" " .. tostring(arg1)) or ""))
     if event == "REPLICATE_ITEM_LIST_UPDATE" then captureReplicateSample() end
+    if event == "AUCTION_HOUSE_CLOSED" then stopSellers("AH closed") end
 end)
 
 SLASH_AQPROBE1 = "/aqprobe"
@@ -191,7 +282,14 @@ SlashCmdList.AQPROBE = function(arg)
         log("item search sent for item " .. id)
     elseif arg == "ownersread" then
         captureItemSearch()
+    elseif arg == "sellers" then
+        startSellers()
+    elseif arg == "sellersstop" then
+        stopSellers("by command")
+    elseif arg == "snap" or arg:match("^snap %d+$") then
+        snapshot(tonumber(arg:match("%d+")) or LINEN_CLOTH)
     elseif arg == "clear" then
+        stopSellers("clear")
         AQProbeDB = { log = {} }
         print("AQProbe cleared")
     else
