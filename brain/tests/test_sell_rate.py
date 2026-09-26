@@ -110,7 +110,12 @@ def test_each_sell_rate_carries_its_evidence(db):
     rates = sell_rates(db, MARKET, CONFIG, now=T0 + 30 * MINUTE)
 
     assert rates[LINEN_KEY] == SellRate(
-        units_per_day=6 / 0.5 * 24, sale_events=2, window_hours=0.5, reposts=0, coincidences=1
+        units_per_day=6 / 0.5 * 24,
+        sale_events=2,
+        window_hours=0.5,
+        reposts=0,
+        coincidences=1,
+        sale_units=6,
     )
     assert rates[SILK_KEY] == SellRate(
         units_per_day=0, sale_events=0, window_hours=0.5, reposts=1, coincidences=0
@@ -142,3 +147,70 @@ def test_a_setting_for_the_range_changes_which_windows_count(db):
     assert rates[LINEN_KEY] == SellRate(
         units_per_day=0, sale_events=0, window_hours=0.5, reposts=0, coincidences=0
     )
+
+
+# --- The typical Sale Event size, for the Sale Size Prior (#24) ---
+
+
+def typical_sizes(db, now, config=CONFIG):
+    return {
+        key: rate.typical_sale_size for key, rate in sell_rates(db, MARKET, config, now).items()
+    }
+
+
+def test_the_typical_size_is_the_item_keys_usual_listing_quantity_when_smaller(db):
+    # One buyer takes a whole 20-stack: the Market's usual Sale Event is 20 units, but
+    # Linen is usually listed 2 at a time (20, 2, 2).
+    run(
+        db,
+        scan(T0, row(quantity=20), row(quantity=2), row(quantity=2)),
+        scan(T0 + 30 * MINUTE, row(quantity=2), row(quantity=2)),
+    )
+
+    assert typical_sizes(db, now=T0 + 30 * MINUTE) == {LINEN_KEY: 2}
+
+
+def test_the_typical_size_is_the_markets_usual_sale_event_when_smaller(db):
+    # Linen is listed 15 at a time, but buyers take 5 at a time.
+    run(
+        db,
+        scan(T0, row(quantity=20), row(item=SILK, quantity=10)),
+        scan(T0 + 30 * MINUTE, row(quantity=15), row(item=SILK, quantity=5)),  # 5 and 5 sold
+    )
+
+    assert typical_sizes(db, now=T0 + 30 * MINUTE) == {LINEN_KEY: 5, SILK_KEY: 5}
+
+
+def test_item_keys_that_never_stack_are_left_out_of_the_markets_usual_sale_event(db):
+    # Three Swords sell one at a time. Counted, they'd make the Market's usual Sale Event
+    # 1 unit; left out, it's Linen's 5.
+    sword = "item:2488::::::::20:1490"
+    run(
+        db,
+        scan(T0, row(quantity=20), *(row(item=sword, unit=u) for u in (100, 101, 102))),
+        scan(T0 + 30 * MINUTE, row(quantity=15)),
+    )
+
+    assert typical_sizes(db, now=T0 + 30 * MINUTE) == {LINEN_KEY: 5, "2488": 1}
+
+
+def test_without_sale_events_of_stacks_the_typical_size_is_the_usual_listing_quantity(db):
+    run(db, scan(T0, row(quantity=20)), scan(T0 + 30 * MINUTE, row(quantity=20)))
+
+    assert typical_sizes(db, now=T0 + 30 * MINUTE) == {LINEN_KEY: 20}
+
+
+def test_an_item_key_without_listings_in_the_range_has_a_typical_size_of_1(db):
+    # Silk was only listed 2 days before the 1-day range.
+    config = replace(CONFIG, sell_rate_range_seconds=DAY)
+    run(
+        db,
+        scan(T0, row(item=SILK, quantity=20)),
+        scan(T0 + 2 * DAY, row(quantity=20)),
+        scan(T0 + 2 * DAY + 30 * MINUTE, row(quantity=20)),
+    )
+
+    assert typical_sizes(db, now=T0 + 2 * DAY + 30 * MINUTE, config=config) == {
+        LINEN_KEY: 20,
+        SILK_KEY: 1,
+    }

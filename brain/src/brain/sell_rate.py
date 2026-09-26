@@ -2,8 +2,9 @@
 only (ADR-0004)."""
 
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from statistics import median
 
 from brain.config import Config
 from brain.history import Market, listings
@@ -18,6 +19,10 @@ class SellRate:
     window_hours: float  # the Market's, shared by every Item Key in it
     reposts: int
     coincidences: int
+    # For the Sale Size Prior (#24): the units in those Sale Events, and the typical size
+    # of one to shrink their average size toward.
+    sale_units: int = 0
+    typical_sale_size: float = 1.0
 
 
 def sell_rates(
@@ -25,9 +30,20 @@ def sell_rates(
 ) -> dict[str, SellRate]:
     """Sell Rate of every Item Key the Market has seen, from the Observation Windows
     ending in the range before `now`. Empty when there are none: no data is not 0."""
-    evidence = sell_rate_evidence(conn, market, config, *_range(config, now))
+    since, until = _range(config, now)
+    evidence = sell_rate_evidence(conn, market, config, since, until)
     if not evidence.window_hours:
         return {}
+    seen = listings(conn, market)
+    quantities: dict[str, list[int]] = defaultdict(list)
+    for listing in seen:
+        if listing.last_seen >= since and listing.first_seen < until:
+            quantities[listing.item_key].append(listing.quantity)
+    # Item Keys that stack: gear, only ever listed 1 at a time, would pull the Market's
+    # usual Sale Event size down to 1.
+    stacking = {item_key for item_key, q in quantities.items() if max(q) > 1}
+    market_sizes = [e.units for e in evidence.sale_events if e.item_key in stacking]
+    market_size = median(market_sizes) if market_sizes else None
     units: Counter[str] = Counter()
     for event in evidence.sale_events:
         units[event.item_key] += event.units
@@ -41,9 +57,22 @@ def sell_rates(
             window_hours=evidence.window_hours,
             reposts=reposts.get(item_key, 0),
             coincidences=coincidences.get(item_key, 0),
+            sale_units=units[item_key],
+            typical_sale_size=_typical_sale_size(market_size, quantities.get(item_key, [])),
         )
-        for item_key in {listing.item_key for listing in listings(conn, market)}
+        for item_key in {listing.item_key for listing in seen}
     }
+
+
+def _typical_sale_size(market_size: float | None, quantities: list[int]) -> float:
+    """What the Sale Size Prior shrinks an Item Key's average Sale Event size toward: the
+    smaller of the Market's usual Sale Event size among Item Keys that stack and the Item
+    Key's usual quantity per Listing, both over the range. Just its Listings' when the
+    Market has no Sale Events to go by, and 1 when the Item Key had no Listings there."""
+    if not quantities:
+        return 1
+    listed = median(quantities)
+    return listed if market_size is None else min(market_size, listed)
 
 
 def observation_window_hours(

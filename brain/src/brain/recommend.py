@@ -174,7 +174,12 @@ def _holding_rows(
         sell_price = value * (1 - cut)
         selling = min(
             unbound,
-            _sellable(rate, config.sell_rate_prior_hours_holdings, config.sale_horizon_seconds),
+            sellable_units(
+                rate,
+                config.sell_rate_prior_hours_holdings,
+                config.sale_size_prior_events_holdings,
+                config.sale_horizon_seconds,
+            ),
         )
         margin = None if vendor_price is None else sell_price - vendor_price
         if not selling or (margin is not None and margin <= 0):
@@ -227,7 +232,12 @@ def _flips(
     """
     offers = sorted(offers)
     to_sell: Supply = []
-    room = _sellable(rate, config.sell_rate_prior_hours_flips, config.sale_horizon_seconds)
+    room = sellable_units(
+        rate,
+        config.sell_rate_prior_hours_flips,
+        config.sale_size_prior_events_flips,
+        config.sale_horizon_seconds,
+    )
     for unit, quantity in offers:
         take = min(quantity, room)
         if not take:
@@ -257,17 +267,31 @@ def _flips(
     return lots
 
 
-def _sellable(rate: SellRate | None, prior_hours: float, horizon_seconds: int) -> int:
+def sellable_units(
+    rate: SellRate | None, prior_hours: float, prior_events: float, horizon_seconds: int
+) -> int:
     """Units that should sell within the Sale Horizon; none without Sell Rate evidence.
 
     Sell Rate is discounted by the Sell Rate Prior, as if `prior_hours` more hours had been
     watched with no sales, so a sale or two in a short Observation Window doesn't read as
-    a fast seller (#25). The discount fades as real window hours build up.
+    a fast seller (#25). Its average Sale Event size is shrunk by the Sale Size Prior, as
+    if `prior_events` more Sale Events of the typical size had been seen, so one big buyer
+    doesn't read as an Item Key that sells in bulk (#24). Both fade as evidence builds up.
     """
     if rate is None or not rate.sale_events:
         return 0
-    # units / (hours + prior) * 24, written so that no prior leaves the rate exactly as is.
-    per_day = rate.units_per_day * rate.window_hours / (rate.window_hours + prior_hours)
+    mean_size = rate.sale_units / rate.sale_events
+    shrunk_size = (rate.sale_units + prior_events * rate.typical_sale_size) / (
+        rate.sale_events + prior_events
+    )
+    # units / (hours + prior) * 24 * shrunk / mean, written so that no priors leave the
+    # rate exactly as is.
+    per_day = (
+        rate.units_per_day
+        * rate.window_hours
+        / (rate.window_hours + prior_hours)
+        * (shrunk_size / mean_size)
+    )
     return math.floor(per_day * horizon_seconds / 86400)
 
 

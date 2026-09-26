@@ -5,11 +5,13 @@ import pytest
 
 from brain.config import Config, Era, Install
 from brain.history import Market, import_character_reads, import_scans, open_history
-from brain.recommend import Action, Row, recommend
+from brain.recommend import Action, Row, recommend, sellable_units
+from brain.sell_rate import SellRate
 
 T0 = 1_790_000_000
 MINUTE = 60
 HOUR = 60 * MINUTE
+DAY = 24 * HOUR
 REALM = "Classic Beta PvP"
 MARKET = Market(realm=REALM, faction="Alliance", era=Era.BETA)
 LINEN = "item:2589::::::::20:1490"
@@ -21,13 +23,15 @@ GOLD = 100 * 100 * 100  # copper
 
 # Default knobs (5% faction cut, 20% and 1 silver Flip margin), except a Sale Horizon of
 # 3 hours, so a Sell Rate from a single short Observation Window is small enough to cap,
-# and no Sell Rate Prior, so these tests take the raw rate at its word.
+# and no Sell Rate Prior or Sale Size Prior, so these tests take the raw rate at its word.
 DEFAULTS = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
 CONFIG = replace(
     DEFAULTS,
     sale_horizon_seconds=3 * HOUR,
     sell_rate_prior_hours_holdings=0,
     sell_rate_prior_hours_flips=0,
+    sale_size_prior_events_holdings=0,
+    sale_size_prior_events_flips=0,
 )
 
 
@@ -388,7 +392,13 @@ def test_a_market_without_observation_windows_rests_on_none(db):
 def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
     # The raw 80 a day * 7 days = 560 units of room: all 100 held are Sold, and all 10
     # cheap units are bought.
-    config = replace(DEFAULTS, sell_rate_prior_hours_holdings=0, sell_rate_prior_hours_flips=0)
+    config = replace(
+        DEFAULTS,
+        sell_rate_prior_hours_holdings=0,
+        sell_rate_prior_hours_flips=0,
+        sale_size_prior_events_holdings=0,
+        sale_size_prior_events_flips=0,
+    )
     result = run(
         db,
         one_sale_in_18_minutes(row(quantity=10, unit=500)),
@@ -400,3 +410,65 @@ def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
     assert (sell.action, sell.quantity) == (Action.SELL, 100)
     [flip] = result[MARKET].shopping_list
     assert (flip.action, flip.quantity) == (Action.SELL, 10)
+
+
+# --- The Sale Size Prior (#24) ---
+
+
+def sold_in_10_hours(events, units, typical_sale_size=2):
+    """A Sell Rate from `events` Sale Events of `units` in total over 10 h of windows."""
+    return SellRate(
+        units_per_day=units / 10 * 24,
+        sale_events=events,
+        window_hours=10,
+        reposts=0,
+        coincidences=0,
+        sale_units=units,
+        typical_sale_size=typical_sale_size,
+    )
+
+
+def test_one_big_sale_event_is_shrunk_toward_the_typical_size():
+    # (20 + 5 * 2) / (1 + 5) = 5 units a Sale Event, at 1 / 10 h * 24 = 2.4 events a day:
+    # 12 a day, not the raw 48.
+    rate = sold_in_10_hours(events=1, units=20)
+
+    assert sellable_units(rate, prior_hours=0, prior_events=5, horizon_seconds=DAY) == 12
+    assert sellable_units(rate, prior_hours=0, prior_events=0, horizon_seconds=DAY) == 48
+
+
+def test_the_sale_size_prior_fades_as_sale_events_build_up():
+    # 30 Sale Events averaging 5 units: (150 + 5 * 2) / (30 + 5) = 4.57, near the Item
+    # Key's own 5. At 30 / 10 h * 24 = 72 events a day that's 329, against the raw 360.
+    rate = sold_in_10_hours(events=30, units=150)
+
+    assert sellable_units(rate, prior_hours=0, prior_events=5, horizon_seconds=DAY) == 329
+
+
+def one_buyer_takes_a_20_stack(*latest_rows):
+    """A buyer takes a whole 20-stack of Linen in one 30-minute Observation Window: raw,
+    960 a day, 120 in the 3 h horizon. Linen is usually listed 2 at a time, so the typical
+    Sale Event is 2 units. A deep Market at 1000."""
+    stacks_of_2 = [row(quantity=2, unit=1000) for _ in range(50)]
+    return [
+        scan(T0, row(quantity=20, unit=1000), *stacks_of_2),
+        scan(T0 + 30 * MINUTE, *stacks_of_2, *latest_rows),
+    ]
+
+
+def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
+    # Holdings, 1 Sale Event: (20 + 1 * 2) / 2 = 11 units, at 48 events a day = 66 in 3 h.
+    # Flips, 5: (20 + 5 * 2) / 6 = 5 units, 30 in 3 h.
+    config = replace(CONFIG, sale_size_prior_events_holdings=1, sale_size_prior_events_flips=5)
+    result = run(
+        db,
+        one_buyer_takes_a_20_stack(row(quantity=40, unit=500)),
+        [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
+        config=config,
+    )
+
+    sell, vendor = result[MARKET].holdings
+    assert (sell.action, sell.quantity) == (Action.SELL, 66)
+    assert (vendor.action, vendor.quantity) == (Action.VENDOR, 34)
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 30, 500)

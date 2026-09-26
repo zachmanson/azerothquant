@@ -52,6 +52,17 @@
 # sell_rate_prior_hours_holdings = 3
 # sell_rate_prior_hours_flips = 24
 
+# Optional: the Sale Size Prior, how much `brain recommend` discounts one big buyer. Sell
+# Rate counts units, so one buyer taking a 20-stack reads like 20 sales. Before Sell Rate
+# becomes a quantity, an Item Key's average Sale Event size is worked out as if this many
+# more Sale Events of a typical size had been seen: the smaller of the Market's usual Sale
+# Event among items that stack and the Item Key's usual Listing quantity.
+# The discount fades as real Sale Events build up. Lenient for Holdings and strict for
+# Flips, as above. 0 turns it off. Default to 1 and 5 Sale Events. Must come before the
+# first [[installs]].
+# sale_size_prior_events_holdings = 1
+# sale_size_prior_events_flips = 5
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

@@ -65,6 +65,11 @@ DEFAULT_FLIP_MIN_MARGIN_COPPER = 100
 # stock that sits.
 DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS = 3
 DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS = 24
+# The Sale Size Prior: an Item Key's average Sale Event size is shrunk toward a typical
+# size as if this many more Sale Events of that size had been seen (#24). Lenient and
+# strict for the same reasons as the Sell Rate Prior.
+DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS = 1
+DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS = 5
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -105,6 +110,10 @@ class Config:
     # quantity, for Holdings and for Flips.
     sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
     sell_rate_prior_hours_flips: float = DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS
+    # Sale Events of the typical size added to an Item Key's real ones before taking
+    # their average size, for Holdings and for Flips.
+    sale_size_prior_events_holdings: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS
+    sale_size_prior_events_flips: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS
 
 
 def load_config(path: Path) -> Config:
@@ -213,6 +222,15 @@ def load_config(path: Path) -> Config:
             ("sell_rate_prior_hours_flips", DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS),
         )
     )
+    size_prior_holdings, size_prior_flips = (
+        _parse_number(
+            path, raw.get(key, default), key, lambda x: x >= 0, "of Sale Events of at least 0"
+        )
+        for key, default in (
+            ("sale_size_prior_events_holdings", DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS),
+            ("sale_size_prior_events_flips", DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS),
+        )
+    )
 
     return Config(
         installs=installs,
@@ -231,6 +249,8 @@ def load_config(path: Path) -> Config:
         flip_min_margin_copper=margin_copper,
         sell_rate_prior_hours_holdings=prior_holdings,
         sell_rate_prior_hours_flips=prior_flips,
+        sale_size_prior_events_holdings=size_prior_holdings,
+        sale_size_prior_events_flips=size_prior_flips,
     )
 
 
