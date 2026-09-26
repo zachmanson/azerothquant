@@ -4,6 +4,10 @@
 -- this file only talks to the WoW API. On load it also deletes the Reads the Brain has
 -- imported (Prune.lua).
 --
+-- Gold and bags are read while in the world and kept in memory, like the bank: on a
+-- real logout (not /reload) the client has already emptied them by PLAYER_LOGOUT, so
+-- reading them there records 0 gold and empty bags.
+--
 -- Read-only (ADR-0003): only calls that read gold, containers and who the player is.
 -- Nothing that moves, uses or deletes items.
 local _, ns = ...
@@ -40,7 +44,9 @@ end
 local db
 local atBank = false
 local bank -- { readAt, slots }: the latest read while the bank was open this session
+local carried -- { money, slots }: the latest read of gold and bags while in the world
 local timer
+local carriedTimer
 
 local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
@@ -80,6 +86,22 @@ local function readBank()
   bank = { readAt = time(), slots = readContainers(bankIds(), {}) }
 end
 
+local function readCarried()
+  carriedTimer = nil
+  -- The backpack reports no slots once it can't be read; keep the last good read then.
+  if (numSlots(BACKPACK) or 0) == 0 then
+    return
+  end
+  carried = { money = GetMoney(), slots = readContainers(bagIds(), {}) }
+end
+
+local function readCarriedSoon()
+  if carriedTimer then
+    carriedTimer:Cancel()
+  end
+  carriedTimer = C_Timer.NewTimer(QUIET_SECONDS, readCarried)
+end
+
 local function cancel()
   if timer then
     timer:Cancel()
@@ -93,6 +115,8 @@ frame:RegisterEvent("BANKFRAME_OPENED")
 frame:RegisterEvent("BANKFRAME_CLOSED")
 frame:RegisterEvent("BAG_UPDATE")
 frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frame:RegisterEvent("PLAYER_MONEY")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
@@ -110,7 +134,12 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     atBank = true
     cancel()
     readBank()
+  elseif event == "PLAYER_ENTERING_WORLD" then
+    readCarried()
+  elseif event == "PLAYER_MONEY" then
+    readCarriedSoon()
   elseif event == "BAG_UPDATE" or event == "PLAYERBANKSLOTS_CHANGED" then
+    readCarriedSoon()
     if atBank then
       cancel()
       timer = C_Timer.NewTimer(QUIET_SECONDS, readBank)
@@ -124,13 +153,17 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     atBank = false
   elseif event == "PLAYER_LOGOUT" then
     -- Anything added to SavedVariables here is saved, on logout and on /reload alike.
+    -- Never read gold or bags here (see top); with no good read this session, skip it.
+    if not carried then
+      return
+    end
     local read = CharacterRead.build({
       readAt = time(),
       realm = GetRealmName(),
       character = table.concat({ UnitFullName("player") }, "-"),
       faction = UnitFactionGroup("player"),
-      money = GetMoney(),
-    }, readContainers(bagIds(), {}), bank)
+      money = carried.money,
+    }, carried.slots, bank)
     table.insert(db.characterReads, read)
   end
 end)
