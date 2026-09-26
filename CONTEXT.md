@@ -64,7 +64,7 @@ The share of real sales that Repost pairing wrongly calls Reposts, because an un
 _Avoid_: error rate, false-positive rate (too generic to say which mistake)
 
 **Probable Sale**:
-A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below Fair Value. Cancellations without a Repost still can't be told apart.
+A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below the Fair Value of the Scan it was last seen in. Cancellations without a Repost still can't be told apart.
 
 **Outcome**:
 What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one.
@@ -79,7 +79,7 @@ The time between two consecutive Scans of a Market, when it is short enough that
 _Avoid_: gap (when you mean one that counts), interval
 
 **Fair Value**:
-The price an Item Key can realistically be sold at in its Market, based on the cheapest part of recent supply rather than the single lowest Listing.
+The price an Item Key can realistically be sold at in its Market, based on the cheapest part of the supply in the latest Scan rather than the single lowest Listing. Units priced far below the rest of that cheap part are left out: they are Flips, not the price.
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
@@ -87,7 +87,7 @@ Units sold per day for an Item Key in a Market: the Partial Sales and Probable S
 _Avoid_: volume, velocity
 
 **Vendor Price**:
-The fixed gold an NPC merchant pays for one unit of an item.
+The fixed gold an NPC merchant pays for one unit of an item. It belongs to the itemID, so every random suffix of an item has the same one, and it is read from the game rather than taken from Classic, since Forever changed some.
 _Avoid_: sell price, vendor value
 
 **Merchant Cost**:
@@ -117,7 +117,16 @@ The materials the player actually got from disenchanting one specific item.
 An item the Decision Engine evaluates for a Recommendation.
 
 **Action**:
-One way to extract value from a Candidate Item: Vendor, Flip, Craft, Disenchant or Hold.
+One way out of a Candidate Item the player holds: Vendor, Sell, Craft, Disenchant or Hold. Buying is never an Action (see Flip).
+_Avoid_: strategy, play
+
+**Sell**:
+The Action of posting an item on the Auction House for other players to buy.
+_Avoid_: post, list, flip (a Flip is a buy)
+
+**Flip**:
+Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action.
+_Avoid_: snipe, arbitrage
 
 **Thesis**:
 A prediction the player writes down from game knowledge: an Item Key, an expected price move, a date and a reason. The Decision Engine prices it as a Hold, and it gets graded afterward.
@@ -134,6 +143,10 @@ _Avoid_: value, worth
 **Recommendation**:
 The best Action for one Candidate Item, with quantity, price ceiling, the full Action path, expected profit and return per day.
 _Avoid_: signal, tip
+
+**Sale Horizon**:
+How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it.
+_Avoid_: timeout, patience
 
 **Shopping List**:
 The Recommendations for things to buy on the Auction House.
