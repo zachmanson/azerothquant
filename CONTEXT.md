@@ -46,7 +46,7 @@ The identity used for pricing: itemID plus random suffix, so "of the Monkey" and
 _Avoid_: item (when you mean the priced identity), itemID
 
 **Listing**:
-One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key, unit buyout and whether it is the player's own, and identical Listings are interchangeable. Its quantity can only go down. Bids are ignored; buyout is the only price.
+One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key, unit buyout and whether it is own, and identical Listings are interchangeable. Own means posted by the Character that did the Scan: the game hides every other seller, including the player's other Characters. Its quantity can only go down. Bids are ignored; buyout is the only price.
 _Avoid_: auction, post, order, stack (a Listing can hold more than one stack)
 
 **Disappearance**:
@@ -58,6 +58,10 @@ A drop in a Listing's quantity between two Scans. It is always a sale, since can
 **Repost**:
 A Disappearance that could not have expired, explained by a new Listing in the same Observation Window with the same Item Key, quantity and own flag, at the same or a lower unit buyout: most likely a seller cancelling to undercut or relist. Whenever such a pairing exists it is taken, so a Repost is never counted as a sale. The two Listings stay separate.
 _Avoid_: relist, undercut (those are why a Repost happens, not the event)
+
+**Coincidence Rate**:
+The share of real sales that Repost pairing wrongly calls Reposts, because an unrelated new Listing happened to fit. It is measured on the player's own Disappearances that an Outcome shows were Sold, and it depends on how busy the Market is, not on who the seller is.
+_Avoid_: error rate, false-positive rate (too generic to say which mistake)
 
 **Probable Sale**:
 A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below Fair Value. Cancellations without a Repost still can't be told apart.
