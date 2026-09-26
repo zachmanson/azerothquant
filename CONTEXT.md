@@ -97,7 +97,7 @@ _Avoid_: vendor price, buy price
 ## Crafting
 
 **Known Recipe**:
-A recipe the player already has, read from the profession window, with its output item, output quantity and reagents.
+A recipe the player already has, read from the profession window, with its output item, output quantity and reagents. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not.
 
 **Learnable Recipe**:
 A recipe the player doesn't have yet but could get, and which costs something to acquire.
