@@ -7,7 +7,6 @@ mail seen in the Character's previous Read.
 """
 
 import math
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -49,8 +48,6 @@ MAIL_DAYS = 30
 # How far apart two derived arrival times can be and still be the same mail. daysLeft
 # is precise to about a second, so this only has to absorb clock differences.
 ARRIVAL_TOLERANCE_SECONDS = 5 * 60
-
-_ITEM_IN_LINK = re.compile(r"\|H(item:[^|]*)\|h")
 
 
 class MailFormatError(ValueError):
@@ -120,11 +117,8 @@ def parse_mail(raw: object) -> tuple[AuctionMail, float] | None:
 
 def _item_key(raw: dict) -> str:
     link = _required(raw, "firstItemLink", str)
-    found = _ITEM_IN_LINK.search(link)
-    if found is None:
-        raise MailFormatError(f"attachment isn't an item link: {link!r}")
     try:
-        return str(ItemKey.from_item_string(found.group(1)))
+        return str(ItemKey.from_link(link))
     except ItemStringError as e:
         raise MailFormatError(str(e)) from None
 

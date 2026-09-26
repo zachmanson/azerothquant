@@ -1,5 +1,5 @@
--- Deletes the Scans and Mailbox Reads the Brain no longer needs from SavedVariables, so the file
--- (rewritten whole on every /reload) doesn't keep growing.
+-- Deletes the Scans, Mailbox Reads and Character Reads the Brain no longer needs from
+-- SavedVariables, so the file (rewritten whole on every /reload) doesn't keep growing.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
@@ -24,6 +24,19 @@ local function removeImported(list, isImported)
     list[i] = nil
   end
   return n - kept
+end
+
+-- Removes every Read taken at or before lastRead[realm][character]; nil lastRead
+-- (the Brain hasn't imported any yet) removes nothing.
+local function removeReadsUpTo(reads, lastRead)
+  if not lastRead then
+    return 0
+  end
+  return removeImported(reads, function(r)
+    local byCharacter = r.realm and lastRead[r.realm]
+    local cutoff = byCharacter and r.character and byCharacter[r.character]
+    return cutoff and r.readAt and r.readAt <= cutoff
+  end)
 end
 
 -- scans: AzerothQuantDB.scans. recommendations: AzerothQuantRecommendations as the
@@ -51,16 +64,14 @@ end
 -- Character's lastMailboxRead time. The Brain imports Reads whatever their order, so
 -- all of those are archived already. Returns how many were deleted.
 function Prune.importedMailboxReads(reads, recommendations)
-  local lastRead = recommendations and recommendations.lastMailboxRead
-  if not lastRead then
-    return 0
-  end
+  return removeReadsUpTo(reads, recommendations and recommendations.lastMailboxRead)
+end
 
-  return removeImported(reads, function(r)
-    local byCharacter = r.realm and lastRead[r.realm]
-    local cutoff = byCharacter and r.character and byCharacter[r.character]
-    return cutoff and r.readAt and r.readAt <= cutoff
-  end)
+-- reads: AzerothQuantDB.characterReads. Deletes every Read taken at or before its
+-- Character's lastCharacterRead time, which are all archived already. Returns how many
+-- were deleted.
+function Prune.importedCharacterReads(reads, recommendations)
+  return removeReadsUpTo(reads, recommendations and recommendations.lastCharacterRead)
 end
 
 ns.Prune = Prune

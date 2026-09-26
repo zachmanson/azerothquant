@@ -3,6 +3,7 @@
 One gzipped JSON file each:
 - a Scan at <era>/<realm>-<faction>/<requestedAt>.json.gz
 - a Mailbox Read at <era>/mailbox/<realm>/<character>/<readAt>.json.gz
+- a Character Read at <era>/character/<realm>/<character>/<readAt>.json.gz
 
 The history database can be rebuilt from these files, so they are the one thing the Brain
 stores that can't be recreated. Files are never overwritten.
@@ -19,6 +20,7 @@ from brain.config import Era
 
 _SUFFIX = ".json.gz"
 _MAILBOX = "mailbox"
+_CHARACTER = "character"
 # Characters Windows doesn't allow in a folder name. Only the folder name is changed;
 # the entry inside keeps its realm, faction and character as recorded.
 _UNSAFE = re.compile(r'[<>:"/\\|?*]')
@@ -45,9 +47,20 @@ class Archive:
         folder = self.root / era.value / _MAILBOX / _safe(raw["realm"]) / _safe(raw["character"])
         return _write(folder / f"{raw['readAt']}{_SUFFIX}", {"era": era.value, "mailboxRead": raw})
 
+    def write_character_read(self, era: Era, raw: dict) -> Path:
+        """Archive one entry of AzerothQuantDB.characterReads, unless it's already there.
+
+        `raw` must have a readable realm, character and readAt, since those name the file.
+        """
+        folder = self.root / era.value / _CHARACTER / _safe(raw["realm"]) / _safe(raw["character"])
+        return _write(
+            folder / f"{raw['readAt']}{_SUFFIX}", {"era": era.value, "characterRead": raw}
+        )
+
     def scans(self) -> Iterator[tuple[Era, dict]]:
         """Every archived Scan with its Era, in no particular order."""
-        # Exactly <era>/<market>/<file>: Mailbox Reads sit deeper, so they never match.
+        # Exactly <era>/<market>/<file>: Mailbox and Character Reads sit deeper, so they
+        # never match.
         for path in sorted(self.root.glob(f"*/*/*{_SUFFIX}")):
             entry = _read(path)
             yield Era(entry["era"]), entry["scan"]
@@ -57,6 +70,12 @@ class Archive:
         for path in sorted(self.root.glob(f"*/{_MAILBOX}/*/*/*{_SUFFIX}")):
             entry = _read(path)
             yield Era(entry["era"]), entry["mailboxRead"]
+
+    def character_reads(self) -> Iterator[tuple[Era, dict]]:
+        """Every archived Character Read with its Era, in no particular order."""
+        for path in sorted(self.root.glob(f"*/{_CHARACTER}/*/*/*{_SUFFIX}")):
+            entry = _read(path)
+            yield Era(entry["era"]), entry["characterRead"]
 
 
 def _safe(name: str) -> str:

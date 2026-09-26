@@ -24,6 +24,7 @@ from brain.config import Config, ConfigError, Era, load_config
 from brain.history import (
     ImportFileError,
     ImportReport,
+    import_character_reads,
     import_file,
     import_mailbox_reads,
     import_scans,
@@ -93,7 +94,8 @@ class RebuildError(Exception):
 
 
 def run_rebuild(config: Config) -> ImportReport:
-    """Recreate the history database from every Scan and Mailbox Read in the Archive.
+    """Recreate the history database from every Scan, Mailbox Read and Character Read in
+    the Archive.
 
     The new database is built beside the old one and only replaces it once complete, so
     a failed rebuild leaves the history as it was. An empty archive is refused rather
@@ -109,8 +111,13 @@ def run_rebuild(config: Config) -> ImportReport:
     reads_by_era: dict[Era, list[dict]] = {}
     for era, raw in archive.mailbox_reads():
         reads_by_era.setdefault(era, []).append(raw)
-    if not scans_by_era and not reads_by_era:
-        raise RebuildError(f"no Scans or Mailbox Reads in the archive at {config.archive_dir}")
+    character_reads_by_era: dict[Era, list[dict]] = {}
+    for era, raw in archive.character_reads():
+        character_reads_by_era.setdefault(era, []).append(raw)
+    if not scans_by_era and not reads_by_era and not character_reads_by_era:
+        raise RebuildError(
+            f"no Scans, Mailbox Reads or Character Reads in the archive at {config.archive_dir}"
+        )
 
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
     rebuilt = config.history_path.with_name(config.history_path.name + ".rebuild")
@@ -124,6 +131,8 @@ def run_rebuild(config: Config) -> ImportReport:
                 _add_report(total, import_scans(conn, raws, era, from_archive))
             for era, raws in reads_by_era.items():
                 import_mailbox_reads(conn, raws, era, from_archive, total)
+            for era, raws in character_reads_by_era.items():
+                import_character_reads(conn, raws, era, from_archive, total)
         os.replace(rebuilt, config.history_path)
     except BaseException:
         rebuilt.unlink(missing_ok=True)
@@ -166,7 +175,8 @@ def _log_results(results: list[FileResult]) -> None:
             log.info(
                 "Imported %s: %d new Scans, %d already imported, %d rejected;"
                 " %d new Mailbox Reads, %d already imported, %d unreadable;"
-                " %d new Outcomes, %d new Purchases",
+                " %d new Outcomes, %d new Purchases;"
+                " %d new Character Reads, %d already imported, %d unreadable",
                 r.path,
                 r.report.scans_imported,
                 r.report.scans_already_imported,
@@ -176,6 +186,9 @@ def _log_results(results: list[FileResult]) -> None:
                 r.report.mailbox_reads_unreadable,
                 r.report.outcomes_found,
                 r.report.purchases_found,
+                r.report.character_reads_imported,
+                r.report.character_reads_already_imported,
+                r.report.character_reads_unreadable,
             )
 
 
@@ -197,7 +210,7 @@ def _rebuild(config: Config) -> int:
         return 1
     log.info(
         "Rebuilt %s from %s: %d Scans, %d rejected; %d Mailbox Reads with %d Outcomes"
-        " and %d Purchases",
+        " and %d Purchases; %d Character Reads",
         config.history_path,
         config.archive_dir,
         report.scans_imported,
@@ -205,6 +218,7 @@ def _rebuild(config: Config) -> int:
         report.mailbox_reads_imported,
         report.outcomes_found,
         report.purchases_found,
+        report.character_reads_imported,
     )
     return 0
 

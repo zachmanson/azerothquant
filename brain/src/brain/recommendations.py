@@ -9,8 +9,9 @@ The Addon then deletes every stored Scan in that Market requested at or before
 that time: each one is either imported already or older than an imported one,
 which the Brain rejects, so none of them can be of any more use.
 
-Likewise, per Character, when the latest imported Mailbox Read was taken. Reads are
-imported whatever their order, so every stored Read up to then is already archived.
+Likewise, per Character, when the latest imported Mailbox Read and Character Read were
+taken. Reads are imported whatever their order, so every stored Read up to then is
+already archived.
 """
 
 import os
@@ -19,7 +20,12 @@ import tempfile
 from pathlib import Path
 
 from brain.config import Install
-from brain.history import Market, latest_mailbox_read_times, latest_scan_times
+from brain.history import (
+    Market,
+    latest_character_read_times,
+    latest_mailbox_read_times,
+    latest_scan_times,
+)
 from brain.lua_literal import assignment
 
 FILE_NAME = "Recommendations.lua"
@@ -31,6 +37,7 @@ _HEADER = (
     "-- was requested. The Addon deletes stored Scans up to then.\n"
     "-- lastMailboxRead[realm][character] is when the latest imported Mailbox Read of\n"
     "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
+    "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
 )
 
 
@@ -39,22 +46,29 @@ def addon_folder(install: Install) -> Path:
 
 
 def render(
-    last_imported: dict[Market, int], last_mailbox_read: dict[tuple[str, str], int] | None = None
+    last_imported: dict[Market, int],
+    last_mailbox_read: dict[tuple[str, str], int] | None = None,
+    last_character_read: dict[tuple[str, str], int] | None = None,
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
         by_realm.setdefault(market.realm, {})[market.faction] = requested_at
-    reads_by_realm: dict[str, dict[str, int]] = {}
-    for (realm, character), read_at in (last_mailbox_read or {}).items():
-        reads_by_realm.setdefault(realm, {})[character] = read_at
     return _HEADER + assignment(
         GLOBAL_NAME,
         {
             "lastImported": by_realm,
-            "lastMailboxRead": reads_by_realm,
+            "lastMailboxRead": _by_realm(last_mailbox_read or {}),
+            "lastCharacterRead": _by_realm(last_character_read or {}),
             "recommendations": [],
         },
     )
+
+
+def _by_realm(read_times: dict[tuple[str, str], int]) -> dict[str, dict[str, int]]:
+    by_realm: dict[str, dict[str, int]] = {}
+    for (realm, character), read_at in read_times.items():
+        by_realm.setdefault(realm, {})[character] = read_at
+    return by_realm
 
 
 def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | None:
@@ -65,7 +79,9 @@ def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | 
         return None
     path = folder / FILE_NAME
     text = render(
-        latest_scan_times(conn, install.era), latest_mailbox_read_times(conn, install.era)
+        latest_scan_times(conn, install.era),
+        latest_mailbox_read_times(conn, install.era),
+        latest_character_read_times(conn, install.era),
     )
     # Write a temp file and swap it in, so the client never reads a half-written file. The
     # temp name is unique so a `brain import` running beside `brain watch` can't clash.

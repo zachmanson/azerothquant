@@ -1,5 +1,6 @@
 """The Brain's persistent history: Scans imported into SQLite as Listing lifetimes,
-and Mailbox Reads as the Outcomes and Purchases in them.
+Mailbox Reads as the Outcomes and Purchases in them, and Character Reads as each
+Character's gold and Holdings.
 
 Each Listing is stored once, with the first and last Scan it was seen in (ADR-0002).
 A Listing whose last Scan isn't its Market's latest one has disappeared. Each drop in
@@ -30,7 +31,7 @@ from brain.mailbox import (
 )
 from brain.matching import match
 from brain.savedvariables import parse_savedvariables
-from brain.scan import Scan, ScanFormatError
+from brain.scan import ItemKey, ItemStringError, Scan, ScanFormatError
 
 log = logging.getLogger(__name__)
 
@@ -109,6 +110,31 @@ CREATE TABLE IF NOT EXISTS auction_mail (
     live INTEGER NOT NULL          -- 1 while it may still be in the inbox
 );
 CREATE INDEX IF NOT EXISTS auction_mail_live ON auction_mail (era, realm, character, live);
+
+-- One row per imported Character Read.
+CREATE TABLE IF NOT EXISTS character_read (
+    id INTEGER PRIMARY KEY,
+    era TEXT NOT NULL,
+    realm TEXT NOT NULL,
+    character TEXT NOT NULL,
+    read_at INTEGER NOT NULL,  -- Unix time; with era, realm and character, its identity
+    faction TEXT,
+    money INTEGER,             -- copper
+    has_bank INTEGER NOT NULL, -- 0 or 1: the bank was opened that session
+    bank_read_at INTEGER,      -- when the bank was last read while open
+    UNIQUE (era, realm, character, read_at)
+);
+
+-- The items in one Character Read, one row per filled slot.
+CREATE TABLE IF NOT EXISTS character_item (
+    id INTEGER PRIMARY KEY,
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    place TEXT NOT NULL,       -- 'bags' or 'bank'
+    item_key TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    bound INTEGER NOT NULL     -- 0 or 1; bound items can't go on the Auction House
+);
+CREATE INDEX IF NOT EXISTS character_item_by_read ON character_item (character_read_id);
 """
 
 
@@ -168,6 +194,16 @@ class Purchase:
     first_seen: int
 
 
+@dataclass(frozen=True)
+class Holding:
+    """How many of one Item Key a Character holds, by where and whether bound."""
+
+    bags: int = 0
+    bags_bound: int = 0
+    bank: int = 0
+    bank_bound: int = 0
+
+
 @dataclass
 class ImportReport:
     scans_imported: int = 0
@@ -190,6 +226,12 @@ class ImportReport:
     mails_unassigned: int = 0
     # Mail the Brain can't read, say an unrecognized subject; left in the Archive.
     mails_unreadable: int = 0
+    character_reads_imported: int = 0
+    character_reads_already_imported: int = 0
+    # Missing its realm, character or readAt, so it can't be named.
+    character_reads_unreadable: int = 0
+    # Items in a Character Read the Brain can't read, say a battle pet; left in the Archive.
+    character_items_unreadable: int = 0
     unreadable_rows: int = 0
     warnings: list[str] = field(default_factory=list)
 
@@ -224,7 +266,7 @@ def _add_listing_item_name(conn: sqlite3.Connection) -> None:
 
 
 def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportReport:
-    """Import every Scan and Mailbox Read in the Addon's SavedVariables file.
+    """Import every Scan, Mailbox Read and Character Read in the Addon's SavedVariables file.
 
     The Era comes from which configured install folder the file is in, since the Scans
     themselves don't say.
@@ -239,8 +281,12 @@ def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportR
     reads = data.get("mailboxReads", [])
     if not isinstance(reads, list):
         raise ImportFileError(f"{path}: AzerothQuantDB.mailboxReads must be a sequence")
+    character_reads = data.get("characterReads", [])
+    if not isinstance(character_reads, list):
+        raise ImportFileError(f"{path}: AzerothQuantDB.characterReads must be a sequence")
     report = import_scans(conn, scans, era, config)
     import_mailbox_reads(conn, reads, era, config, report)
+    import_character_reads(conn, character_reads, era, config, report)
     return report
 
 
@@ -396,7 +442,7 @@ def import_mailbox_reads(
     archive = Archive(config.archive_dir) if config.archive_dir is not None else None
     reads = []
     for raw in raw_reads:
-        if not _nameable_mailbox_read(raw):
+        if not _nameable_read(raw):
             report.mailbox_reads_unreadable += 1
             report.warn(f"Skipped a Mailbox Read the Brain can't place: {raw!r:.200}")
             continue
@@ -530,7 +576,84 @@ def _live_mails(conn: sqlite3.Connection, owner: tuple[str, str, str]) -> list[L
     ]
 
 
-def _nameable_mailbox_read(raw: object) -> bool:
+def import_character_reads(
+    conn: sqlite3.Connection,
+    raw_reads: list[object],
+    era: Era,
+    config: Config,
+    report: ImportReport | None = None,
+) -> ImportReport:
+    """Import the Addon's Character Reads (entries of AzerothQuantDB.characterReads).
+
+    Each Read stands alone, so unlike Mailbox Reads they can be imported in any order.
+    Importing a Read that is already there does nothing. As with Scans, a Read whose
+    archive write fails isn't recorded, so the Addon keeps it.
+    """
+    report = report if report is not None else ImportReport()
+    archive = Archive(config.archive_dir) if config.archive_dir is not None else None
+    for raw in raw_reads:
+        if not _nameable_read(raw):
+            report.character_reads_unreadable += 1
+            report.warn(f"Skipped a Character Read the Brain can't place: {raw!r:.200}")
+            continue
+        if archive is not None:
+            archive.write_character_read(era, raw)
+        with conn:
+            _import_character_read(conn, raw, era, report)
+    return report
+
+
+def _import_character_read(
+    conn: sqlite3.Connection, raw: dict, era: Era, report: ImportReport
+) -> None:
+    bank = raw.get("bank")
+    has_bank = isinstance(bank, list)
+    faction, money = raw.get("faction"), raw.get("money")
+    if not isinstance(faction, str) or not isinstance(money, int) or isinstance(money, bool):
+        # Kept, with its items, but its gold can't be pooled.
+        faction = money = None
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO character_read (era, realm, character, read_at, faction,"
+        " money, has_bank, bank_read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            era.value,
+            raw["realm"],
+            raw["character"],
+            raw["readAt"],
+            faction,
+            money,
+            has_bank,
+            raw.get("bankReadAt") if has_bank else None,
+        ),
+    )
+    if not cursor.rowcount:
+        report.character_reads_already_imported += 1
+        return
+    report.character_reads_imported += 1
+    read_id = cursor.lastrowid
+    if money is None:
+        report.warn(
+            f"Character Read at {raw['readAt']} for {raw['character']} has no readable gold"
+            " or faction, so none of its gold is pooled."
+        )
+    rows = []
+    for place, entries in (("bags", raw.get("bags")), ("bank", bank)):
+        for entry in entries if isinstance(entries, list) else []:
+            try:
+                key, count, bound = _held_item(entry)
+            except ValueError as e:
+                report.character_items_unreadable += 1
+                report.warn(f"Character Read at {raw['readAt']} for {raw['character']}: {e}")
+                continue
+            rows.append((read_id, place, key, count, bound))
+    conn.executemany(
+        "INSERT INTO character_item (character_read_id, place, item_key, count, bound)"
+        " VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
+def _nameable_read(raw: object) -> bool:
     return (
         isinstance(raw, dict)
         and isinstance(raw.get("realm"), str)
@@ -631,6 +754,16 @@ def latest_mailbox_read_times(conn: sqlite3.Connection, era: Era) -> dict[tuple[
     return {(realm, character): at for realm, character, at in rows}
 
 
+def latest_character_read_times(conn: sqlite3.Connection, era: Era) -> dict[tuple[str, str], int]:
+    """read_at of the latest Character Read imported for each (realm, character) in the Era."""
+    rows = conn.execute(
+        "SELECT realm, character, MAX(read_at) FROM character_read"
+        " WHERE era = ? GROUP BY realm, character ORDER BY realm, character",
+        (era.value,),
+    )
+    return {(realm, character): at for realm, character, at in rows}
+
+
 def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
     """requested_at of every Scan imported for the Market, oldest first."""
     rows = conn.execute(
@@ -671,3 +804,57 @@ def purchases(conn: sqlite3.Connection, market: Market) -> list[Purchase]:
         Purchase(ch, name, key, n, price, at, first)
         for ch, _, name, key, n, price, _, at, first in rows
     ]
+
+
+# Each Character's latest Character Read in the Era, as a subquery over character_read.
+_LATEST_CHARACTER_READS = (
+    "SELECT * FROM character_read r WHERE era = ? AND read_at = ("
+    " SELECT MAX(read_at) FROM character_read"
+    " WHERE era = r.era AND realm = r.realm AND character = r.character)"
+)
+
+
+def pooled_gold(conn: sqlite3.Connection, era: Era, realm: str, faction: str) -> int:
+    """Copper held by the Characters on the realm and faction, each as of its latest
+    Character Read. Mail can't move gold any further, so this is what sizing can use."""
+    (total,) = conn.execute(
+        f"SELECT COALESCE(SUM(money), 0) FROM ({_LATEST_CHARACTER_READS})"
+        " WHERE realm = ? AND faction = ?",
+        (era.value, realm, faction),
+    ).fetchone()
+    return total
+
+
+def _held_item(entry: object) -> tuple[str, int, bool]:
+    """(Item Key, count, bound) of one filled slot, or ValueError if it can't be read."""
+    if not isinstance(entry, dict):
+        raise ValueError(f"an item must be a table, got {entry!r:.200}")
+    link, count = entry.get("link"), entry.get("count")
+    if not isinstance(link, str) or not isinstance(count, int) or isinstance(count, bool):
+        raise ValueError(f"skipped an item with no link or count: {entry!r:.200}")
+    try:
+        key = ItemKey.from_link(link)
+    except ItemStringError as e:
+        raise ValueError(f"skipped an item: {e}") from None
+    return str(key), count, entry.get("isBound") is True
+
+
+def holdings(conn: sqlite3.Connection, era: Era, realm: str, character: str) -> dict[str, Holding]:
+    """What the Character holds, by Item Key: bags as of its latest Character Read, and
+    the bank as of the latest Read that has one (the bank can't change while closed)."""
+    latest = (
+        "SELECT id FROM character_read WHERE era = ? AND realm = ? AND character = ? {}"
+        " ORDER BY read_at DESC LIMIT 1"
+    )
+    owner = (era.value, realm, character)
+    rows = conn.execute(
+        "SELECT place, item_key, bound, SUM(count) FROM character_item"
+        f" WHERE (place = 'bags' AND character_read_id = ({latest.format('')}))"
+        f" OR (place = 'bank' AND character_read_id = ({latest.format('AND has_bank')}))"
+        " GROUP BY place, item_key, bound ORDER BY item_key",
+        (*owner, *owner),
+    )
+    counts: dict[str, dict[str, int]] = {}
+    for place, key, bound, count in rows:
+        counts.setdefault(key, {})[f"{place}_bound" if bound else place] = count
+    return {key: Holding(**c) for key, c in counts.items()}

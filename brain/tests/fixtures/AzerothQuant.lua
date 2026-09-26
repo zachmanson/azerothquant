@@ -103,4 +103,55 @@ AzerothQuantDB = {
 			},
 		}, -- [2]
 	},
+	["characterReads"] = {
+		{
+			["readAt"] = 1790000900,
+			["realm"] = "Classic Beta PvP",
+			["character"] = "Kash-Patel",
+			["faction"] = "Alliance",
+			["money"] = 1234567,
+			["bags"] = {
+				{
+					["bag"] = 0,
+					["slot"] = 1,
+					["link"] = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r",
+					["count"] = 20,
+					["isBound"] = false,
+				}, -- [1]
+				{
+					["bag"] = 0,
+					["slot"] = 2,
+					["link"] = "|cffffffff|Hitem:6948::::::::20:1490:::::::::|h[Hearthstone]|h|r",
+					["count"] = 1,
+					["isBound"] = true,
+				}, -- [2]
+			},
+			["bankReadAt"] = 1790000850,
+			["bank"] = {
+				{
+					["bag"] = -1,
+					["slot"] = 1,
+					["link"] = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r",
+					["count"] = 40,
+					["isBound"] = false,
+				}, -- [1]
+			},
+		}, -- [1]
+		{
+			["readAt"] = 1790002000,
+			["realm"] = "Classic Beta PvP",
+			["character"] = "Kash-Patel",
+			["faction"] = "Alliance",
+			["money"] = 1200000,
+			["bags"] = {
+				{
+					["bag"] = 0,
+					["slot"] = 1,
+					["link"] = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r",
+					["count"] = 12,
+					["isBound"] = false,
+				}, -- [1]
+			},
+		}, -- [2]
+	},
 }

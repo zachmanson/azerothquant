@@ -124,3 +124,45 @@ describe("Prune.importedMailboxReads", function()
     assert.is_nil(reads[5])
   end)
 end)
+
+describe("Prune.importedCharacterReads", function()
+  local function read(realm, character, readAt)
+    return { realm = realm, character = character, readAt = readAt, bags = {} }
+  end
+
+  local function times(reads)
+    local out = {}
+    for i, r in ipairs(reads) do
+      out[i] = r.readAt
+    end
+    return out
+  end
+
+  it("deletes nothing when the Brain has never imported a Character Read", function()
+    local reads = { read("R", "Kash-Patel", 100) }
+
+    assert.are.equal(0, Prune.importedCharacterReads(reads, nil))
+    -- A Recommendations.lua written before Character Reads existed has no lastCharacterRead.
+    assert.are.equal(0, Prune.importedCharacterReads(reads, { lastMailboxRead = { R = { ["Kash-Patel"] = 500 } } }))
+    assert.are.same({ 100 }, times(reads))
+  end)
+
+  it("deletes each Character's Reads taken at or before its last imported one, in order", function()
+    local reads = {
+      read("R", "Kash-Patel", 100),
+      read("R", "Alt-Patel", 100),
+      read("R", "Kash-Patel", 200),
+      read("R", "Kash-Patel", 300),
+      read("Other", "Kash-Patel", 100),
+      read(nil, "Kash-Patel", 100),
+    }
+    local recommendations = { lastCharacterRead = { R = { ["Kash-Patel"] = 200 } } }
+
+    local removed = Prune.importedCharacterReads(reads, recommendations)
+
+    assert.are.equal(2, removed)
+    assert.are.same({ 100, 300, 100, 100 }, times(reads))
+    assert.are.equal("Alt-Patel", reads[1].character)
+    assert.is_nil(reads[5])
+  end)
+end)

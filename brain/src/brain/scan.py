@@ -4,12 +4,14 @@ The Addon stores each row almost raw (addon/AzerothQuant/Scan.lua). This module
 turns that into Brain terms: the Item Key and the unit buyout.
 """
 
+import re
 from dataclasses import dataclass
 
 # Positions in "item:itemID:enchant:gem1:gem2:gem3:gem4:suffix:unique:level:spec:
 # modifiersMask:context:numBonusIDs:bonusID1:..." (after the "item:" prefix).
 _SUFFIX = 6
 _NUM_BONUS_IDS = 12
+_ITEM_IN_LINK = re.compile(r"\|H(item:[^|]*)\|h")
 
 
 class ItemStringError(ValueError):
@@ -54,6 +56,14 @@ class ItemKey:
 
         # Bonus IDs are a set; sorting makes the key independent of the order they came in.
         return cls(item_id=item_id, bonus_ids=tuple(sorted(bonus_ids)))
+
+    @classmethod
+    def from_link(cls, link: str) -> "ItemKey":
+        """Build the Item Key from an item link ("|cff...|Hitem:2589::...|h[Name]|h|r")."""
+        found = _ITEM_IN_LINK.search(link)
+        if found is None:
+            raise ItemStringError(f"not an item link: {link!r}")
+        return cls.from_item_string(found.group(1))
 
     def __str__(self) -> str:
         """ "itemID" or "itemID:bonus1:bonus2..." (bonus IDs ascending). Used as the stored key."""

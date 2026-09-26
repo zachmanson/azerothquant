@@ -8,7 +8,7 @@ import pytest
 from brain.archive import Archive
 from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
 from brain.config import Config, Era, Install
-from brain.history import Market, listings, open_history, outcomes
+from brain.history import Holding, Market, holdings, listings, open_history, outcomes, pooled_gold
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 
@@ -104,9 +104,11 @@ def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_pat
 
     # The fixture holds two Alliance Scans on "Classic Beta PvP"; the later one is 1790001200.
     # Its two Mailbox Reads are Kash-Patel's; the later one is 1790001800.
+    # So are its two Character Reads; the later one is 1790002000.
     assert read_recommendations(install) == {
         "lastImported": {"Classic Beta PvP": {"Alliance": 1790001200}},
         "lastMailboxRead": {"Classic Beta PvP": {"Kash-Patel": 1790001800}},
+        "lastCharacterRead": {"Classic Beta PvP": {"Kash-Patel": 1790002000}},
         "recommendations": [],
     }
 
@@ -129,6 +131,7 @@ def test_each_install_only_hears_about_its_own_era(tmp_path):
         "Classic Beta PvP": {"Kash-Patel": 1790001800}
     }
     assert read_recommendations(live)["lastMailboxRead"] == []
+    assert read_recommendations(live)["lastCharacterRead"] == []
 
 
 def test_an_install_without_the_addon_gets_no_file(tmp_path):
@@ -176,6 +179,28 @@ def test_import_archives_every_mailbox_read_in_the_file_verbatim(tmp_path):
     assert len(list(Archive(config.archive_dir).scans())) == 2
 
 
+def test_import_archives_every_character_read_in_the_file_verbatim(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    saved = parse_savedvariables(file.read_text(encoding="utf-8"))["AzerothQuantDB"]
+
+    results = run_import(config, [file])
+
+    assert results[0].report.character_reads_imported == 2
+    archived = sorted(Archive(config.archive_dir).character_reads(), key=lambda r: r[1]["readAt"])
+    assert archived == [(Era.BETA, raw) for raw in saved["characterReads"]]
+    # Kept apart from the Scans and Mailbox Reads.
+    assert len(list(Archive(config.archive_dir).scans())) == 2
+    assert len(list(Archive(config.archive_dir).mailbox_reads())) == 2
+    with closing(open_history(config.history_path)) as conn:
+        # Bags from the later Read; the bank from the earlier one, the only one with a bank.
+        assert holdings(conn, Era.BETA, "Classic Beta PvP", "Kash-Patel") == {
+            "2589": Holding(bags=12, bank=40),
+        }
+        assert pooled_gold(conn, Era.BETA, "Classic Beta PvP", "Alliance") == 1200000
+
+
 def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_path):
     install = tmp_path / "_classic_beta_"
     file = install_with_savedvariables(install)
@@ -187,6 +212,7 @@ def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_pat
 
     assert report.scans_imported == 2
     assert report.outcomes_found > 0
+    assert report.character_reads_imported == 2
     assert dump(config.history_path) == imported
     with closing(open_history(config.history_path)) as conn:
         assert outcomes(conn, MARKET)

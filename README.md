@@ -45,11 +45,11 @@ cd brain
 ..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
 ```
 
-It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox) a few seconds after you `/reload`. Stop it with Ctrl+C.
+It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.
 
-After each import it rewrites `Interface\AddOns\AzerothQuant\Recommendations.lua` in every install that has the Addon. The game reads it on the next `/reload` or login, and the Addon then deletes the Scans and Mailbox Reads the Brain has already imported from SavedVariables. So each leaves SavedVariables one `/reload` after the Brain imports it.
+After each import it rewrites `Interface\AddOns\AzerothQuant\Recommendations.lua` in every install that has the Addon. The game reads it on the next `/reload` or login, and the Addon then deletes the Scans, Mailbox Reads and Character Reads the Brain has already imported from SavedVariables. So each leaves SavedVariables one `/reload` after the Brain imports it.
 
-Before importing a Scan or Mailbox Read, the Brain saves it exactly as recorded to the Archive (`brain\archive\` by default, or `archive_dir` in the config), one gzipped JSON file each. The archive is the source of truth: `history.sqlite` can always be rebuilt from it, but the archive itself can't be recreated, so it's worth pointing `archive_dir` at a backed-up or synced folder. See ADR-0005.
+Before importing a Scan, Mailbox Read or Character Read, the Brain saves it exactly as recorded to the Archive (`brain\archive\` by default, or `archive_dir` in the config), one gzipped JSON file each. The archive is the source of truth: `history.sqlite` can always be rebuilt from it, but the archive itself can't be recreated, so it's worth pointing `archive_dir` at a backed-up or synced folder. See ADR-0005.
 
 ### Addon (Lua)
 
