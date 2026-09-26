@@ -213,3 +213,140 @@ def test_sale_events_are_counted_per_item_key(db):
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert evidence.event_counts() == {LINEN_KEY: 2, SILK_KEY: 2}
+
+
+# --- Reposts ---
+
+
+def candidates(evidence):
+    return [
+        (e.item_key, e.unit_buyout, e.units)
+        for e in evidence.sale_events
+        if e.kind == SaleKind.PROBABLE_SALE_CANDIDATE
+    ]
+
+
+def test_a_disappearance_reposted_cheaper_is_not_a_probable_sale_candidate(db):
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, row(unit=90)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == []
+
+
+def test_a_new_listing_explains_only_one_disappearance_and_the_cheapest_stays_a_sale(db):
+    # The 60 is the Repost; buyers clear the cheapest first, so the 50 is the sale.
+    run(db, scan(T0, row(unit=50), row(unit=60)), scan(T0 + 20 * MINUTE, row(unit=40)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == [(LINEN_KEY, 50, 1)]
+
+
+def test_pairing_takes_every_repost_the_data_allows(db):
+    # Cheapest new Listing to the most expensive Disappearance would pair 44 with 50 and
+    # leave 45 with nothing it can explain. Pairing 50 with 48 and 45 with 44 gets both.
+    run(
+        db,
+        scan(T0, row(unit=45), row(unit=50)),
+        scan(T0 + 20 * MINUTE, row(unit=44), row(unit=48)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == []
+
+
+def own_row(**kwargs):
+    return row(**kwargs) | {"own": True}
+
+
+@pytest.mark.parametrize(
+    "new_listing",
+    [
+        pytest.param(row(item=SILK, unit=90), id="other Item Key"),
+        pytest.param(row(quantity=2, unit=90), id="other quantity"),
+        pytest.param(own_row(unit=90), id="other own flag"),
+        pytest.param(row(unit=101), id="priced higher"),
+    ],
+)
+def test_a_new_listing_that_does_not_match_is_not_a_repost(db, new_listing):
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, new_listing))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == [(LINEN_KEY, 100, 1)]
+
+
+def test_a_repost_at_the_same_price_is_not_a_sale(db):
+    # Reposting resets time left, so it can't continue the old Listing (its bucket went up).
+    run(db, scan(T0, row(unit=100, time_left=3)), scan(T0 + 20 * MINUTE, row(unit=100)))
+    assert len(disappearances(db, MARKET, CONFIG)) == 1
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == []
+
+
+def test_a_new_listing_from_a_later_window_is_not_a_repost(db):
+    run(
+        db,
+        scan(T0, row(unit=100)),
+        scan(T0 + 20 * MINUTE),
+        scan(T0 + 40 * MINUTE, row(unit=90)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == [(LINEN_KEY, 100, 1)]
+
+
+def test_a_disappearance_that_could_have_expired_does_not_use_up_a_new_listing(db):
+    run(
+        db,
+        scan(T0, row(unit=100, time_left=1), row(unit=80)),
+        scan(T0 + 20 * MINUTE, row(unit=70)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert candidates(evidence) == []
+
+
+def test_reposts_and_the_coincidence_baseline_are_counted_per_item_key(db):
+    run(
+        db,
+        scan(
+            T0,
+            row(item=SILK, unit=100),  # reposted at 90
+            row(unit=100),  # the only new Listing like it is priced higher: a coincidence
+            row(quantity=5, unit=100),  # nothing new like it at all
+        ),
+        scan(T0 + 20 * MINUTE, row(item=SILK, unit=90), row(unit=120)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.repost_counts() == {SILK_KEY: 1}
+    assert evidence.coincidence_counts() == {LINEN_KEY: 1}
+
+
+def test_a_disappearance_outside_an_observation_window_is_never_a_repost(db):
+    run(db, scan(T0, row(unit=100)), scan(T0 + 3 * HOUR, row(unit=90)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.repost_counts() == {}
+
+
+def test_a_new_listing_does_not_explain_away_a_partial_sale(db):
+    run(
+        db,
+        scan(T0, row(quantity=20)),
+        scan(T0 + 20 * MINUTE, row(quantity=15), row(quantity=5, unit=90)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.units, e.kind) for e in evidence.sale_events] == [(5, SaleKind.PARTIAL_SALE)]
+    assert evidence.repost_counts() == {}

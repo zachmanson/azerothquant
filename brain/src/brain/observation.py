@@ -2,19 +2,20 @@
 
 Only Observation Windows (gaps between consecutive Scans no longer than the configured
 cap) count, and within one a Disappearance is a Probable Sale candidate only if its
-time-left bucket rules out expiry over the gap. Everything here is computed from the
-raw history on read, so changing the cap recomputes the past (ADR-0002).
+time-left bucket rules out expiry over the gap and no Repost explains it. Everything
+here is computed from the raw history on read, so changing the cap recomputes the past
+(ADR-0002).
 """
 
 import sqlite3
 from bisect import bisect_right
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
 from itertools import pairwise
 
 from brain.config import Config
-from brain.history import Market, listings, partial_sales, scan_times
+from brain.history import Listing, Market, listings, partial_sales, scan_times
 
 
 @dataclass(frozen=True, order=True)
@@ -81,6 +82,46 @@ def _least_time_left(bucket: int, config: Config) -> int:
     return config.time_left_max_seconds[bucket - 2] if bucket > 1 else 0
 
 
+@dataclass(frozen=True)
+class _Pairing:
+    sales: list[Disappearance]  # candidates no Repost explains
+    reposts: list[Disappearance]
+    # Sales that failed to pair only because every new Listing like them was priced
+    # higher: a baseline for how often a real sale sits next to an unrelated post.
+    coincidences: list[Disappearance]
+
+
+def _pair_reposts(candidates: list[Disappearance], new: list[Listing]) -> _Pairing:
+    """Pair off every Repost the data allows.
+
+    A Repost pairs a candidate with a new Listing from the same Observation Window with
+    the same Item Key, quantity and own flag, at the same or a lower unit buyout. Going
+    from the most expensive candidate down, each takes the most expensive unpaired new
+    Listing it can. That pairs as many as possible and leaves the cheapest candidates
+    as the sales, the way buyers clear the Auction House.
+    """
+    new_prices: dict[tuple, list[int]] = defaultdict(list)
+    for n in new:
+        new_prices[(n.item_key, n.quantity, n.own, n.first_seen)].append(n.unit_buyout)
+    for prices in new_prices.values():
+        prices.sort()
+    cheapest_new = {group: prices[0] for group, prices in new_prices.items()}
+
+    pairing = _Pairing(sales=[], reposts=[], coincidences=[])
+    for d in sorted(candidates, key=lambda d: d.unit_buyout, reverse=True):
+        group = (d.item_key, d.quantity, d.own, d.gone_at)
+        prices = new_prices.get(group, [])
+        cheaper = bisect_right(prices, d.unit_buyout)
+        if cheaper:
+            del prices[cheaper - 1]
+            pairing.reposts.append(d)
+            continue
+        pairing.sales.append(d)
+        if group in cheapest_new and cheapest_new[group] > d.unit_buyout:
+            pairing.coincidences.append(d)
+    return pairing
+
+
 class SaleKind(StrEnum):
     PARTIAL_SALE = "partial_sale"
     # A Disappearance that passes the expiry rule. It becomes a Probable Sale once the
@@ -102,10 +143,20 @@ class SaleEvent:
 class SellRateEvidence:
     window_hours: float  # total length of the Observation Windows in the range
     sale_events: list[SaleEvent] = field(default_factory=list)  # oldest first
+    reposts: list[Disappearance] = field(default_factory=list)
+    # Disappearances left as sales only because every new Listing like them was priced
+    # higher (ADR-0004).
+    coincidences: list[Disappearance] = field(default_factory=list)
 
     def event_counts(self) -> dict[str, int]:
         """How many sale events each Item Key has, so thin evidence can be discounted."""
         return dict(Counter(e.item_key for e in self.sale_events))
+
+    def repost_counts(self) -> dict[str, int]:
+        return dict(Counter(d.item_key for d in self.reposts))
+
+    def coincidence_counts(self) -> dict[str, int]:
+        return dict(Counter(d.item_key for d in self.coincidences))
 
 
 def sell_rate_evidence(
@@ -121,6 +172,13 @@ def sell_rate_evidence(
         for p in partial_sales(conn, market)
         if p.seen_at in window_ends
     ]
+    candidates = [
+        d
+        for d in disappearances(conn, market, config)
+        if d.gone_at in window_ends and not d.expiry_possible
+    ]
+    new = [n for n in listings(conn, market) if n.first_seen in window_ends]
+    pairing = _pair_reposts(candidates, new)
     events += [
         SaleEvent(
             d.item_key,
@@ -130,11 +188,12 @@ def sell_rate_evidence(
             d.quantity,
             SaleKind.PROBABLE_SALE_CANDIDATE,
         )
-        for d in disappearances(conn, market, config)
-        if d.gone_at in window_ends and not d.expiry_possible
+        for d in pairing.sales
     ]
     events.sort(key=lambda e: e.seen_at)
     return SellRateEvidence(
         window_hours=sum(w.end - w.start for w in windows) / 3600,
         sale_events=events,
+        reposts=pairing.reposts,
+        coincidences=pairing.coincidences,
     )
