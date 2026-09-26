@@ -1,4 +1,6 @@
-"""The Scan Archive: every Scan exactly as the Addon recorded it, kept forever (ADR-0005).
+"""The Archive: everything the Addon recorded, exactly as recorded, kept forever (ADR-0005).
+
+So far that is Scans; Mailbox Reads join them with #15.
 
 One gzipped JSON file per Scan at <era>/<realm>-<faction>/<requestedAt>.json.gz. The
 history database can be rebuilt from these files, so they are the one thing the Brain
@@ -20,7 +22,7 @@ _SUFFIX = ".json.gz"
 _UNSAFE = re.compile(r'[<>:"/\\|?*]')
 
 
-class ScanArchive:
+class Archive:
     def __init__(self, root: Path):
         self.root = root
 

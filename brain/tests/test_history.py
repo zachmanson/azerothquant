@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from brain.archive import ScanArchive
+from brain.archive import Archive
 from brain.config import Config, Era, Install
 from brain.history import (
     ImportFileError,
@@ -355,7 +355,7 @@ def test_rejects_a_file_outside_every_install(db, tmp_path):
         import_file(db, stray, config)
 
 
-# --- Scan Archive (ADR-0005) ---
+# --- Archive (ADR-0005) ---
 
 
 def archived_config(tmp_path):
@@ -369,8 +369,21 @@ def test_every_imported_scan_is_archived_verbatim(db, tmp_path):
 
     import_scans(db, [first, second], Era.BETA, config)
 
-    archived = sorted(ScanArchive(config.archive_dir).scans(), key=lambda s: s[1]["requestedAt"])
+    archived = sorted(Archive(config.archive_dir).scans(), key=lambda s: s[1]["requestedAt"])
     assert archived == [(Era.BETA, first), (Era.BETA, second)]
+
+
+def test_scan_timings_are_imported_past_and_archived_verbatim(db, tmp_path):
+    # firstUpdateAt and readAt (#15) are diagnostic only: the Brain doesn't use them,
+    # but must import the Scan as usual and keep them in the Archive.
+    config = archived_config(tmp_path)
+    timed = scan(T0, row(quantity=20)) | {"firstUpdateAt": T0 + 5, "readAt": T0 + 31}
+
+    report = import_scans(db, [timed], Era.BETA, config)
+
+    assert report.scans_imported == 1
+    assert listings(db, MARKET) == [listing(T0, T0, quantity=20)]
+    assert list(Archive(config.archive_dir).scans()) == [(Era.BETA, timed)]
 
 
 def test_a_scan_older_than_the_history_is_still_archived(db, tmp_path):
@@ -380,7 +393,7 @@ def test_a_scan_older_than_the_history_is_still_archived(db, tmp_path):
     report = import_scans(db, [scan(T0, row())], Era.BETA, config)
 
     assert report.scans_out_of_order == 1
-    assert len(list(ScanArchive(config.archive_dir).scans())) == 2
+    assert len(list(Archive(config.archive_dir).scans())) == 2
 
 
 def test_a_scan_that_cant_be_archived_isnt_imported(db, tmp_path):

@@ -173,19 +173,19 @@ def test_rejects_bad_observation_window_cap(tmp_path, value):
         load_config(path)
 
 
-def test_scan_archive_defaults_to_a_folder_next_to_the_config(tmp_path):
+def test_archive_defaults_to_a_folder_next_to_the_config(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
     assert config.archive_dir == tmp_path / "archive"
 
 
-def test_scan_archive_can_be_set_anywhere(tmp_path):
+def test_archive_can_be_set_anywhere(tmp_path):
     elsewhere = tmp_path / "synced" / "aq-archive"
     config = load_config(write_config(tmp_path, f"archive_dir = '{elsewhere}'" + INSTALL))
 
     assert config.archive_dir == elsewhere
 
 
-def test_scan_archive_must_be_a_folder_path(tmp_path):
+def test_archive_must_be_a_folder_path(tmp_path):
     with pytest.raises(ConfigError, match="archive_dir"):
         load_config(write_config(tmp_path, "archive_dir = 3" + INSTALL))

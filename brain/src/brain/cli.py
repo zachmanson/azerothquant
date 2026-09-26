@@ -2,7 +2,7 @@
 
     brain import   import every SavedVariables file once
     brain watch    import each SavedVariables file whenever the client rewrites it
-    brain rebuild  recreate the history database from the Scan Archive (ADR-0005)
+    brain rebuild  recreate the history database from the Archive (ADR-0005)
 
 Both only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003).
@@ -19,7 +19,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from brain.archive import ScanArchive
+from brain.archive import Archive
 from brain.config import Config, ConfigError, Era, load_config
 from brain.history import (
     ImportFileError,
@@ -92,7 +92,7 @@ class RebuildError(Exception):
 
 
 def run_rebuild(config: Config) -> ImportReport:
-    """Recreate the history database from every Scan in the Scan Archive.
+    """Recreate the history database from every Scan in the Archive.
 
     The new database is built beside the old one and only replaces it once complete, so
     a failed rebuild leaves the history as it was. An empty archive is refused rather
@@ -102,7 +102,7 @@ def run_rebuild(config: Config) -> ImportReport:
     if config.archive_dir is None:
         raise RebuildError("no archive folder configured")
     by_era: dict[Era, list[dict]] = {}
-    for era, raw in ScanArchive(config.archive_dir).scans():
+    for era, raw in Archive(config.archive_dir).scans():
         by_era.setdefault(era, []).append(raw)
     if not by_era:
         raise RebuildError(f"no Scans in the archive at {config.archive_dir}")
@@ -229,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("import", help="import every SavedVariables file once")
     commands.add_parser("watch", help="import SavedVariables files whenever they change")
-    commands.add_parser("rebuild", help="recreate the history database from the Scan Archive")
+    commands.add_parser("rebuild", help="recreate the history database from the Archive")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")

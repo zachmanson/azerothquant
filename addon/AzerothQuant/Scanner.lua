@@ -87,6 +87,7 @@ end
 
 local function finish(rows)
   cancel(noResponseTimer)
+  pending.readAt = time()
   local scan = Scan.build(pending, rows, UnitName("player"))
   table.insert(db.scans, scan)
   db.nextScanId = db.nextScanId + 1
@@ -207,6 +208,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if not pending or reading then
       return
     end
+    pending.firstUpdateAt = pending.firstUpdateAt or time()
     cancel(noResponseTimer)
     cancel(debounceTimer)
     debounceTimer = C_Timer.NewTimer(QUIET_SECONDS, readRows)

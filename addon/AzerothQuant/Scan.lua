@@ -35,7 +35,10 @@ function Scan.marketFaction(npcGUID, playerFaction)
   return playerFaction
 end
 
--- request: { id, requestedAt, realm, character, faction }, captured when the Scan was requested.
+-- request: { id, requestedAt, realm, character, faction }, captured when the Scan was requested,
+-- plus firstUpdateAt (first REPLICATE_ITEM_LIST_UPDATE) and readAt (rows finished reading).
+-- Those two are diagnostic only (#15): they tell a throttled or slow Scan apart afterwards,
+-- but the Listings still stand as of requestedAt.
 -- rows: one per replicate index, { link, count, buyout, timeLeft, owner }.
 -- playerName: UnitName("player"), to recognize the player's own Listings.
 -- Returns the Scan as stored in SavedVariables. buyout stays whole-auction; the Brain
@@ -64,6 +67,8 @@ function Scan.build(request, rows, playerName)
   return {
     id = request.id,
     requestedAt = request.requestedAt,
+    firstUpdateAt = request.firstUpdateAt,
+    readAt = request.readAt,
     realm = request.realm,
     character = request.character,
     faction = request.faction,

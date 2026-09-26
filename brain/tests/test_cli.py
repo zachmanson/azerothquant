@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from brain.archive import ScanArchive
+from brain.archive import Archive
 from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
 from brain.config import Config, Era, Install
 from brain.history import Market, listings, open_history
@@ -136,7 +136,7 @@ def test_an_install_without_the_addon_gets_no_file(tmp_path):
     assert not (install / "Interface").exists()
 
 
-# --- Scan Archive and rebuild (ADR-0005) ---
+# --- Archive and rebuild (ADR-0005) ---
 
 
 def dump(path: Path) -> list[str]:
@@ -151,7 +151,7 @@ def test_import_archives_every_scan_in_the_file(tmp_path):
 
     run_import(config, [file])
 
-    archived = sorted(s["requestedAt"] for _, s in ScanArchive(config.archive_dir).scans())
+    archived = sorted(s["requestedAt"] for _, s in Archive(config.archive_dir).scans())
     assert archived == [1790000000, 1790001200]
 
 

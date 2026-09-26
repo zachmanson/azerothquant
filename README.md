@@ -42,14 +42,14 @@ Installing the Brain (above) adds a `brain` command. Run it from `brain/` (or pa
 cd brain
 ..\.venv\Scripts\brain import   # import every SavedVariables file once
 ..\.venv\Scripts\brain watch    # keep running; import whenever the game rewrites the file
-..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Scan Archive (stop watch first)
+..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan a few seconds after you `/reload`. Stop it with Ctrl+C.
 
 After each import it rewrites `Interface\AddOns\AzerothQuant\Recommendations.lua` in every install that has the Addon. The game reads it on the next `/reload` or login, and the Addon then deletes the Scans the Brain has already imported from SavedVariables. So a Scan leaves SavedVariables one `/reload` after the Brain imports it.
 
-Before importing a Scan, the Brain saves it exactly as recorded to the Scan Archive (`brain\archive\` by default, or `archive_dir` in the config), one gzipped JSON file per Scan. The archive is the source of truth: `history.sqlite` can always be rebuilt from it, but the archive itself can't be recreated, so it's worth pointing `archive_dir` at a backed-up or synced folder. See ADR-0005.
+Before importing a Scan, the Brain saves it exactly as recorded to the Archive (`brain\archive\` by default, or `archive_dir` in the config), one gzipped JSON file per Scan. The archive is the source of truth: `history.sqlite` can always be rebuilt from it, but the archive itself can't be recreated, so it's worth pointing `archive_dir` at a backed-up or synced folder. See ADR-0005.
 
 ### Addon (Lua)
 

@@ -50,7 +50,7 @@ class Config:
     history_path: Path = Path(DEFAULT_HISTORY_FILE)
     # Only gaps between Scans up to this long count toward Sell Rate (ADR-0004).
     observation_window_max_seconds: int = DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES * 60
-    # The Scan Archive folder (ADR-0005). A loaded config always has one; None, for
+    # The Archive folder (ADR-0005). A loaded config always has one; None, for
     # tests and for rebuilding from the archive itself, means Scans aren't archived.
     archive_dir: Path | None = None
 

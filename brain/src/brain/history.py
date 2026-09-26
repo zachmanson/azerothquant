@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from brain.archive import ScanArchive
+from brain.archive import Archive
 from brain.config import Config, Era
 from brain.matching import match
 from brain.savedvariables import parse_savedvariables
@@ -155,12 +155,12 @@ def import_scans(
     imported any number of times. A Scan older than the latest one already imported
     for its Market is rejected, since history is never re-matched.
 
-    With an archive folder configured, each Scan is written to the Scan Archive before
+    With an archive folder configured, each Scan is written to the Archive before
     it is imported (ADR-0005). If that write fails the error propagates and the Scan
     stays out of the history, so the Addon doesn't prune it and it's retried later.
     """
     report = ImportReport()
-    archive = ScanArchive(config.archive_dir) if config.archive_dir is not None else None
+    archive = Archive(config.archive_dir) if config.archive_dir is not None else None
     scans = []
     for raw in raw_scans:
         try:

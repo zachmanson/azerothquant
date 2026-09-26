@@ -61,6 +61,22 @@ describe("Scan.build", function()
     assert.are.equal(0, scan.droppedRows)
   end)
 
+  it("records when the Auction House first answered and when the rows were read", function()
+    local request = {}
+    for k, v in pairs(REQUEST) do
+      request[k] = v
+    end
+    request.firstUpdateAt = 1790000005
+    request.readAt = 1790000031
+
+    local scan = Scan.build(request, {}, "Kash")
+
+    assert.are.equal(1790000005, scan.firstUpdateAt)
+    assert.are.equal(1790000031, scan.readAt)
+    -- The Listings still stand as of the request, so requestedAt stays the Scan's time.
+    assert.are.equal(1790000000, scan.requestedAt)
+  end)
+
   it("keeps the compact item string from the link", function()
     local scan = Scan.build(REQUEST, { row(), row({ link = NATURE_PROT }) }, "Kash")
 
