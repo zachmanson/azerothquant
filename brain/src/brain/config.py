@@ -59,6 +59,12 @@ DEFAULT_SALE_HORIZON_DAYS = 7
 # A Flip to Sell must clear both this share of its buy price and this much copper per unit.
 DEFAULT_FLIP_MIN_MARGIN_SHARE = 0.2
 DEFAULT_FLIP_MIN_MARGIN_COPPER = 100
+# The Sell Rate Prior: thin Sell Rate evidence is discounted as if this many more hours of
+# Observation Window had been watched with no sales (#25). Lenient for Holdings, where too
+# low a rate vendors what would have sold; strict for Flips, where too high a rate buys
+# stock that sits.
+DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS = 3
+DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS = 24
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -95,6 +101,10 @@ class Config:
     flip_min_margin_share: float = DEFAULT_FLIP_MIN_MARGIN_SHARE
     # ...and at least this many copper per unit.
     flip_min_margin_copper: int = DEFAULT_FLIP_MIN_MARGIN_COPPER
+    # Hours of no sales added to the Observation Windows before Sell Rate becomes a
+    # quantity, for Holdings and for Flips.
+    sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
+    sell_rate_prior_hours_flips: float = DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS
 
 
 def load_config(path: Path) -> Config:
@@ -196,6 +206,13 @@ def load_config(path: Path) -> Config:
             f"{path}: flip_min_margin_copper must be a whole number of copper of at least 0, "
             f"got {margin_copper!r}"
         )
+    prior_holdings, prior_flips = (
+        _parse_number(path, raw.get(key, default), key, lambda x: x >= 0, "of hours of at least 0")
+        for key, default in (
+            ("sell_rate_prior_hours_holdings", DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS),
+            ("sell_rate_prior_hours_flips", DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS),
+        )
+    )
 
     return Config(
         installs=installs,
@@ -212,6 +229,8 @@ def load_config(path: Path) -> Config:
         sale_horizon_seconds=round(horizon_days * 24 * 3600),
         flip_min_margin_share=margin_share,
         flip_min_margin_copper=margin_copper,
+        sell_rate_prior_hours_holdings=prior_holdings,
+        sell_rate_prior_hours_flips=prior_flips,
     )
 
 

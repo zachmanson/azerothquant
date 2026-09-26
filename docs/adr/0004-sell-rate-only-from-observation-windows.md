@@ -10,5 +10,5 @@ Scans only happen while the player stands at an Auction House (ADR-0003), at mos
 ## Consequences
 
 - Observation Windows cluster in the hours the player plays, usually evening prime time, when buying is heaviest. Scaling those hours to "per day" likely overstates Sell Rate. Accepted for now; revisit if Lots sell consistently slower than predicted.
-- Each Sell Rate keeps its evidence (Observation Window hours for the Market, sale events for the Item Key) so the Decision Engine can discount thin data later (#8).
+- Each Sell Rate keeps its evidence (Observation Window hours for the Market, sale events for the Item Key) so the Decision Engine can discount thin data. It does so with the Sell Rate Prior in `brain recommend`, leaving Sell Rate itself the raw measurement (#25).
 - A Disappearance that pairs with a new Listing in the same window is a Repost, not a sale, and pairs are taken wherever the data allows (#13). Some real sales will be paired with an unrelated post by coincidence, so this pulls Sell Rate low, against the prime-time bias above. Each Item Key's evidence also counts the pairs that failed only because the new Listing was priced higher, as a baseline for how often coincidences happen, in case we later switch to weighting instead.

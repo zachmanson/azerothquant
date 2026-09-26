@@ -86,6 +86,10 @@ _Avoid_: market value, price, min buyout
 Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity.
 _Avoid_: volume, velocity
 
+**Sell Rate Prior**:
+Hours of Observation Window with no sales that the Decision Engine adds to a Market's real ones before Sell Rate becomes a quantity, so a sale or two in a short window doesn't read as a fast seller. Its effect fades as real window hours build up. Holdings get a small one and Flips a large one, since overrating a Flip spends gold on stock that sits. Sell Rate itself stays the raw measurement.
+_Avoid_: pseudo-hours, thin-data discount, confidence bound
+
 **Vendor Price**:
 The fixed gold an NPC merchant pays for one unit of an item. It belongs to the itemID, so every random suffix of an item has the same one, and it is read from the game rather than taken from Classic, since Forever changed some.
 _Avoid_: sell price, vendor value

@@ -42,6 +42,16 @@
 # flip_min_margin_share = 0.2
 # flip_min_margin_copper = 100
 
+# Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
+# evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours
+# of Observation Windows had been watched with no sales, so one sale in a short window
+# doesn't read as a fast seller.
+# The discount fades as real window hours build up. Lenient for Holdings (too low a rate
+# vendors what would have sold) and strict for Flips (too high a rate buys stock that
+# sits). 0 turns it off. Default to 3 and 24 hours. Must come before the first [[installs]].
+# sell_rate_prior_hours_holdings = 3
+# sell_rate_prior_hours_flips = 24
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

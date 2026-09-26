@@ -245,10 +245,11 @@ def run_recommend(config: Config) -> str:
         markets = recommend(conn, config)
     if not markets:
         return "No Character has a Market with a Scan yet.\n"
-    return "\n".join(_render_market(m) for m in markets)
+    range_days = config.sell_rate_range_seconds // 86400
+    return "\n".join(_render_market(m, range_days) for m in markets)
 
 
-def _render_market(m: MarketRecommendations) -> str:
+def _render_market(m: MarketRecommendations, range_days: int) -> str:
     as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
     holdings = _table(
         ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "Note"],
@@ -283,7 +284,8 @@ def _render_market(m: MarketRecommendations) -> str:
     )
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     return (
-        f"{market}, as of the Scan at {as_of}\n\n"
+        f"{market}, as of the Scan at {as_of}\n"
+        f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n\n"
         f"Holdings\n{holdings}\n"
         f"Shopping List: {_money(m.gold)} to spend, {_money(m.shopping_cost)} in total\n"
         f"{shopping}"

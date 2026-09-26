@@ -24,7 +24,7 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.sell_rate import SellRate, sell_rates
+from brain.sell_rate import SellRate, observation_window_hours, sell_rates
 
 
 class Action(StrEnum):
@@ -66,6 +66,9 @@ class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
     gold: int  # the Market's pooled gold, what the Shopping List can spend
+    # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
+    # in the Market rests on, shown instead of a per-row "thin" flag (#25).
+    window_hours: float = 0.0
     holdings: list[Row] = field(default_factory=list)
     shopping_list: list[Row] = field(default_factory=list)
     shopping_cost: int = 0
@@ -125,6 +128,7 @@ def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommenda
                 market,
                 now,
                 gold,
+                window_hours=observation_window_hours(conn, market, config, now),
                 holdings=rows,
                 shopping_list=shopping,
                 shopping_cost=sum(r.cost for r in shopping),
@@ -168,7 +172,10 @@ def _holding_rows(
         rows.append(Row(item_key, None, unbound, note="no data"))
     elif unbound:
         sell_price = value * (1 - cut)
-        selling = min(unbound, _sellable(rate, config))
+        selling = min(
+            unbound,
+            _sellable(rate, config.sell_rate_prior_hours_holdings, config.sale_horizon_seconds),
+        )
         margin = None if vendor_price is None else sell_price - vendor_price
         if not selling or (margin is not None and margin <= 0):
             selling = 0
@@ -220,7 +227,7 @@ def _flips(
     """
     offers = sorted(offers)
     to_sell: Supply = []
-    room = _sellable(rate, config)
+    room = _sellable(rate, config.sell_rate_prior_hours_flips, config.sale_horizon_seconds)
     for unit, quantity in offers:
         take = min(quantity, room)
         if not take:
@@ -250,11 +257,18 @@ def _flips(
     return lots
 
 
-def _sellable(rate: SellRate | None, config: Config) -> int:
-    """Units that should sell within the Sale Horizon; none without Sell Rate evidence."""
+def _sellable(rate: SellRate | None, prior_hours: float, horizon_seconds: int) -> int:
+    """Units that should sell within the Sale Horizon; none without Sell Rate evidence.
+
+    Sell Rate is discounted by the Sell Rate Prior, as if `prior_hours` more hours had been
+    watched with no sales, so a sale or two in a short Observation Window doesn't read as
+    a fast seller (#25). The discount fades as real window hours build up.
+    """
     if rate is None or not rate.sale_events:
         return 0
-    return math.floor(rate.units_per_day * config.sale_horizon_seconds / 86400)
+    # units / (hours + prior) * 24, written so that no prior leaves the rate exactly as is.
+    per_day = rate.units_per_day * rate.window_hours / (rate.window_hours + prior_hours)
+    return math.floor(per_day * horizon_seconds / 86400)
 
 
 def _resale(supply: Supply, bought: Supply, cut: float, config: Config) -> float | None:

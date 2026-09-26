@@ -160,13 +160,24 @@ class SellRateEvidence:
         return dict(Counter(d.item_key for d in self.coincidences))
 
 
+def observation_windows_between(
+    conn: sqlite3.Connection, market: Market, config: Config, since: int, until: int
+) -> list[ObservationWindow]:
+    """The Observation Windows whose later Scan falls in [since, until)."""
+    return [w for w in observation_windows(conn, market, config) if since <= w.end < until]
+
+
+def window_hours(windows: list[ObservationWindow]) -> float:
+    return sum(w.end - w.start for w in windows) / 3600
+
+
 def sell_rate_evidence(
     conn: sqlite3.Connection, market: Market, config: Config, since: int, until: int
 ) -> SellRateEvidence:
     """What Sell Rate is built from over [since, until): the Observation Windows whose
     later Scan falls in the range. Windows aren't clipped at the edges, so the hours
     and the sales always cover the same windows."""
-    windows = [w for w in observation_windows(conn, market, config) if since <= w.end < until]
+    windows = observation_windows_between(conn, market, config, since, until)
     window_ends = {w.end for w in windows}
     events = [
         SaleEvent(p.item_key, p.unit_buyout, p.own, p.seen_at, p.units_sold, SaleKind.PARTIAL_SALE)
@@ -204,7 +215,7 @@ def sell_rate_evidence(
     ]
     events.sort(key=lambda e: e.seen_at)
     return SellRateEvidence(
-        window_hours=sum(w.end - w.start for w in windows) / 3600,
+        window_hours=window_hours(windows),
         sale_events=events,
         reposts=pairing.reposts,
         coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],

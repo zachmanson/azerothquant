@@ -20,10 +20,14 @@ ORE_KEY = "2770"
 GOLD = 100 * 100 * 100  # copper
 
 # Default knobs (5% faction cut, 20% and 1 silver Flip margin), except a Sale Horizon of
-# 3 hours, so a Sell Rate from a single short Observation Window is small enough to cap.
+# 3 hours, so a Sell Rate from a single short Observation Window is small enough to cap,
+# and no Sell Rate Prior, so these tests take the raw rate at its word.
+DEFAULTS = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
 CONFIG = replace(
-    Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),)),
+    DEFAULTS,
     sale_horizon_seconds=3 * HOUR,
+    sell_rate_prior_hours_holdings=0,
+    sell_rate_prior_hours_flips=0,
 )
 
 
@@ -323,3 +327,76 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
         ("2770", None, None),
         ("6303", None, None),
     ]
+
+
+# --- The Sell Rate Prior (#25) ---
+
+
+def one_sale_in_18_minutes(*latest_rows):
+    """One Linen sold in a single 18-minute Observation Window: a raw Sell Rate of 80 a
+    day, from 0.3 h of watching. A deep Market at 1000, so resale stays well clear."""
+    return [
+        scan(T0, row(quantity=200, unit=1000)),
+        scan(T0 + 18 * MINUTE, row(quantity=199, unit=1000), *latest_rows),
+    ]
+
+
+def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
+    # As if 24 more hours had been watched with no sales: 1 / 24.3 h * 24 * 7 days = 6.9,
+    # not the raw 80 a day * 7 = 560.
+    config = replace(DEFAULTS, sell_rate_prior_hours_flips=24)
+    result = run(
+        db,
+        one_sale_in_18_minutes(row(quantity=10, unit=500)),
+        [character_read(money=GOLD)],
+        config=config,
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 6, 500)
+
+
+def test_holdings_are_discounted_less_than_flips(db):
+    # The default Sell Rate Prior for Holdings, 3 h: 1 / 3.3 h * 24 * 7 days = 50.9 of the 100
+    # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought.
+    result = run(
+        db,
+        one_sale_in_18_minutes(row(quantity=10, unit=500)),
+        [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
+        config=DEFAULTS,
+    )
+
+    sell, vendor = result[MARKET].holdings
+    assert (sell.action, sell.quantity) == (Action.SELL, 50)
+    assert (vendor.action, vendor.quantity) == (Action.VENDOR, 50)
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity) == (Action.SELL, 6)
+
+
+def test_the_market_shows_how_many_hours_of_observation_window_its_sell_rate_rests_on(db):
+    result = run(db, one_sale_in_18_minutes(), [character_read()])
+
+    assert result[MARKET].window_hours == pytest.approx(0.3)
+
+
+def test_a_market_without_observation_windows_rests_on_none(db):
+    result = run(db, [scan(T0, row())], [character_read()])
+
+    assert result[MARKET].window_hours == 0
+
+
+def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
+    # The raw 80 a day * 7 days = 560 units of room: all 100 held are Sold, and all 10
+    # cheap units are bought.
+    config = replace(DEFAULTS, sell_rate_prior_hours_holdings=0, sell_rate_prior_hours_flips=0)
+    result = run(
+        db,
+        one_sale_in_18_minutes(row(quantity=10, unit=500)),
+        [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
+        config=config,
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.quantity) == (Action.SELL, 100)
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity) == (Action.SELL, 10)

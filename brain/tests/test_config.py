@@ -260,6 +260,8 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.sale_horizon_seconds == 7 * 24 * 3600
     assert config.flip_min_margin_share == 0.2
     assert config.flip_min_margin_copper == 100
+    assert config.sell_rate_prior_hours_holdings == 3
+    assert config.sell_rate_prior_hours_flips == 24
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -269,6 +271,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "sale_horizon_days = 1.5\n"
         "flip_min_margin_share = 0\n"
         "flip_min_margin_copper = 500\n"
+        "sell_rate_prior_hours_holdings = 0\n"
+        "sell_rate_prior_hours_flips = 12.5\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -277,6 +281,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.sale_horizon_seconds == 36 * 3600
     assert config.flip_min_margin_share == 0
     assert config.flip_min_margin_copper == 500
+    assert config.sell_rate_prior_hours_holdings == 0
+    assert config.sell_rate_prior_hours_flips == 12.5
 
 
 @pytest.mark.parametrize(
@@ -290,6 +296,10 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("flip_min_margin_share", "-0.2"),
         ("flip_min_margin_copper", "-1"),
         ("flip_min_margin_copper", "1.5"),  # whole copper
+        ("sell_rate_prior_hours_holdings", "-1"),
+        ("sell_rate_prior_hours_holdings", "false"),
+        ("sell_rate_prior_hours_flips", '"24"'),
+        ("sell_rate_prior_hours_flips", "-0.5"),
     ],
 )
 def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):

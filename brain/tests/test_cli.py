@@ -342,6 +342,8 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert "Classic Beta PvP Alliance (beta)" in text
+    # The one Observation Window every Sell Rate here rests on.
+    assert "Sell Rate observed for 1.0 h in the last 14 days" in text
     # Fair Value (700 + 700 + 1000) / 3 = 800, less the 5% cut: 760 each, 750 more than a
     # vendor pays. The Flip resells at 950, once the two 700s are bought.
     assert ["2589", "Sell", "3", "8s 00c", "22s 80c", "7s 50c", "1"] in lines
