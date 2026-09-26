@@ -11,11 +11,13 @@ Recommendations.lua
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
 Money.lua
 Scan.lua
+MailboxRead.lua
 Prune.lua
 Nudge.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua
+Mailbox.lua
 
 # SPIKE (#15), throwaway: /aq maildump. Delete with the file.
 MailDumpSpike.lua
