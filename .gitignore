@@ -13,3 +13,6 @@ brain/config.toml
 
 # The Brain's history database (default location)
 brain/history.sqlite
+
+# The Scan Archive (default location)
+brain/archive/

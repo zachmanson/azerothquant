@@ -1,8 +1,12 @@
 import shutil
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from brain.cli import run_import, savedvariables_files
+import pytest
+
+from brain.archive import ScanArchive
+from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
 from brain.config import Config, Era, Install
 from brain.history import Market, listings, open_history
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
@@ -21,7 +25,11 @@ def install_with_savedvariables(root: Path, account: str = "ACCOUNT1") -> Path:
 
 
 def config_for(tmp_path: Path, *installs: Install) -> Config:
-    return Config(installs=installs, history_path=tmp_path / "history.sqlite")
+    return Config(
+        installs=installs,
+        history_path=tmp_path / "history.sqlite",
+        archive_dir=tmp_path / "archive",
+    )
 
 
 def test_finds_the_savedvariables_file_of_every_account_in_every_install(tmp_path):
@@ -126,3 +134,79 @@ def test_an_install_without_the_addon_gets_no_file(tmp_path):
 
     assert result.error is None
     assert not (install / "Interface").exists()
+
+
+# --- Scan Archive and rebuild (ADR-0005) ---
+
+
+def dump(path: Path) -> list[str]:
+    with closing(sqlite3.connect(path)) as conn:
+        return list(conn.iterdump())
+
+
+def test_import_archives_every_scan_in_the_file(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+
+    run_import(config, [file])
+
+    archived = sorted(s["requestedAt"] for _, s in ScanArchive(config.archive_dir).scans())
+    assert archived == [1790000000, 1790001200]
+
+
+def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    imported = dump(config.history_path)
+
+    report = run_rebuild(config)
+
+    assert report.scans_imported == 2
+    assert dump(config.history_path) == imported
+    assert not list(tmp_path.glob("*.rebuild*"))
+
+
+def test_rebuild_replaces_a_history_that_has_drifted_from_the_archive(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    imported = dump(config.history_path)
+    with closing(sqlite3.connect(config.history_path)) as conn, conn:
+        conn.execute("DELETE FROM partial_sale")
+
+    run_rebuild(config)
+
+    assert dump(config.history_path) == imported
+
+
+def test_rebuild_refuses_an_empty_archive_rather_than_wipe_the_history(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    imported = dump(config.history_path)
+    shutil.rmtree(config.archive_dir)
+
+    with pytest.raises(RebuildError, match="no Scans"):
+        run_rebuild(config)
+
+    assert dump(config.history_path) == imported
+
+
+def test_rebuild_tells_the_addon_what_is_in_the_rebuilt_history(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    install_addon(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    (addon_folder(Install(install, Era.BETA)) / FILE_NAME).unlink()
+
+    run_rebuild(config)
+
+    assert read_recommendations(install)["lastImported"] == {
+        "Classic Beta PvP": {"Alliance": 1790001200}
+    }

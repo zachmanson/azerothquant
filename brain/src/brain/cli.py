@@ -2,13 +2,16 @@
 
     brain import   import every SavedVariables file once
     brain watch    import each SavedVariables file whenever the client rewrites it
+    brain rebuild  recreate the history database from the Scan Archive (ADR-0005)
 
 Both only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003).
 """
 
 import argparse
+import dataclasses
 import logging
+import os
 import sqlite3
 import sys
 import time
@@ -16,8 +19,15 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from brain.config import Config, ConfigError, load_config
-from brain.history import ImportFileError, ImportReport, import_file, open_history
+from brain.archive import ScanArchive
+from brain.config import Config, ConfigError, Era, load_config
+from brain.history import (
+    ImportFileError,
+    ImportReport,
+    import_file,
+    import_scans,
+    open_history,
+)
 from brain.recommendations import write_recommendations
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
@@ -77,6 +87,54 @@ def run_import(config: Config, paths: list[Path]) -> list[FileResult]:
     return results
 
 
+class RebuildError(Exception):
+    """The history can't be rebuilt, and the existing one was left as it was."""
+
+
+def run_rebuild(config: Config) -> ImportReport:
+    """Recreate the history database from every Scan in the Scan Archive.
+
+    The new database is built beside the old one and only replaces it once complete, so
+    a failed rebuild leaves the history as it was. An empty archive is refused rather
+    than turned into an empty history. Stop `brain watch` first: it holds the history
+    open, and on Windows an open file can't be replaced.
+    """
+    if config.archive_dir is None:
+        raise RebuildError("no archive folder configured")
+    by_era: dict[Era, list[dict]] = {}
+    for era, raw in ScanArchive(config.archive_dir).scans():
+        by_era.setdefault(era, []).append(raw)
+    if not by_era:
+        raise RebuildError(f"no Scans in the archive at {config.archive_dir}")
+
+    config.history_path.parent.mkdir(parents=True, exist_ok=True)
+    rebuilt = config.history_path.with_name(config.history_path.name + ".rebuild")
+    rebuilt.unlink(missing_ok=True)
+    # Everything read here is already archived, so don't archive it again.
+    from_archive = dataclasses.replace(config, archive_dir=None)
+    total = ImportReport()
+    try:
+        with closing(open_history(rebuilt)) as conn:
+            for era, raws in by_era.items():
+                _add_report(total, import_scans(conn, raws, era, from_archive))
+        os.replace(rebuilt, config.history_path)
+    except BaseException:
+        rebuilt.unlink(missing_ok=True)
+        raise
+
+    with closing(open_history(config.history_path)) as conn:
+        _write_recommendations(conn, config)
+    return total
+
+
+def _add_report(total: ImportReport, report: ImportReport) -> None:
+    for f in dataclasses.fields(ImportReport):
+        if f.name == "warnings":
+            total.warnings.extend(report.warnings)
+        else:
+            setattr(total, f.name, getattr(total, f.name) + getattr(report, f.name))
+
+
 def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
     """Rewrite every install's Recommendations.lua from the history.
 
@@ -117,6 +175,22 @@ def _import_once(config: Config) -> int:
     return 1 if any(r.error is not None for r in results) else 0
 
 
+def _rebuild(config: Config) -> int:
+    try:
+        report = run_rebuild(config)
+    except (RebuildError, OSError, sqlite3.Error, ValueError) as e:
+        log.error("Couldn't rebuild the history: %s", e)
+        return 1
+    log.info(
+        "Rebuilt %s from %s: %d Scans, %d rejected",
+        config.history_path,
+        config.archive_dir,
+        report.scans_imported,
+        report.scans_out_of_order + report.scans_unreadable,
+    )
+    return 0
+
+
 def _watch(config: Config) -> int:
     watcher = Watcher(settle_seconds=SETTLE_SECONDS)
     folders = ", ".join(str(i.path) for i in config.installs)
@@ -155,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("import", help="import every SavedVariables file once")
     commands.add_parser("watch", help="import SavedVariables files whenever they change")
+    commands.add_parser("rebuild", help="recreate the history database from the Scan Archive")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -166,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "import":
         return _import_once(config)
+    if args.command == "rebuild":
+        return _rebuild(config)
     return _watch(config)
 
 

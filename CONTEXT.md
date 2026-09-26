@@ -33,6 +33,10 @@ Relative value learned from Beta (price ratios, turnover rank) that the Decision
 One full pass over every Listing on the Auction House, as it stood at the moment the Scan was requested.
 _Avoid_: snapshot, dump
 
+**Scan Archive**:
+Every Scan exactly as the Addon recorded it, one file per Scan, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
+_Avoid_: backup, raw dump
+
 **Item Key**:
 The identity used for pricing: itemID plus random suffix, so "of the Monkey" and "of the Eagle" versions are different Item Keys.
 _Avoid_: item (when you mean the priced identity), itemID

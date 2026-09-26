@@ -1,7 +1,9 @@
+import dataclasses
 from pathlib import Path
 
 import pytest
 
+from brain.archive import ScanArchive
 from brain.config import Config, Era, Install
 from brain.history import (
     ImportFileError,
@@ -351,3 +353,49 @@ def test_rejects_a_file_outside_every_install(db, tmp_path):
 
     with pytest.raises(ImportFileError, match="install"):
         import_file(db, stray, config)
+
+
+# --- Scan Archive (ADR-0005) ---
+
+
+def archived_config(tmp_path):
+    return dataclasses.replace(CONFIG, archive_dir=tmp_path / "archive")
+
+
+def test_every_imported_scan_is_archived_verbatim(db, tmp_path):
+    config = archived_config(tmp_path)
+    first = scan(T0, row(quantity=20), {"itemString": "garbage", "quantity": 1})
+    second = scan(T0 + 20 * MINUTE, row(quantity=15))
+
+    import_scans(db, [first, second], Era.BETA, config)
+
+    archived = sorted(ScanArchive(config.archive_dir).scans(), key=lambda s: s[1]["requestedAt"])
+    assert archived == [(Era.BETA, first), (Era.BETA, second)]
+
+
+def test_a_scan_older_than_the_history_is_still_archived(db, tmp_path):
+    config = archived_config(tmp_path)
+    import_scans(db, [scan(T0 + HOUR, row())], Era.BETA, config)
+
+    report = import_scans(db, [scan(T0, row())], Era.BETA, config)
+
+    assert report.scans_out_of_order == 1
+    assert len(list(ScanArchive(config.archive_dir).scans())) == 2
+
+
+def test_a_scan_that_cant_be_archived_isnt_imported(db, tmp_path):
+    config = archived_config(tmp_path)
+    config.archive_dir.write_text("a file where the archive folder should be")
+
+    with pytest.raises(OSError):
+        import_scans(db, [scan(T0, row())], Era.BETA, config)
+
+    # Not in the history, so the Addon keeps it and the Brain tries again later.
+    assert listings(db, MARKET) == []
+    assert db.execute("SELECT COUNT(*) FROM scan").fetchone() == (0,)
+
+
+def test_without_an_archive_folder_nothing_is_archived(db, tmp_path):
+    run(db, scan(T0, row()))
+
+    assert list(tmp_path.iterdir()) == []

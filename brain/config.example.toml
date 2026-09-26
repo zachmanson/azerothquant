@@ -20,6 +20,13 @@
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'
 
+# Optional: where the Brain keeps the Scan Archive, every Scan exactly as the Addon
+# recorded it (see ADR-0005). The history database can be rebuilt from it with
+# `brain rebuild`, but the archive itself can't be recreated, so consider pointing this
+# at a synced or backed-up folder. A relative path is relative to this file. Defaults to
+# archive next to it. Must come before the first [[installs]].
+# archive_dir = 'archive'
+
 [[installs]]
 path = 'C:\Program Files (x86)\World of Warcraft\_classic_beta_'
 era = "beta"

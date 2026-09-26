@@ -37,6 +37,7 @@ DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
+DEFAULT_ARCHIVE_DIR = "archive"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,9 @@ class Config:
     history_path: Path = Path(DEFAULT_HISTORY_FILE)
     # Only gaps between Scans up to this long count toward Sell Rate (ADR-0004).
     observation_window_max_seconds: int = DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES * 60
+    # The Scan Archive folder (ADR-0005). A loaded config always has one; None, for
+    # tests and for rebuilding from the archive itself, means Scans aren't archived.
+    archive_dir: Path | None = None
 
 
 def load_config(path: Path) -> Config:
@@ -87,12 +91,16 @@ def load_config(path: Path) -> Config:
     history = raw.get("history_path", DEFAULT_HISTORY_FILE)
     if not isinstance(history, str) or not history:
         raise ConfigError(f"{path}: history_path must be a file path, got {history!r}")
+    archive = raw.get("archive_dir", DEFAULT_ARCHIVE_DIR)
+    if not isinstance(archive, str) or not archive:
+        raise ConfigError(f"{path}: archive_dir must be a folder path, got {archive!r}")
 
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
         history_path=path.parent / history,
         observation_window_max_seconds=window_minutes * 60,
+        archive_dir=path.parent / archive,
     )
 
 
