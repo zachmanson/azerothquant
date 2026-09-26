@@ -11,6 +11,11 @@
 # verified on Forever. Must come before the first [[installs]].
 # time_left_max_minutes = [30, 120, 720, 2880]
 
+# Optional: the longest gap, in minutes, between two Scans of a Market that still counts
+# as an Observation Window. Only those gaps count toward Sell Rate (see ADR-0004).
+# Defaults to 60. Must come before the first [[installs]].
+# observation_window_max_minutes = 60
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

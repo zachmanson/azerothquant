@@ -1,0 +1,140 @@
+"""Which parts of a Market's history count toward Sell Rate (ADR-0004).
+
+Only Observation Windows (gaps between consecutive Scans no longer than the configured
+cap) count, and within one a Disappearance is a Probable Sale candidate only if its
+time-left bucket rules out expiry over the gap. Everything here is computed from the
+raw history on read, so changing the cap recomputes the past (ADR-0002).
+"""
+
+import sqlite3
+from bisect import bisect_right
+from collections import Counter
+from dataclasses import dataclass, field
+from enum import StrEnum
+from itertools import pairwise
+
+from brain.config import Config
+from brain.history import Market, listings, partial_sales, scan_times
+
+
+@dataclass(frozen=True, order=True)
+class ObservationWindow:
+    start: int  # requested_at of the earlier Scan
+    end: int  # requested_at of the later Scan
+
+
+def observation_windows(
+    conn: sqlite3.Connection, market: Market, config: Config
+) -> list[ObservationWindow]:
+    """Every consecutive pair of the Market's Scans close enough to be an Observation
+    Window, oldest first."""
+    return [
+        ObservationWindow(start, end)
+        for start, end in pairwise(scan_times(conn, market))
+        if end - start <= config.observation_window_max_seconds
+    ]
+
+
+@dataclass(frozen=True, order=True)
+class Disappearance:
+    item_key: str
+    unit_buyout: int
+    own: bool
+    quantity: int
+    time_left: int  # bucket in the last Scan it was seen in
+    last_seen: int  # requested_at of the last Scan it was in
+    gone_at: int  # requested_at of the next Scan, where it was missing
+    in_window: bool  # the gap between the two Scans is an Observation Window
+    expiry_possible: bool  # the gap was long enough for its bucket to run out
+
+
+def disappearances(conn: sqlite3.Connection, market: Market, config: Config) -> list[Disappearance]:
+    """Every Listing that was in one Scan of the Market and missing from the next, in
+    the order the Listings were first seen."""
+    times = scan_times(conn, market)
+    result = []
+    for listing in listings(conn, market):
+        after = bisect_right(times, listing.last_seen)
+        if after == len(times):
+            continue  # still in the latest Scan
+        gone_at = times[after]
+        gap = gone_at - listing.last_seen
+        result.append(
+            Disappearance(
+                item_key=listing.item_key,
+                unit_buyout=listing.unit_buyout,
+                own=listing.own,
+                quantity=listing.quantity,
+                time_left=listing.time_left,
+                last_seen=listing.last_seen,
+                gone_at=gone_at,
+                in_window=gap <= config.observation_window_max_seconds,
+                expiry_possible=gap >= _least_time_left(listing.time_left, config),
+            )
+        )
+    return result
+
+
+def _least_time_left(bucket: int, config: Config) -> int:
+    """The least time a Listing in this bucket can have left, in seconds: the previous
+    bucket's longest, or 0 for bucket 1."""
+    return config.time_left_max_seconds[bucket - 2] if bucket > 1 else 0
+
+
+class SaleKind(StrEnum):
+    PARTIAL_SALE = "partial_sale"
+    # A Disappearance that passes the expiry rule. It becomes a Probable Sale once the
+    # Fair Value price check exists.
+    PROBABLE_SALE_CANDIDATE = "probable_sale_candidate"
+
+
+@dataclass(frozen=True, order=True)
+class SaleEvent:
+    item_key: str
+    unit_buyout: int
+    own: bool
+    seen_at: int  # requested_at of the Scan that ends the Observation Window
+    units: int
+    kind: SaleKind
+
+
+@dataclass(frozen=True)
+class SellRateEvidence:
+    window_hours: float  # total length of the Observation Windows in the range
+    sale_events: list[SaleEvent] = field(default_factory=list)  # oldest first
+
+    def event_counts(self) -> dict[str, int]:
+        """How many sale events each Item Key has, so thin evidence can be discounted."""
+        return dict(Counter(e.item_key for e in self.sale_events))
+
+
+def sell_rate_evidence(
+    conn: sqlite3.Connection, market: Market, config: Config, since: int, until: int
+) -> SellRateEvidence:
+    """What Sell Rate is built from over [since, until): the Observation Windows whose
+    later Scan falls in the range. Windows aren't clipped at the edges, so the hours
+    and the sales always cover the same windows."""
+    windows = [w for w in observation_windows(conn, market, config) if since <= w.end < until]
+    window_ends = {w.end for w in windows}
+    events = [
+        SaleEvent(p.item_key, p.unit_buyout, p.own, p.seen_at, p.units_sold, SaleKind.PARTIAL_SALE)
+        for p in partial_sales(conn, market)
+        if p.seen_at in window_ends
+    ]
+    events += [
+        SaleEvent(
+            d.item_key,
+            d.unit_buyout,
+            d.own,
+            d.gone_at,
+            d.quantity,
+            SaleKind.PROBABLE_SALE_CANDIDATE,
+        )
+        for d in disappearances(conn, market, config)
+        if d.gone_at in window_ends and not d.expiry_possible
+    ]
+    events.sort(key=lambda e: e.seen_at)
+    return SellRateEvidence(
+        window_hours=sum(w.end - w.start for w in windows) / 3600,
+        sale_events=events,
+    )

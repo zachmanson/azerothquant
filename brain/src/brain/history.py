@@ -326,3 +326,13 @@ def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
         (era.value,),
     )
     return {Market(realm, faction, era): at for realm, faction, at in rows}
+
+
+def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
+    """requested_at of every Scan imported for the Market, oldest first."""
+    rows = conn.execute(
+        "SELECT s.requested_at FROM scan s JOIN market m ON m.id = s.market_id"
+        f" WHERE {_MARKET_FILTER} ORDER BY s.requested_at",
+        _market_params(market),
+    )
+    return [at for (at,) in rows]

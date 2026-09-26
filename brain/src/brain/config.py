@@ -31,6 +31,11 @@ class Install:
 DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 48 * 60)
 
 
+# Longest gap between two Scans of a Market that still counts as an Observation Window
+# (ADR-0004).
+DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
+
+
 DEFAULT_HISTORY_FILE = "history.sqlite"
 
 
@@ -42,6 +47,8 @@ class Config:
     time_left_max_seconds: tuple[int, ...] = tuple(m * 60 for m in DEFAULT_TIME_LEFT_MAX_MINUTES)
     # The SQLite history. A relative path in the file is relative to the config file.
     history_path: Path = Path(DEFAULT_HISTORY_FILE)
+    # Only gaps between Scans up to this long count toward Sell Rate (ADR-0004).
+    observation_window_max_seconds: int = DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES * 60
 
 
 def load_config(path: Path) -> Config:
@@ -65,6 +72,18 @@ def load_config(path: Path) -> Config:
     minutes = _parse_time_left(
         path, raw.get("time_left_max_minutes", DEFAULT_TIME_LEFT_MAX_MINUTES)
     )
+    window_minutes = raw.get(
+        "observation_window_max_minutes", DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES
+    )
+    if (
+        isinstance(window_minutes, bool)
+        or not isinstance(window_minutes, int)
+        or window_minutes < 1
+    ):
+        raise ConfigError(
+            f"{path}: observation_window_max_minutes must be a positive whole number of minutes, "
+            f"got {window_minutes!r}"
+        )
     history = raw.get("history_path", DEFAULT_HISTORY_FILE)
     if not isinstance(history, str) or not history:
         raise ConfigError(f"{path}: history_path must be a file path, got {history!r}")
@@ -73,6 +92,7 @@ def load_config(path: Path) -> Config:
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
         history_path=path.parent / history,
+        observation_window_max_seconds=window_minutes * 60,
     )
 
 

@@ -151,3 +151,23 @@ def test_history_path_can_be_set_relative_to_the_config(tmp_path):
     config = load_config(write_config(tmp_path, "history_path = 'data/h.sqlite'" + INSTALL))
 
     assert config.history_path == tmp_path / "data" / "h.sqlite"
+
+
+def test_observation_window_cap_defaults_to_an_hour(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.observation_window_max_seconds == 3600
+
+
+def test_observation_window_cap_can_be_set(tmp_path):
+    config = load_config(write_config(tmp_path, "observation_window_max_minutes = 45" + INSTALL))
+
+    assert config.observation_window_max_seconds == 45 * 60
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "true", '"60"', "[60]"])
+def test_rejects_bad_observation_window_cap(tmp_path, value):
+    path = write_config(tmp_path, f"observation_window_max_minutes = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match="observation_window_max_minutes"):
+        load_config(path)
