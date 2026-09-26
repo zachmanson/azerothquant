@@ -230,3 +230,23 @@ def test_rejects_bad_fair_value_knobs(tmp_path, key, value):
 
     with pytest.raises(ConfigError, match=key):
         load_config(path)
+
+
+def test_sell_rate_range_defaults_to_14_days(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.sell_rate_range_seconds == 14 * 24 * 3600
+
+
+def test_sell_rate_range_can_be_set(tmp_path):
+    config = load_config(write_config(tmp_path, "sell_rate_days = 7" + INSTALL))
+
+    assert config.sell_rate_range_seconds == 7 * 24 * 3600
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "true", '"14"'])
+def test_rejects_bad_sell_rate_range(tmp_path, value):
+    path = write_config(tmp_path, f"sell_rate_days = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match="sell_rate_days"):
+        load_config(path)

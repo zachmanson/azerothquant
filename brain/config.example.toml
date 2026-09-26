@@ -26,6 +26,10 @@
 # fair_value_outlier_share = 0.5
 # probable_sale_max_fair_value_multiple = 1.2
 
+# Optional: how many days back Sell Rate looks. Only the Observation Windows that ended in
+# that many days before now count. Defaults to 14. Must come before the first [[installs]].
+# sell_rate_days = 14
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

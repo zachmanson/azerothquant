@@ -46,6 +46,10 @@ DEFAULT_FAIR_VALUE_OUTLIER_SHARE = 0.5
 DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE = 1.2
 
 
+# Sell Rate counts the Observation Windows that ended in this many days before now (#22).
+DEFAULT_SELL_RATE_RANGE_DAYS = 14
+
+
 DEFAULT_HISTORY_FILE = "history.sqlite"
 DEFAULT_ARCHIVE_DIR = "archive"
 
@@ -69,6 +73,8 @@ class Config:
     fair_value_outlier_share: float = DEFAULT_FAIR_VALUE_OUTLIER_SHARE
     # Probable Sales are priced at most this multiple of Fair Value in their last Scan.
     probable_sale_max_fair_value_multiple: float = DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE
+    # Sell Rate counts only the Observation Windows that ended this recently.
+    sell_rate_range_seconds: int = DEFAULT_SELL_RATE_RANGE_DAYS * 24 * 3600
 
 
 def load_config(path: Path) -> Config:
@@ -103,6 +109,16 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f"{path}: observation_window_max_minutes must be a positive whole number of minutes, "
             f"got {window_minutes!r}"
+        )
+    sell_rate_days = raw.get("sell_rate_days", DEFAULT_SELL_RATE_RANGE_DAYS)
+    if (
+        isinstance(sell_rate_days, bool)
+        or not isinstance(sell_rate_days, int)
+        or sell_rate_days < 1
+    ):
+        raise ConfigError(
+            f"{path}: sell_rate_days must be a positive whole number of days, "
+            f"got {sell_rate_days!r}"
         )
     history = raw.get("history_path", DEFAULT_HISTORY_FILE)
     if not isinstance(history, str) or not history:
@@ -144,6 +160,7 @@ def load_config(path: Path) -> Config:
         fair_value_slice_share=slice_share,
         fair_value_outlier_share=outlier_share,
         probable_sale_max_fair_value_multiple=multiple,
+        sell_rate_range_seconds=sell_rate_days * 24 * 3600,
     )
 
 
