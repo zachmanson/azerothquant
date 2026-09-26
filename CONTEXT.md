@@ -66,6 +66,10 @@ _Avoid_: error rate, false-positive rate (too generic to say which mistake)
 **Probable Sale**:
 A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below the Fair Value of the Scan it was last seen in. Cancellations without a Repost still can't be told apart.
 
+**Sale Event**:
+One Partial Sale or Probable Sale: one drop in the units on offer seen between two Scans. On Forever a buyer can take any part of a Listing, so a Sale Event is usually one buyer but can be several, and Scans can't tell which. Its size is the units it removed.
+_Avoid_: sale, purchase (a Purchase is the player's own buy)
+
 **Outcome**:
 What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one.
 _Avoid_: result, receipt, invoice (an invoice is one kind of mail)
@@ -89,6 +93,10 @@ _Avoid_: volume, velocity
 **Sell Rate Prior**:
 Hours of Observation Window with no sales that the Decision Engine adds to a Market's real ones before Sell Rate becomes a quantity, so a sale or two in a short window doesn't read as a fast seller. Its effect fades as real window hours build up. Holdings get a small one and Flips a large one, since overrating a Flip spends gold on stock that sits. Sell Rate itself stays the raw measurement.
 _Avoid_: pseudo-hours, thin-data discount, confidence bound
+
+**Sale Size Prior**:
+Sale Events of a typical size that the Decision Engine adds to an Item Key's real ones before taking their average size, so one big buyer doesn't make an Item Key look like it sells in bulk. The typical size is the smaller of the Market's usual Sale Event size among items that stack and the Item Key's usual Listing quantity. Its effect fades as real Sale Events build up. Holdings get a small one and Flips a large one, for the same reason as the Sell Rate Prior.
+_Avoid_: stack-size cap, median sale
 
 **Vendor Price**:
 The fixed gold an NPC merchant pays for one unit of an item. It belongs to the itemID, so every random suffix of an item has the same one, and it is read from the game rather than taken from Classic, since Forever changed some.
