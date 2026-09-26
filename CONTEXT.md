@@ -38,7 +38,7 @@ The Auction House mail in one Character's inbox (sales, purchases, cancellations
 _Avoid_: mail scan (a Scan is only ever the Auction House)
 
 **Archive**:
-Every Scan and every Mailbox Read exactly as the Addon recorded it, one file each, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
+Every Scan, Mailbox Read and Character Read exactly as the Addon recorded it, one file each, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
 _Avoid_: Scan Archive (it holds more than Scans), backup, raw dump
 
 **Item Key**:
@@ -104,6 +104,10 @@ A recipe the player doesn't have yet but could get, and which costs something to
 
 ## Personal history
 
+**Character Read**:
+One Character's gold, faction and bag contents as they stood at logout or `/reload`, plus its bank if the player opened it that session (the bank can only be read while it's open, and can't change while it's closed). Kept in the Archive like Scans and Mailbox Reads.
+_Avoid_: snapshot, inventory
+
 **Disenchant Result**:
 The materials the player actually got from disenchanting one specific item.
 
@@ -136,9 +140,9 @@ The Recommendations for things to buy on the Auction House.
 _Avoid_: buy list, snipes
 
 **Holdings**:
-Every Item Key the player's Characters own in bags and banks, each with its Recommendation.
+Every Item Key the player's Characters own in bags and banks, each with its Recommendation. Built from each Character's latest Character Read, taking the bank from the latest Read that has one. Keyring, equipped gear and unclaimed mail are not Holdings.
 _Avoid_: inventory (that's only bags), stock
 
 **Character**:
-One of the player's in-game characters. Known Recipes, Holdings and gold belong to a Character; gold is pooled across Characters for sizing.
+One of the player's in-game characters, identified by realm and name. Known Recipes, Holdings and gold belong to a Character. Gold is pooled for sizing across the Characters on one realm and faction, since mail can't move it any further.
 _Avoid_: toon, alt, account
