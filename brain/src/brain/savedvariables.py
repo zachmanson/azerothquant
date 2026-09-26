@@ -18,6 +18,8 @@ class SavedVariablesError(Exception):
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _NUMBER = re.compile(r"0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+_DECIMAL_ESCAPE = re.compile(r"\d{1,3}")
+_ASSIGNMENT = re.compile(r"\s*=(?!=)")
 _SIMPLE_ESCAPES = {
     "n": b"\n",
     "t": b"\t",
@@ -110,8 +112,8 @@ class _Parser:
 
     def _is_keyed_field(self, name_match: re.Match[str]) -> bool:
         # `name = value` rather than a bare `true`/`nil` etc. used as a sequence entry.
-        rest = self.text[name_match.end() :].lstrip()
-        return rest.startswith("=") and not rest.startswith("==")
+        # Matched in place: slicing off the rest of the text would copy the whole file.
+        return _ASSIGNMENT.match(self.text, name_match.end()) is not None
 
     def _number(self) -> int | float:
         negative = self._peek() == "-"
@@ -133,12 +135,14 @@ class _Parser:
 
     def _string(self) -> str:
         quote = self.text[self.pos]
-        start_line = self._line()
+        # The line is only worked out on error: counting it up front for every string
+        # makes parsing quadratic in the file size.
+        start = self.pos
         self.pos += 1
         out = bytearray()
         while True:
             if self.pos >= len(self.text):
-                raise SavedVariablesError(f"line {start_line}: unterminated string")
+                raise SavedVariablesError(f"line {self._line(start)}: unterminated string")
             c = self.text[self.pos]
             if c == quote:
                 self.pos += 1
@@ -154,7 +158,7 @@ class _Parser:
                 out += _SIMPLE_ESCAPES[escape]
                 self.pos += 2
             elif escape.isdigit():
-                digits = re.match(r"\d{1,3}", self.text[self.pos + 1 :]).group()
+                digits = _DECIMAL_ESCAPE.match(self.text, self.pos + 1).group()
                 if int(digits) > 255:
                     raise self._error(f"escape \\{digits} is out of range")
                 out.append(int(digits))
@@ -164,7 +168,9 @@ class _Parser:
         try:
             return out.decode("utf-8")
         except UnicodeDecodeError:
-            raise SavedVariablesError(f"line {start_line}: string is not valid UTF-8") from None
+            raise SavedVariablesError(
+                f"line {self._line(start)}: string is not valid UTF-8"
+            ) from None
 
     # --- low-level helpers ---
 
@@ -200,8 +206,9 @@ class _Parser:
             else:
                 break
 
-    def _line(self) -> int:
-        return self.text.count("\n", 0, self.pos) + 1
+    def _line(self, pos: int | None = None) -> int:
+        # Scans the text up to `pos`, so only call it on the way to an error.
+        return self.text.count("\n", 0, self.pos if pos is None else pos) + 1
 
     def _error(self, message: str) -> SavedVariablesError:
         found = self.text[self.pos : self.pos + 20] or "end of file"

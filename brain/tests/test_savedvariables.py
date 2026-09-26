@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from brain.savedvariables import SavedVariablesError, parse_savedvariables
@@ -99,3 +101,25 @@ def test_rejects_anything_that_is_not_data():
 def test_rejects_an_unterminated_table():
     with pytest.raises(SavedVariablesError):
         parse_savedvariables("t = { 1, 2")
+
+
+def test_an_unterminated_string_reports_the_line_it_started_on():
+    with pytest.raises(SavedVariablesError, match="line 2: unterminated string"):
+        parse_savedvariables('t = {\n"abc')
+
+
+def test_parses_a_full_scan_in_linear_time():
+    # A real Scan is ~60k Listings (~7 MB). Parsing used to rescan the text before each
+    # string, which took minutes on a file that size.
+    listing = (
+        '\t\t\t\t{\n\t\t\t\t\t["quantity"] = 1,\n'
+        '\t\t\t\t\t["itemString"] = "item:20744::::::::20:1490",\n'
+        '\t\t\t\t\t["buyout"] = 600,\n\t\t\t\t\t["timeLeft"] = 2,\n\t\t\t\t},\n'
+    )
+    text = 'AzerothQuantDB = {\n\t["listings"] = {\n' + listing * 10_000 + "\t},\n}\n"
+
+    start = time.perf_counter()
+    db = parse_savedvariables(text)["AzerothQuantDB"]
+
+    assert len(db["listings"]) == 10_000
+    assert time.perf_counter() - start < 5
