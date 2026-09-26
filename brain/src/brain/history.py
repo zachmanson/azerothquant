@@ -1,6 +1,7 @@
 """The Brain's persistent history: Scans imported into SQLite as Listing lifetimes,
 Mailbox Reads as the Outcomes and Purchases in them, and Character Reads as each
-Character's gold and Holdings.
+Character's gold and Holdings. Scans and Character Reads also carry each item's Vendor
+Price, kept per Era as last seen.
 
 Each Listing is stored once, with the first and last Scan it was seen in (ADR-0002).
 A Listing whose last Scan isn't its Market's latest one has disappeared. Each drop in
@@ -135,6 +136,15 @@ CREATE TABLE IF NOT EXISTS character_item (
     bound INTEGER NOT NULL     -- 0 or 1; bound items can't go on the Auction House
 );
 CREATE INDEX IF NOT EXISTS character_item_by_read ON character_item (character_read_id);
+
+-- Vendor Price per itemID (every random suffix shares it), from Scans and Character Reads.
+CREATE TABLE IF NOT EXISTS vendor_price (
+    era TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    price INTEGER NOT NULL,    -- copper; 0 when a vendor won't buy it
+    seen_at INTEGER NOT NULL,  -- requestedAt or readAt of the Scan or Read it came from
+    PRIMARY KEY (era, item_id)
+);
 """
 
 
@@ -330,6 +340,9 @@ def import_scans(
             archive.write(era, raw)
         with conn:
             _import_scan(conn, scan, era, config, report)
+            _record_vendor_prices(
+                conn, era, raw, scan.requested_at, f"Scan at {scan.requested_at}", report
+            )
     return report
 
 
@@ -600,6 +613,14 @@ def import_character_reads(
             archive.write_character_read(era, raw)
         with conn:
             _import_character_read(conn, raw, era, report)
+            _record_vendor_prices(
+                conn,
+                era,
+                raw,
+                raw["readAt"],
+                f"Character Read at {raw['readAt']} for {raw['character']}",
+                report,
+            )
     return report
 
 
@@ -661,6 +682,48 @@ def _nameable_read(raw: object) -> bool:
         and isinstance(raw.get("readAt"), int)
         and not isinstance(raw.get("readAt"), bool)
     )
+
+
+def _record_vendor_prices(
+    conn: sqlite3.Connection, era: Era, raw: dict, seen_at: int, source: str, report: ImportReport
+) -> None:
+    prices, unreadable = _vendor_prices(raw)
+    if unreadable:
+        report.warn(f"{source}: skipped {unreadable} Vendor Prices the Brain can't read.")
+    conn.executemany(
+        # The newest one wins, whatever order Scans and Reads are imported in.
+        "INSERT INTO vendor_price (era, item_id, price, seen_at) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT (era, item_id) DO UPDATE SET price = excluded.price,"
+        " seen_at = excluded.seen_at WHERE excluded.seen_at >= vendor_price.seen_at",
+        [(era.value, item_id, price, seen_at) for item_id, price in prices.items()],
+    )
+
+
+def _vendor_prices(raw: dict) -> tuple[dict[int, int], int]:
+    """The Addon's itemID -> copper map, however it arrived, and how many entries in it
+    couldn't be read.
+
+    From SavedVariables the keys are ints, and an empty map reads as a list (a Lua table
+    with keys 1..n does). From the Archive's JSON the keys are strings.
+    """
+    # Scans and Reads from before #20 have none.
+    entries = raw.get("vendorPrices", {})
+    if isinstance(entries, list):
+        entries = dict(enumerate(entries, start=1))
+    if not isinstance(entries, dict):
+        return {}, 1
+    prices = {}
+    for item_id, price in entries.items():
+        if isinstance(item_id, str) and item_id.isdigit():
+            item_id = int(item_id)
+        if not _whole_copper(item_id) or not _whole_copper(price):
+            continue
+        prices[item_id] = price
+    return prices, len(entries) - len(prices)
+
+
+def _whole_copper(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 @dataclass(frozen=True)
@@ -847,6 +910,12 @@ def pooled_gold(conn: sqlite3.Connection, era: Era, realm: str, faction: str) ->
         (era.value, realm, faction),
     ).fetchone()
     return total
+
+
+def vendor_prices(conn: sqlite3.Connection, era: Era) -> dict[int, int]:
+    """Copper a vendor pays for one unit, by itemID, as last seen in the Era."""
+    rows = conn.execute("SELECT item_id, price FROM vendor_price WHERE era = ?", (era.value,))
+    return dict(rows)
 
 
 def _held_item(entry: object) -> tuple[str, int, bool]:

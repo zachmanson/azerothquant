@@ -161,6 +161,35 @@ describe("Scan.build", function()
     assert.is_nil(scan.listings[4].name)
   end)
 
+  it("records each distinct item's Vendor Price once, by itemID", function()
+    local lookups = {}
+    local function sellPrice(itemID)
+      lookups[#lookups + 1] = itemID
+      return ({ [2680] = 11, [9768] = 245 })[itemID]
+    end
+    local rows = { row(), row({ buyout = 300 }), row({ link = NATURE_PROT }), row() }
+
+    local scan = Scan.build(REQUEST, rows, "Kash", sellPrice)
+
+    -- Every random suffix shares its itemID's Vendor Price, so the key is the itemID alone.
+    assert.are.same({ [2680] = 11, [9768] = 245 }, scan.vendorPrices)
+    -- ~58k rows but ~4.7k distinct items per Scan: one lookup each.
+    table.sort(lookups)
+    assert.are.same({ 2680, 9768 }, lookups)
+    assert.are.equal(0, scan.vendorPricesMissing)
+  end)
+
+  it("keeps a Vendor Price of 0 and counts items whose data hasn't loaded", function()
+    local rows = { row(), row({ link = NATURE_PROT }) }
+    -- 0: the vendor won't buy it. nil: GetItemInfo has nothing for it yet.
+    local scan = Scan.build(REQUEST, rows, "Kash", function(itemID)
+      return itemID == 2680 and 0 or nil
+    end)
+
+    assert.are.same({ [2680] = 0 }, scan.vendorPrices)
+    assert.are.equal(1, scan.vendorPricesMissing)
+  end)
+
   it("stores no seller or bid fields", function()
     local rows = {
       row({ owner = "Kash", ownerFullName = "Kash Patel", bidAmount = 250, minBid = 200, minIncrement = 5 }),

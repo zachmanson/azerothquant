@@ -26,12 +26,37 @@ local function items(slots)
   return kept
 end
 
+-- Vendor Price by itemID for every filled slot, and how many distinct items had none
+-- (not loaded by the client when read). 0 means a vendor won't buy it and is kept.
+local function vendorPrices(slotLists)
+  local prices, unpriced = {}, {}
+  for _, slots in ipairs(slotLists) do
+    for _, s in ipairs(slots) do
+      local itemID = s.info and tonumber(s.info.hyperlink:match("|Hitem:(%d+)"))
+      if itemID and s.sellPrice then
+        prices[itemID] = s.sellPrice
+      elseif itemID then
+        unpriced[itemID] = true
+      end
+    end
+  end
+  local missing = 0
+  for itemID in pairs(unpriced) do
+    if prices[itemID] == nil then
+      missing = missing + 1
+    end
+  end
+  return prices, missing
+end
+
 -- who: { readAt, realm, character, faction, money }.
--- bagSlots: one per slot, { bag, slot, info }, where info is what
--- C_Container.GetContainerItemInfo returns (nil for an empty slot).
+-- bagSlots: one per slot, { bag, slot, info, sellPrice }, where info is what
+-- C_Container.GetContainerItemInfo returns (nil for an empty slot) and sellPrice is
+-- the item's Vendor Price, read along with it (nil if the client hadn't loaded it).
 -- bank: { readAt, slots } from the last time the bank was read while open this
 -- session, or nil if it wasn't opened. Stale bank contents are never carried forward.
 function CharacterRead.build(who, bagSlots, bank)
+  local prices, missing = vendorPrices({ bagSlots, bank and bank.slots or {} })
   return {
     readAt = who.readAt,
     realm = who.realm,
@@ -41,6 +66,8 @@ function CharacterRead.build(who, bagSlots, bank)
     bags = items(bagSlots),
     bankReadAt = bank and bank.readAt,
     bank = bank and items(bank.slots),
+    vendorPrices = prices,
+    vendorPricesMissing = missing,
   }
 end
 

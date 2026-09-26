@@ -85,16 +85,22 @@ local function tick()
   refreshButton()
 end
 
+-- The Vendor Price: GetItemInfo's 11th return. nil until the client has loaded the item.
+local function sellPrice(itemID)
+  return (select(11, GetItemInfo(itemID)))
+end
+
 local function finish(rows)
   cancel(noResponseTimer)
   pending.readAt = time()
-  local scan = Scan.build(pending, rows, UnitName("player"))
+  local scan = Scan.build(pending, rows, UnitName("player"), sellPrice)
   table.insert(db.scans, scan)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false
   refreshButton()
-  say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data. /reload to hand it to the Brain.",
-    scan.id, #scan.listings, scan.droppedRows))
+  say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data, %d items with no Vendor Price yet."
+    .. " /reload to hand it to the Brain.",
+    scan.id, #scan.listings, scan.droppedRows, scan.vendorPricesMissing))
 end
 
 local function readRows()

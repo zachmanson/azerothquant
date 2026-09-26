@@ -8,7 +8,7 @@
 -- real logout (not /reload) the client has already emptied them by PLAYER_LOGOUT, so
 -- reading them there records 0 gold and empty bags.
 --
--- Read-only (ADR-0003): only calls that read gold, containers and who the player is.
+-- Read-only (ADR-0003): only calls that read gold, containers, item info and who the player is.
 -- Nothing that moves, uses or deletes items.
 local _, ns = ...
 local CharacterRead = ns.CharacterRead
@@ -55,7 +55,11 @@ end
 local function readContainers(bags, into)
   for _, bag in ipairs(bags) do
     for slot = 1, numSlots(bag) or 0 do
-      into[#into + 1] = { bag = bag, slot = slot, info = itemInfo(bag, slot) }
+      local info = itemInfo(bag, slot)
+      -- The Vendor Price is read now, with the item, rather than at logout. GetItemInfo's
+      -- 11th return; nil until the client has loaded the item.
+      local sellPrice = info and select(11, GetItemInfo(info.hyperlink))
+      into[#into + 1] = { bag = bag, slot = slot, info = info, sellPrice = sellPrice }
     end
   end
   return into

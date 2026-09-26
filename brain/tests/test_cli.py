@@ -1,3 +1,4 @@
+import json
 import shutil
 import sqlite3
 from contextlib import closing
@@ -8,7 +9,16 @@ import pytest
 from brain.archive import Archive
 from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
 from brain.config import Config, Era, Install
-from brain.history import Holding, Market, holdings, listings, open_history, outcomes, pooled_gold
+from brain.history import (
+    Holding,
+    Market,
+    holdings,
+    listings,
+    open_history,
+    outcomes,
+    pooled_gold,
+    vendor_prices,
+)
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 
@@ -189,7 +199,9 @@ def test_import_archives_every_character_read_in_the_file_verbatim(tmp_path):
 
     assert results[0].report.character_reads_imported == 2
     archived = sorted(Archive(config.archive_dir).character_reads(), key=lambda r: r[1]["readAt"])
-    assert archived == [(Era.BETA, raw) for raw in saved["characterReads"]]
+    # As JSON holds it: the vendorPrices keys become strings, which is all that changes.
+    as_json = json.loads(json.dumps(saved["characterReads"]))
+    assert archived == [(Era.BETA, raw) for raw in as_json]
     # Kept apart from the Scans and Mailbox Reads.
     assert len(list(Archive(config.archive_dir).scans())) == 2
     assert len(list(Archive(config.archive_dir).mailbox_reads())) == 2
@@ -219,6 +231,23 @@ def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_pat
         # The fixture's Scans are from before #17: its own Listing has no name.
         assert [entry.item_name for entry in listings(conn, MARKET) if entry.own] == [None]
     assert not list(tmp_path.glob("*.rebuild*"))
+
+
+def test_vendor_prices_come_back_the_same_from_the_archive(tmp_path):
+    # The Archive is JSON, which turns the itemID keys into strings, and an empty Lua
+    # table reads as a list. Neither may change what the rebuilt history holds.
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    expected = {2589: 10, 2592: 25, 6948: 0, 9768: 245}
+    run_import(config, [file])
+    with closing(open_history(config.history_path)) as conn:
+        assert vendor_prices(conn, Era.BETA) == expected
+
+    run_rebuild(config)
+
+    with closing(open_history(config.history_path)) as conn:
+        assert vendor_prices(conn, Era.BETA) == expected
 
 
 def test_rebuild_replaces_a_history_that_has_drifted_from_the_archive(tmp_path):

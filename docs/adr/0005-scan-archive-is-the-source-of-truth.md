@@ -23,3 +23,7 @@ The Addon now also records Mailbox Reads: the headers and invoices of the Auctio
 ## Amendment: the Archive also holds Character Reads (#16)
 
 The Addon now also records a Character Read on every logout and `/reload`: the Character's gold and faction, its bags, and its bank if it was opened that session. These go in the Archive under the same rules, at `<era>/character/<realm>/<character>/<readAt>.json.gz`, and every Read is kept rather than only the latest. "The latest Read per Character" (what Holdings and pooled gold use) is then just a query, and the history of what was in the bags is kept for later. That history is the only record of items that leave without mail (vendored, disenchanted, crafted away), which future Lot work will need. Items are stored as raw links, so the Brain derives Item Keys from them the same way it does for Scans and mail, and a rebuild can re-derive them.
+
+## Amendment: Vendor Prices and JSON keys (#20)
+
+Scans and Character Reads now carry `vendorPrices`, a map from itemID to copper. It is the first map in the Addon's data keyed by numbers, and JSON keys are always strings, so the archived copy reads back as `{"2589": 10}` where SavedVariables had `[2589] = 10`. Nothing is lost, and the Brain reads both shapes (and an empty map, which SavedVariables gives as a list), so an import and a rebuild give the same history. "Verbatim" means as close as JSON allows, not byte-for-byte.

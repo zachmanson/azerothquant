@@ -31,6 +31,12 @@ AzerothQuantDB = {
 					["itemString"] = "item:2592::::::::20:1490",
 				}, -- [3]
 			},
+			["vendorPrices"] = {
+				[2589] = 10,
+				[9768] = 245,
+				[2592] = 25,
+			},
+			["vendorPricesMissing"] = 0,
 		}, -- [1]
 		{
 			["droppedRows"] = 0,
@@ -47,6 +53,9 @@ AzerothQuantDB = {
 					["itemString"] = "item:2589::::::::20:1490",
 				}, -- [1]
 			},
+			["vendorPrices"] = {
+			},
+			["vendorPricesMissing"] = 1,
 		}, -- [2]
 	},
 	["mailboxReads"] = {
@@ -136,6 +145,11 @@ AzerothQuantDB = {
 					["isBound"] = false,
 				}, -- [1]
 			},
+			["vendorPrices"] = {
+				[2589] = 10,
+				[6948] = 0,
+			},
+			["vendorPricesMissing"] = 0,
 		}, -- [1]
 		{
 			["readAt"] = 1790002000,

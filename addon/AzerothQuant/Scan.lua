@@ -48,13 +48,27 @@ end
 -- rows: one per replicate index, { link, count, buyout, timeLeft, owner }.
 -- Own rows also get the item name from the link.
 -- playerName: UnitName("player"), to recognize the player's own Listings.
+-- sellPrice(itemID): the item's Vendor Price in copper (GetItemInfo's sellPrice), or nil
+-- when the client hasn't loaded the item yet.
 -- Returns the Scan as stored in SavedVariables. buyout stays whole-auction; the Brain
 -- divides by quantity for the unit buyout.
-function Scan.build(request, rows, playerName)
+function Scan.build(request, rows, playerName, sellPrice)
   local listings = {}
   local droppedRows = 0
+  -- Vendor Price belongs to the itemID, so every suffix of an item shares one entry.
+  -- 0 means a vendor won't buy it; the Brain decides what that means.
+  local vendorPrices, looked = {}, {}
+  local vendorPricesMissing = 0
   for _, r in ipairs(rows) do
     local item = itemString(r.link)
+    local itemID = item and tonumber(item:match("^item:(%d+)"))
+    if itemID and sellPrice and not looked[itemID] then
+      looked[itemID] = true
+      vendorPrices[itemID] = sellPrice(itemID)
+      if vendorPrices[itemID] == nil then
+        vendorPricesMissing = vendorPricesMissing + 1
+      end
+    end
     if not item then
       -- Item data never loaded. hasAllInfo = false alone is fine as long as the link is there
       -- (the link carries the itemID too).
@@ -85,6 +99,8 @@ function Scan.build(request, rows, playerName)
     faction = request.faction,
     droppedRows = droppedRows,
     listings = listings,
+    vendorPrices = vendorPrices,
+    vendorPricesMissing = vendorPricesMissing,
   }
 end
 
