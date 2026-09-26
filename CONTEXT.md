@@ -47,8 +47,12 @@ A Listing that was in one Scan and missing from the next. It was sold, cancelled
 **Partial Sale**:
 A drop in a Listing's quantity between two Scans. It is always a sale, since cancelling and expiring remove the whole Listing.
 
+**Repost**:
+A Disappearance that could not have expired, explained by a new Listing in the same Observation Window with the same Item Key, quantity and own flag, at the same or a lower unit buyout: most likely a seller cancelling to undercut or relist. Whenever such a pairing exists it is taken, so a Repost is never counted as a sale. The two Listings stay separate.
+_Avoid_: relist, undercut (those are why a Repost happens, not the event)
+
 **Probable Sale**:
-A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows) and it was priced near or below Fair Value. Cancellations still can't be told apart.
+A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below Fair Value. Cancellations without a Repost still can't be told apart.
 
 **Observation Window**:
 The time between two consecutive Scans of a Market, when it is short enough that almost no sale goes unseen. Only Observation Windows count toward Sell Rate; longer gaps still track Listings but add nothing to it.
