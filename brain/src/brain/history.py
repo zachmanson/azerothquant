@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS listing (
     first_seen_scan_id INTEGER NOT NULL REFERENCES scan (id),
     last_seen_scan_id INTEGER NOT NULL REFERENCES scan (id),
     quantity INTEGER NOT NULL,     -- as of the last-seen Scan
-    time_left INTEGER NOT NULL     -- bucket 1-4, as of the last-seen Scan
+    time_left INTEGER NOT NULL,    -- bucket 1-4, as of the last-seen Scan
+    item_name TEXT                 -- own Listings only, and NULL in Scans from before #17
 );
 CREATE INDEX IF NOT EXISTS listing_by_last_seen ON listing (last_seen_scan_id);
 
@@ -127,6 +128,7 @@ class Listing:
     time_left: int
     first_seen: int  # requested_at of the first Scan it was in
     last_seen: int  # requested_at of the last Scan it was in
+    item_name: str | None = None  # own Listings only, once the Addon recorded it (#17)
 
 
 @dataclass(frozen=True, order=True)
@@ -205,7 +207,20 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    _add_listing_item_name(conn)
     return conn
+
+
+def _add_listing_item_name(conn: sqlite3.Connection) -> None:
+    """Add listing.item_name (#17) to a history made before it existed.
+
+    CREATE TABLE IF NOT EXISTS leaves an existing table as it was. `brain rebuild` would
+    fix that too, but a stale history shouldn't break `brain watch` in the meantime.
+    """
+    columns = {name for _, name, *_ in conn.execute("PRAGMA table_info(listing)")}
+    if "item_name" not in columns:
+        with conn:
+            conn.execute("ALTER TABLE listing ADD COLUMN item_name TEXT")
 
 
 def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportReport:
@@ -329,8 +344,10 @@ def _import_scan(
     result = match(previous, scan.rows, gap, config.time_left_max_seconds)
 
     conn.executemany(
-        "UPDATE listing SET last_seen_scan_id = ?, quantity = ?, time_left = ? WHERE id = ?",
-        [(scan_id, c.quantity, c.time_left, p.id) for p, c in result.matched],
+        # A Listing first seen before the Addon recorded names picks one up when it can.
+        "UPDATE listing SET last_seen_scan_id = ?, quantity = ?, time_left = ?,"
+        " item_name = COALESCE(item_name, ?) WHERE id = ?",
+        [(scan_id, c.quantity, c.time_left, c.item_name, p.id) for p, c in result.matched],
     )
     conn.executemany(
         "INSERT INTO partial_sale (listing_id, scan_id, units_sold) VALUES (?, ?, ?)",
@@ -342,9 +359,19 @@ def _import_scan(
     )
     conn.executemany(
         "INSERT INTO listing (market_id, item_key, unit_buyout, own, first_seen_scan_id,"
-        " last_seen_scan_id, quantity, time_left) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        " last_seen_scan_id, quantity, time_left, item_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            (market_id, c.item_key, c.unit_buyout, c.own, scan_id, scan_id, c.quantity, c.time_left)
+            (
+                market_id,
+                c.item_key,
+                c.unit_buyout,
+                c.own,
+                scan_id,
+                scan_id,
+                c.quantity,
+                c.time_left,
+                c.item_name,
+            )
             for c in result.new
         ],
     )
@@ -558,7 +585,7 @@ def listings(conn: sqlite3.Connection, market: Market) -> list[Listing]:
     """Every Listing ever seen in the Market, oldest first."""
     rows = conn.execute(
         "SELECT l.item_key, l.unit_buyout, l.own, l.quantity, l.time_left,"
-        " first.requested_at, last.requested_at"
+        " first.requested_at, last.requested_at, l.item_name"
         " FROM listing l"
         " JOIN market m ON m.id = l.market_id"
         " JOIN scan first ON first.id = l.first_seen_scan_id"
@@ -566,7 +593,7 @@ def listings(conn: sqlite3.Connection, market: Market) -> list[Listing]:
         f" WHERE {_MARKET_FILTER} ORDER BY l.id",
         _market_params(market),
     )
-    return [Listing(k, u, bool(o), q, t, f, la) for k, u, o, q, t, f, la in rows]
+    return [Listing(k, u, bool(o), q, t, f, la, n) for k, u, o, q, t, f, la, n in rows]
 
 
 def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]:

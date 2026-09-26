@@ -15,6 +15,12 @@ local function itemString(link)
   return s and (s:gsub(":+$", ""))
 end
 
+-- "...|h[Scouting Belt of Nature Protection]|h|r" -> "Scouting Belt of Nature Protection".
+-- The suffix is part of the name, as the sale mail spells it.
+local function itemName(link)
+  return link:match("|h%[(.-)%]|h")
+end
+
 -- NPC IDs of the neutral (goblin) auctioneers, from Wowhead Classic. Still to be
 -- confirmed on the Forever client (issue #3); add any missing ones here.
 local NEUTRAL_AUCTIONEERS = {
@@ -40,6 +46,7 @@ end
 -- Those two are diagnostic only (#15): they tell a throttled or slow Scan apart afterwards,
 -- but the Listings still stand as of requestedAt.
 -- rows: one per replicate index, { link, count, buyout, timeLeft, owner }.
+-- Own rows also get the item name from the link.
 -- playerName: UnitName("player"), to recognize the player's own Listings.
 -- Returns the Scan as stored in SavedVariables. buyout stays whole-auction; the Brain
 -- divides by quantity for the unit buyout.
@@ -53,6 +60,7 @@ function Scan.build(request, rows, playerName)
       -- (the link carries the itemID too).
       droppedRows = droppedRows + 1
     elseif r.buyout and r.buyout > 0 then
+      local own = r.owner ~= nil and r.owner == playerName
       listings[#listings + 1] = {
         -- Not the Item Key yet: the Brain derives that (itemID + bonus IDs) from this string.
         itemString = item,
@@ -60,7 +68,10 @@ function Scan.build(request, rows, playerName)
         buyout = r.buyout,
         timeLeft = r.timeLeft,
         -- The full Scan hides every seller except the player, so this is the only one kept.
-        own = (r.owner ~= nil and r.owner == playerName) or nil,
+        own = own or nil,
+        -- Sale mail names the item but carries no Item Key, so an Outcome can only be
+        -- matched to its own Listing by name (#17). Other rows skip it to keep the Scan small.
+        name = own and itemName(r.link) or nil,
       }
     end
   end

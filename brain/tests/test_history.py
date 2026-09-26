@@ -1,4 +1,6 @@
 import dataclasses
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -46,14 +48,18 @@ def scan(at, *rows, faction="Alliance", realm="Classic Beta PvP"):
     }
 
 
-def row(item=LINEN, quantity=1, unit=100, time_left=4, own=False):
+def row(item=LINEN, quantity=1, unit=100, time_left=4, own=False, name=None):
     r = {"itemString": item, "quantity": quantity, "buyout": quantity * unit, "timeLeft": time_left}
     if own:
         r["own"] = True
+    if name is not None:
+        r["name"] = name
     return r
 
 
-def listing(first_seen, last_seen, quantity=1, unit=100, time_left=4, own=False, key=LINEN_KEY):
+def listing(
+    first_seen, last_seen, quantity=1, unit=100, time_left=4, own=False, key=LINEN_KEY, name=None
+):
     return Listing(
         item_key=key,
         unit_buyout=unit,
@@ -62,6 +68,7 @@ def listing(first_seen, last_seen, quantity=1, unit=100, time_left=4, own=False,
         time_left=time_left,
         first_seen=first_seen,
         last_seen=last_seen,
+        item_name=name,
     )
 
 
@@ -241,6 +248,60 @@ def test_different_prices_or_item_keys_never_match(db):
     run(db, scan(T0, row(unit=100)), scan(t1, row(unit=99), row(item="item:2592", unit=100)))
 
     assert [entry.last_seen for entry in listings(db, MARKET)] == [T0, t1, t1]
+
+
+# --- item names (#17) ---
+
+
+def test_own_listings_keep_the_item_name_and_others_dont(db):
+    run(
+        db,
+        scan(
+            T0,
+            row(own=True, name="Linen Cloth"),
+            # A name on someone else's row isn't an error; it's just not kept.
+            row(unit=90, name="Linen Cloth"),
+            row(unit=80),
+        ),
+    )
+
+    assert sorted(listings(db, MARKET)) == [
+        listing(T0, T0, unit=80),
+        listing(T0, T0, unit=90),
+        listing(T0, T0, own=True, name="Linen Cloth"),
+    ]
+
+
+def test_scans_from_before_names_import_with_no_name(db):
+    # Archive files from before #17 have no name on any row, own or not.
+    run(db, scan(T0, row(own=True)))
+
+    assert listings(db, MARKET) == [listing(T0, T0, own=True)]
+
+
+def test_an_own_listing_first_seen_without_a_name_gets_it_when_seen_with_one(db):
+    # A Listing still up when the Addon starts recording names can then be matched too.
+    t1 = T0 + 20 * MINUTE
+    run(db, scan(T0, row(own=True)), scan(t1, row(own=True, name="Linen Cloth")))
+
+    assert listings(db, MARKET) == [listing(T0, t1, own=True, name="Linen Cloth")]
+
+
+def test_a_history_from_before_names_gets_the_column(tmp_path):
+    path = tmp_path / "history.sqlite"
+    with closing(sqlite3.connect(path)) as old:
+        # The listing table as it was before #17. Frozen on purpose: don't sync it with _SCHEMA.
+        old.executescript(
+            "CREATE TABLE listing (id INTEGER PRIMARY KEY, market_id INTEGER NOT NULL,"
+            " item_key TEXT NOT NULL, unit_buyout INTEGER NOT NULL, own INTEGER NOT NULL,"
+            " first_seen_scan_id INTEGER NOT NULL, last_seen_scan_id INTEGER NOT NULL,"
+            " quantity INTEGER NOT NULL, time_left INTEGER NOT NULL);"
+        )
+
+    with closing(open_history(path)) as conn:
+        run(conn, scan(T0, row(own=True, name="Linen Cloth")))
+
+        assert listings(conn, MARKET) == [listing(T0, T0, own=True, name="Linen Cloth")]
 
 
 # --- flagged rows ---

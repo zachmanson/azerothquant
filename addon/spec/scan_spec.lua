@@ -142,6 +142,25 @@ describe("Scan.build", function()
     assert.is_nil(scan.listings[3].own)
   end)
 
+  it("records the item name on the player's own Listings only", function()
+    -- Sold mail names the item but carries no Item Key (#17), so own rows need the name.
+    local rows = {
+      row({ owner = "Kash" }),
+      row({ owner = "Kash", link = NATURE_PROT }),
+      row(),
+      row({ owner = "Someone" }),
+    }
+
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal("Spiced Wolf Meat", scan.listings[1].name)
+    -- A suffix item keeps its suffix, as the sale mail spells it.
+    assert.are.equal("Scouting Belt of Nature Protection", scan.listings[2].name)
+    -- Left out on everyone else's rows, so the Scan barely grows.
+    assert.is_nil(scan.listings[3].name)
+    assert.is_nil(scan.listings[4].name)
+  end)
+
   it("stores no seller or bid fields", function()
     local rows = {
       row({ owner = "Kash", ownerFullName = "Kash Patel", bidAmount = 250, minBid = 200, minIncrement = 5 }),
@@ -154,6 +173,6 @@ describe("Scan.build", function()
       keys[#keys + 1] = k
     end
     table.sort(keys)
-    assert.are.same({ "buyout", "itemString", "own", "quantity", "timeLeft" }, keys)
+    assert.are.same({ "buyout", "itemString", "name", "own", "quantity", "timeLeft" }, keys)
   end)
 end)

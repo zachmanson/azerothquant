@@ -190,6 +190,8 @@ def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_pat
     assert dump(config.history_path) == imported
     with closing(open_history(config.history_path)) as conn:
         assert outcomes(conn, MARKET)
+        # The fixture's Scans are from before #17: its own Listing has no name.
+        assert [entry.item_name for entry in listings(conn, MARKET) if entry.own] == [None]
     assert not list(tmp_path.glob("*.rebuild*"))
 
 

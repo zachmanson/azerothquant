@@ -97,6 +97,9 @@ class ScanRow:
     own: bool
     quantity: int
     time_left: int
+    # The item name, on own rows only: sale mail names the item but has no Item Key (#17).
+    # None for Scans from before the Addon recorded it.
+    item_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,13 +164,17 @@ def _row(raw: object) -> ScanRow | None:
     unit = unit_buyout(buyout, quantity)
     if unit is None:
         return None
+    # The Addon writes own = true or leaves it out.
+    own = raw.get("own") is True
+    name = raw.get("name")
     return ScanRow(
         item_key=str(item_key),
         unit_buyout=unit,
-        # The Addon writes own = true or leaves it out.
-        own=raw.get("own") is True,
+        own=own,
         quantity=quantity,
         time_left=time_left,
+        # The Addon only names own rows; a name anywhere else is ignored, not an error.
+        item_name=name if own and isinstance(name, str) else None,
     )
 
 
