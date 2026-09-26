@@ -8,7 +8,7 @@ import pytest
 from brain.archive import Archive
 from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
 from brain.config import Config, Era, Install
-from brain.history import Market, listings, open_history
+from brain.history import Market, listings, open_history, outcomes
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 
@@ -186,7 +186,10 @@ def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_pat
     report = run_rebuild(config)
 
     assert report.scans_imported == 2
+    assert report.outcomes_found > 0
     assert dump(config.history_path) == imported
+    with closing(open_history(config.history_path)) as conn:
+        assert outcomes(conn, MARKET)
     assert not list(tmp_path.glob("*.rebuild*"))
 
 

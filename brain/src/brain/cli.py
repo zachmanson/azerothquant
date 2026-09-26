@@ -165,7 +165,8 @@ def _log_results(results: list[FileResult]) -> None:
         else:
             log.info(
                 "Imported %s: %d new Scans, %d already imported, %d rejected;"
-                " %d new Mailbox Reads, %d already imported, %d unreadable",
+                " %d new Mailbox Reads, %d already imported, %d unreadable;"
+                " %d new Outcomes, %d new Purchases",
                 r.path,
                 r.report.scans_imported,
                 r.report.scans_already_imported,
@@ -173,6 +174,8 @@ def _log_results(results: list[FileResult]) -> None:
                 r.report.mailbox_reads_imported,
                 r.report.mailbox_reads_already_imported,
                 r.report.mailbox_reads_unreadable,
+                r.report.outcomes_found,
+                r.report.purchases_found,
             )
 
 
@@ -193,12 +196,15 @@ def _rebuild(config: Config) -> int:
         log.error("Couldn't rebuild the history: %s", e)
         return 1
     log.info(
-        "Rebuilt %s from %s: %d Scans, %d rejected; %d Mailbox Reads",
+        "Rebuilt %s from %s: %d Scans, %d rejected; %d Mailbox Reads with %d Outcomes"
+        " and %d Purchases",
         config.history_path,
         config.archive_dir,
         report.scans_imported,
         report.scans_out_of_order + report.scans_unreadable,
         report.mailbox_reads_imported,
+        report.outcomes_found,
+        report.purchases_found,
     )
     return 0
 

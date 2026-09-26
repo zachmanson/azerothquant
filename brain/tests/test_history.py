@@ -9,18 +9,24 @@ from brain.history import (
     ImportFileError,
     Listing,
     Market,
+    Outcome,
     PartialSale,
+    Purchase,
     import_file,
     import_mailbox_reads,
     import_scans,
     listings,
     open_history,
+    outcomes,
     partial_sales,
+    purchases,
 )
+from brain.mailbox import MailKind
 
 T0 = 1_790_000_000
 MINUTE = 60
 HOUR = 60 * MINUTE
+DAY = 24 * HOUR
 
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
@@ -456,3 +462,185 @@ def test_a_mailbox_read_that_cant_be_named_is_skipped_and_not_archived(db, tmp_p
     assert report.mailbox_reads_unreadable == 3
     assert len(report.warnings) == 3
     assert list(Archive(config.archive_dir).mailbox_reads()) == []
+
+
+# --- Outcomes and Purchases from Mailbox Reads (#15) ---
+
+
+def sold_mail(name="Tigerseye", count=1, price=110, sender="Alliance Auction House", days=30):
+    return {
+        "index": 1,
+        "sender": sender,
+        "subject": f"Auction successful: {name}" + (f" ({count})" if count > 1 else ""),
+        "money": price - price // 20 + 100,
+        "daysLeft": days,
+        "invoice": {"invoiceType": "seller", "itemName": name, "bid": price, "count": count},
+    }
+
+
+def won_mail(price=1, days=29.9):
+    return {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": "Auction won: Heavy Shot",
+        "money": 0,
+        "daysLeft": days,
+        "firstItemQuantity": 1,
+        "firstItemLink": "|cnIQ1:|Hitem:2519::::::::20:1490:::::::::|h[Heavy Shot]|h|r",
+        "invoice": {"invoiceType": "buyer", "itemName": "Heavy Shot", "bid": price, "count": 1},
+    }
+
+
+def read_with(at, *mails, character="Kash-Patel", shown=None, total=None):
+    shown = len(mails) if shown is None else shown
+    return mailbox_read(
+        at,
+        character=character,
+        mails=list(mails),
+        shownCount=shown,
+        totalCount=shown if total is None else total,
+    )
+
+
+def read_mail(db, *reads):
+    return import_mailbox_reads(db, list(reads), Era.BETA, CONFIG)
+
+
+def test_mail_becomes_outcomes_and_purchases_in_the_senders_market(db):
+    read_mail(db, read_with(T0, sold_mail(count=8, price=2304), won_mail(days=29.5)))
+
+    assert outcomes(db, MARKET) == [
+        Outcome(
+            character="Kash-Patel",
+            kind=MailKind.SOLD,
+            item_name="Tigerseye",
+            item_key=None,
+            count=8,
+            price=2304,
+            money=2304 - 115 + 100,
+            arrived_at=None,
+            first_seen=T0,
+        )
+    ]
+    assert purchases(db, MARKET) == [
+        Purchase(
+            character="Kash-Patel",
+            item_name="Heavy Shot",
+            item_key="2519",
+            count=1,
+            price=1,
+            arrived_at=T0 - DAY // 2,
+            first_seen=T0,
+        )
+    ]
+    horde = dataclasses.replace(MARKET, faction="Horde")
+    assert outcomes(db, horde) == [] and purchases(db, horde) == []
+
+
+def test_mail_still_there_in_the_next_read_isnt_counted_again(db):
+    # Sold mail stayed at exactly 30 days in the spike, so this can't lean on arrival times.
+    read_mail(db, read_with(T0, sold_mail()), read_with(T0 + HOUR, sold_mail()))
+
+    assert len(outcomes(db, MARKET)) == 1
+
+
+def test_a_second_identical_mail_is_a_second_outcome(db):
+    read_mail(db, read_with(T0, sold_mail()), read_with(T0 + HOUR, sold_mail(), sold_mail()))
+
+    assert len(outcomes(db, MARKET)) == 2
+
+
+def test_mail_taken_and_then_sent_again_is_new(db):
+    # Tigerseye sells, is taken, and a second one sells before the next visit.
+    read_mail(
+        db,
+        read_with(T0, sold_mail()),
+        read_with(T0 + HOUR),
+        read_with(T0 + 2 * HOUR, sold_mail()),
+    )
+
+    assert len(outcomes(db, MARKET)) == 2
+
+
+def test_an_identical_mail_that_arrived_later_is_new_even_without_an_empty_read_between(db):
+    # Won at T0 - 1 day, taken; another won at T0 + 1 hour. Their arrivals give them away.
+    read_mail(
+        db,
+        read_with(T0, won_mail(days=29)),
+        read_with(T0 + 2 * HOUR, won_mail(days=30 - 1 / 24)),
+    )
+
+    assert [p.arrived_at for p in purchases(db, MARKET)] == [T0 - DAY, T0 + HOUR]
+
+
+def test_mail_hidden_by_a_full_inbox_isnt_counted_again_when_it_shows(db):
+    # Only 50 mails show; a mail left out of an incomplete read is still in the inbox.
+    read_mail(
+        db,
+        read_with(T0, sold_mail()),
+        read_with(T0 + HOUR, shown=0, total=60),
+        read_with(T0 + 2 * HOUR, sold_mail()),
+    )
+
+    assert len(outcomes(db, MARKET)) == 1
+
+
+def test_each_characters_inbox_is_separate(db):
+    read_mail(db, read_with(T0, sold_mail()), read_with(T0 + HOUR, sold_mail(), character="Alt"))
+
+    assert [o.character for o in outcomes(db, MARKET)] == ["Kash-Patel", "Alt"]
+
+
+def test_reads_are_interpreted_oldest_first_whatever_their_order(db):
+    read_mail(db, read_with(T0 + HOUR, sold_mail()), read_with(T0, sold_mail()))
+
+    assert [o.first_seen for o in outcomes(db, MARKET)] == [T0]
+
+
+def test_a_read_older_than_one_already_interpreted_waits_for_a_rebuild(db):
+    read_mail(db, read_with(T0 + HOUR))
+
+    report = read_mail(db, read_with(T0, sold_mail()))
+
+    assert report.mailbox_reads_imported == 1
+    assert report.mailbox_reads_out_of_order == 1
+    assert "brain rebuild" in report.warnings[0]
+    assert outcomes(db, MARKET) == []
+
+
+def test_reimporting_a_read_doesnt_interpret_it_again(db):
+    read_mail(db, read_with(T0, sold_mail()))
+    read_mail(db, read_with(T0, sold_mail(), sold_mail()))
+
+    assert len(outcomes(db, MARKET)) == 1
+
+
+def test_mail_from_an_unknown_sender_is_flagged_and_left_out_of_every_market(db):
+    report = read_mail(db, read_with(T0, sold_mail(sender="Blackwater Auction House")))
+
+    assert report.mails_unassigned == 1
+    assert "Blackwater Auction House" in report.warnings[0]
+    for faction in ("Alliance", "Horde", "Neutral"):
+        assert outcomes(db, dataclasses.replace(MARKET, faction=faction)) == []
+
+
+def test_unassigned_mail_is_still_matched_across_reads(db):
+    unknown = sold_mail(sender="Blackwater Auction House")
+
+    report = read_mail(db, read_with(T0, unknown), read_with(T0 + HOUR, unknown))
+
+    assert report.mails_unassigned == 1
+
+
+def test_mail_the_brain_cant_read_is_counted_and_the_rest_imported(db):
+    report = read_mail(db, read_with(T0, sold_mail(), {"sender": "Alliance Auction House"}))
+
+    assert report.mails_unreadable == 1
+    assert len(report.warnings) == 1
+    assert len(outcomes(db, MARKET)) == 1
+
+
+def test_counts_new_outcomes_and_purchases(db):
+    report = read_mail(db, read_with(T0, sold_mail(), won_mail()), read_with(T0 + 1, sold_mail()))
+
+    assert (report.outcomes_found, report.purchases_found) == (1, 1)

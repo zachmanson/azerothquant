@@ -1,9 +1,12 @@
 """The Brain's persistent history: Scans imported into SQLite as Listing lifetimes,
-plus a record of every imported Mailbox Read.
+and Mailbox Reads as the Outcomes and Purchases in them.
 
 Each Listing is stored once, with the first and last Scan it was seen in (ADR-0002).
 A Listing whose last Scan isn't its Market's latest one has disappeared. Each drop in
 a Listing's quantity is stored as a Partial Sale.
+
+Each Auction House mail is stored once too, however many Mailbox Reads it shows up in:
+mail stays in the inbox until taken, so each Read is matched against the one before.
 """
 
 import logging
@@ -14,6 +17,17 @@ from pathlib import Path
 
 from brain.archive import Archive
 from brain.config import Config, Era
+from brain.mailbox import (
+    OUTCOME_KINDS,
+    AuctionMail,
+    LiveMail,
+    MailFormatError,
+    MailKind,
+    arrived_at,
+    faction_of,
+    match_mails,
+    parse_mail,
+)
 from brain.matching import match
 from brain.savedvariables import parse_savedvariables
 from brain.scan import Scan, ScanFormatError
@@ -71,6 +85,29 @@ CREATE TABLE IF NOT EXISTS mailbox_read (
     mails INTEGER NOT NULL,    -- Auction House mails in it
     UNIQUE (era, realm, character, read_at)
 );
+
+-- One row per Auction House mail, however many Mailbox Reads it was in. Kinds sold,
+-- cancelled and expired are Outcomes; won is a Purchase.
+CREATE TABLE IF NOT EXISTS auction_mail (
+    id INTEGER PRIMARY KEY,
+    era TEXT NOT NULL,
+    realm TEXT NOT NULL,
+    character TEXT NOT NULL,       -- whose inbox it was in
+    market_id INTEGER REFERENCES market (id),  -- NULL when the sender isn't known
+    kind TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    item_key TEXT,                 -- NULL for sale mail, which has no attachment
+    count INTEGER NOT NULL,
+    price INTEGER,                 -- copper for the stack; NULL for cancelled and expired
+    money INTEGER NOT NULL,        -- copper attached
+    arrived_at INTEGER,            -- Unix time; NULL until daysLeft starts counting down
+    first_read_at INTEGER NOT NULL,
+    last_read_at INTEGER NOT NULL,
+    live INTEGER NOT NULL          -- 1 while it may still be in the inbox
+);
+CREATE INDEX IF NOT EXISTS auction_mail_live ON auction_mail (era, realm, character, live);
 """
 
 
@@ -101,6 +138,34 @@ class PartialSale:
     units_sold: int
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """What happened to one stack the player posted (CONTEXT.md: Outcome)."""
+
+    character: str
+    kind: MailKind  # sold, cancelled or expired
+    item_name: str
+    item_key: str | None  # None for Sold: the sale mail names the item but doesn't attach it
+    count: int
+    price: int | None  # gross copper for the stack when Sold
+    money: int  # copper paid out: for Sold, after the cut and with the deposit back
+    arrived_at: int | None
+    first_seen: int  # read_at of the first Mailbox Read it was in
+
+
+@dataclass(frozen=True)
+class Purchase:
+    """One stack the player bought on the Auction House (CONTEXT.md: Purchase)."""
+
+    character: str
+    item_name: str
+    item_key: str
+    count: int
+    price: int  # copper for the stack
+    arrived_at: int | None
+    first_seen: int
+
+
 @dataclass
 class ImportReport:
     scans_imported: int = 0
@@ -114,6 +179,15 @@ class ImportReport:
     mailbox_reads_already_imported: int = 0
     # Missing its realm, character or readAt, so it can't be named.
     mailbox_reads_unreadable: int = 0
+    # Older than a Read already interpreted for its Character: archived and recorded, but
+    # its mail is only interpreted by `brain rebuild`.
+    mailbox_reads_out_of_order: int = 0
+    outcomes_found: int = 0
+    purchases_found: int = 0
+    # New mail whose sender isn't a known Auction House, so it has no Market.
+    mails_unassigned: int = 0
+    # Mail the Brain can't read, say an unrecognized subject; left in the Archive.
+    mails_unreadable: int = 0
     unreadable_rows: int = 0
     warnings: list[str] = field(default_factory=list)
 
@@ -283,39 +357,150 @@ def import_mailbox_reads(
     config: Config,
     report: ImportReport | None = None,
 ) -> ImportReport:
-    """Import the Addon's Mailbox Reads (entries of AzerothQuantDB.mailboxReads).
+    """Import the Addon's Mailbox Reads (entries of AzerothQuantDB.mailboxReads), oldest
+    first, turning their mail into Outcomes and Purchases.
 
-    For now importing only archives each Read and records that it was imported; turning
-    its mail into Outcomes and Purchases comes later and will rebuild from the Archive.
-    As with Scans, a Read whose archive write fails isn't recorded, so the Addon keeps it.
+    Importing a Read that is already there does nothing. A Read older than one already
+    imported for its Character is recorded but not interpreted, since each Read is
+    matched against the one before it; `brain rebuild` puts it in its place. As with
+    Scans, a Read whose archive write fails isn't recorded, so the Addon keeps it.
     """
     report = report if report is not None else ImportReport()
     archive = Archive(config.archive_dir) if config.archive_dir is not None else None
+    reads = []
     for raw in raw_reads:
         if not _nameable_mailbox_read(raw):
             report.mailbox_reads_unreadable += 1
             report.warn(f"Skipped a Mailbox Read the Brain can't place: {raw!r:.200}")
             continue
+        reads.append(raw)
+
+    for raw in sorted(reads, key=lambda r: r["readAt"]):
         if archive is not None:
             archive.write_mailbox_read(era, raw)
-        mails = raw.get("mails")
         with conn:
-            inserted = conn.execute(
-                "INSERT OR IGNORE INTO mailbox_read (era, realm, character, read_at, mails)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (
-                    era.value,
-                    raw["realm"],
-                    raw["character"],
-                    raw["readAt"],
-                    len(mails) if isinstance(mails, list) else 0,
-                ),
-            ).rowcount
-        if inserted:
-            report.mailbox_reads_imported += 1
-        else:
-            report.mailbox_reads_already_imported += 1
+            _import_mailbox_read(conn, raw, era, report)
     return report
+
+
+def _import_mailbox_read(
+    conn: sqlite3.Connection, raw: dict, era: Era, report: ImportReport
+) -> None:
+    owner = (era.value, raw["realm"], raw["character"])
+    read_at = raw["readAt"]
+    mails = raw.get("mails")
+    mails = mails if isinstance(mails, list) else []
+    latest = conn.execute(
+        "SELECT MAX(read_at) FROM mailbox_read WHERE era = ? AND realm = ? AND character = ?",
+        owner,
+    ).fetchone()[0]
+    inserted = conn.execute(
+        "INSERT OR IGNORE INTO mailbox_read (era, realm, character, read_at, mails)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (*owner, read_at, len(mails)),
+    ).rowcount
+    if not inserted:
+        report.mailbox_reads_already_imported += 1
+        return
+    report.mailbox_reads_imported += 1
+    if latest is not None and read_at < latest:
+        report.mailbox_reads_out_of_order += 1
+        report.warn(
+            f"The Mailbox Read at {read_at} for {raw['character']} is older than one already "
+            f"imported ({latest}); its mail is left out until `brain rebuild`."
+        )
+        return
+
+    current = []
+    for raw_mail in mails:
+        try:
+            parsed = parse_mail(raw_mail)
+        except MailFormatError as e:
+            report.mails_unreadable += 1
+            report.warn(f"Mailbox Read at {read_at} for {raw['character']}: skipped a mail: {e}")
+            continue
+        if parsed is not None:
+            mail, days_left = parsed
+            current.append((mail, arrived_at(read_at, days_left)))
+
+    live = _live_mails(conn, owner)
+    matches = match_mails(live, current)
+    for (mail, arrival), live_id in zip(current, matches, strict=True):
+        if live_id is None:
+            _insert_mail(conn, owner, mail, arrival, read_at, report)
+        else:
+            conn.execute(
+                "UPDATE auction_mail SET last_read_at = ?,"
+                " arrived_at = COALESCE(arrived_at, ?) WHERE id = ?",
+                (read_at, arrival, live_id),
+            )
+
+    # Over 50 mails, the inbox shows only some: a mail missing from an incomplete Read
+    # may just be hidden, so it stays live.
+    if raw.get("shownCount") == raw.get("totalCount"):
+        seen = set(matches)
+        conn.executemany(
+            "UPDATE auction_mail SET live = 0 WHERE id = ?",
+            [(m.id,) for m in live if m.id not in seen],
+        )
+
+
+def _insert_mail(
+    conn: sqlite3.Connection,
+    owner: tuple[str, str, str],
+    mail: AuctionMail,
+    arrival: int | None,
+    read_at: int,
+    report: ImportReport,
+) -> None:
+    era, realm, character = owner
+    faction = faction_of(mail.sender)
+    market_id = None
+    if faction is None:
+        report.mails_unassigned += 1
+        report.warn(
+            f"{character}'s mail {mail.subject!r} is from {mail.sender!r}, which isn't a known "
+            "Auction House, so it has no Market. It is kept in the Archive."
+        )
+    else:
+        market_id = _market_id(conn, Market(realm=realm, faction=faction, era=Era(era)))
+    if mail.kind in OUTCOME_KINDS:
+        report.outcomes_found += 1
+    else:
+        report.purchases_found += 1
+    conn.execute(
+        "INSERT INTO auction_mail (era, realm, character, market_id, kind, sender, subject,"
+        " item_name, item_key, count, price, money, arrived_at, first_read_at, last_read_at,"
+        " live) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        (
+            *owner,
+            market_id,
+            mail.kind.value,
+            mail.sender,
+            mail.subject,
+            mail.item_name,
+            mail.item_key,
+            mail.count,
+            mail.price,
+            mail.money,
+            arrival,
+            read_at,
+            read_at,
+        ),
+    )
+
+
+def _live_mails(conn: sqlite3.Connection, owner: tuple[str, str, str]) -> list[LiveMail]:
+    rows = conn.execute(
+        "SELECT id, kind, sender, subject, item_name, item_key, count, price, money, arrived_at"
+        " FROM auction_mail WHERE era = ? AND realm = ? AND character = ? AND live = 1"
+        " ORDER BY id",
+        owner,
+    )
+    return [
+        LiveMail(id=i, mail=AuctionMail(MailKind(kind), *fields), arrived_at=at)
+        for i, kind, *fields, at in rows
+    ]
 
 
 def _nameable_mailbox_read(raw: object) -> bool:
@@ -427,3 +612,35 @@ def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
         _market_params(market),
     )
     return [at for (at,) in rows]
+
+
+_MAIL_COLUMNS = (
+    "a.character, a.kind, a.item_name, a.item_key, a.count, a.price, a.money, a.arrived_at,"
+    " a.first_read_at"
+)
+
+
+def outcomes(conn: sqlite3.Connection, market: Market) -> list[Outcome]:
+    """Every Outcome in the Market, in the order the Brain first saw them."""
+    rows = conn.execute(
+        f"SELECT {_MAIL_COLUMNS} FROM auction_mail a JOIN market m ON m.id = a.market_id"
+        f" WHERE {_MARKET_FILTER} AND a.kind != ? ORDER BY a.first_read_at, a.id",
+        (*_market_params(market), MailKind.WON.value),
+    )
+    return [
+        Outcome(ch, MailKind(kind), name, key, n, price, money, at, first)
+        for ch, kind, name, key, n, price, money, at, first in rows
+    ]
+
+
+def purchases(conn: sqlite3.Connection, market: Market) -> list[Purchase]:
+    """Every Purchase in the Market, in the order the Brain first saw them."""
+    rows = conn.execute(
+        f"SELECT {_MAIL_COLUMNS} FROM auction_mail a JOIN market m ON m.id = a.market_id"
+        f" WHERE {_MARKET_FILTER} AND a.kind = ? ORDER BY a.first_read_at, a.id",
+        (*_market_params(market), MailKind.WON.value),
+    )
+    return [
+        Purchase(ch, name, key, n, price, at, first)
+        for ch, _, name, key, n, price, _, at, first in rows
+    ]
