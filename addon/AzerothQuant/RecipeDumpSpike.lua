@@ -136,12 +136,78 @@ local function craftRows()
   return rows
 end
 
-local function dump()
-  local tradeShown, craftShown = isShown("TradeSkillFrame"), isShown("CraftFrame")
-  if not (tradeShown or craftShown) then
-    say("Open a profession window first.")
-    return
+-- Every shown global frame whose name mentions Trade, Profession or Craft, to find
+-- Forever's profession window if it isn't TradeSkillFrame or CraftFrame.
+local function shownFrames()
+  local names = {}
+  for name, v in pairs(_G) do
+    if type(name) == "string" and type(v) == "table" and type(v.IsShown) == "function"
+      and (name:find("Trade") or name:find("Profession") or name:find("Craft")) then
+      local ok, shown = pcall(v.IsShown, v)
+      if ok and shown then
+        names[#names + 1] = name
+      end
+    end
   end
+  table.sort(names)
+  return names
+end
+
+-- The newer C_TradeSkillUI API, in case Forever replaced the Classic calls with it.
+-- Recipe details only for learned recipes, since the ID list includes unlearned ones.
+local MAX_RECIPES = 400
+local function tradeSkillUI()
+  local api = _G.C_TradeSkillUI
+  if type(api) ~= "table" then
+    return "<missing>"
+  end
+  local functions = {}
+  for name, v in pairs(api) do
+    if type(v) == "function" then
+      functions[#functions + 1] = name
+    end
+  end
+  table.sort(functions)
+
+  local function apiCall(name, ...)
+    if type(api[name]) ~= "function" then
+      return "<missing>"
+    end
+    return allReturns(pcall(api[name], ...))
+  end
+
+  local recipes = {}
+  local ids = apiCall("GetAllRecipeIDs")
+  local idList = type(ids) == "table" and ids[1] == true and type(ids[2]) == "table" and ids[2] or {}
+  for i, id in ipairs(idList) do
+    if i > MAX_RECIPES then
+      break
+    end
+    local info = apiCall("GetRecipeInfo", id)
+    local learned = type(info) == "table" and type(info[2]) == "table" and info[2].learned
+    recipes[#recipes + 1] = {
+      id = id,
+      info = info,
+      schematic = learned and apiCall("GetRecipeSchematic", id, false) or nil,
+      itemLink = learned and apiCall("GetRecipeItemLink", id) or nil,
+      cooldown = learned and apiCall("GetRecipeCooldown", id) or nil,
+    }
+  end
+
+  return {
+    functions = functions,
+    baseProfession = apiCall("GetBaseProfessionInfo"),
+    childProfession = apiCall("GetChildProfessionInfo"),
+    tradeSkillLine = apiCall("GetTradeSkillLine"),
+    numRecipeIDs = #idList,
+    recipes = recipes,
+  }
+end
+
+local function dump()
+  -- No early return on these: Forever's profession window may not be either frame, so
+  -- dump anyway and let shownFrames say what was open.
+  local tradeShown, craftShown = isShown("TradeSkillFrame"), isShown("CraftFrame")
 
   local apis = {}
   for _, name in ipairs(API) do
@@ -157,6 +223,8 @@ local function dump()
     class = allReturns(UnitClass("player")),
     tradeSkillFrameShown = tradeShown,
     craftFrameShown = craftShown,
+    shownFrames = shownFrames(),
+    tradeSkillUI = tradeSkillUI(),
     apis = apis,
     events = events,
     tradeSkill = {
@@ -189,6 +257,11 @@ local function dump()
     tostring(first(entry.tradeSkill.line)), #entry.tradeSkill.rows,
     tostring(first(entry.craft.displaySkillLine) or first(entry.craft.name)), #entry.craft.rows))
   say("Missing calls: " .. (#missing > 0 and table.concat(missing, ", ") or "none"))
+  say("Open frames: " .. (#entry.shownFrames > 0 and table.concat(entry.shownFrames, ", ") or "none found"))
+  local ui = entry.tradeSkillUI
+  say(type(ui) == "table"
+    and string.format("C_TradeSkillUI: %d functions, %d recipe IDs.", #ui.functions, ui.numRecipeIDs)
+    or "C_TradeSkillUI: missing")
   say(string.format("Events since SHOW: %d.", #events))
   for _, e in ipairs(events) do
     say(string.format("  %s at +%.2fs (trade %s, craft %s)", e.event, tonumber(e.t) or -1,
