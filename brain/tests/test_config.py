@@ -189,3 +189,44 @@ def test_archive_can_be_set_anywhere(tmp_path):
 def test_archive_must_be_a_folder_path(tmp_path):
     with pytest.raises(ConfigError, match="archive_dir"):
         load_config(write_config(tmp_path, "archive_dir = 3" + INSTALL))
+
+
+def test_fair_value_knobs_default_to_the_designed_values(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.fair_value_slice_share == 0.15
+    assert config.fair_value_outlier_share == 0.5
+    assert config.probable_sale_max_fair_value_multiple == 1.2
+
+
+def test_fair_value_knobs_can_be_set(tmp_path):
+    text = (
+        "fair_value_slice_share = 0.25\n"
+        "fair_value_outlier_share = 0\n"
+        "probable_sale_max_fair_value_multiple = 1.5\n"
+    )
+    config = load_config(write_config(tmp_path, text + INSTALL))
+
+    assert config.fair_value_slice_share == 0.25
+    assert config.fair_value_outlier_share == 0
+    assert config.probable_sale_max_fair_value_multiple == 1.5
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("fair_value_slice_share", "0"),  # the slice would be empty
+        ("fair_value_slice_share", "1.5"),
+        ("fair_value_slice_share", '"0.15"'),
+        ("fair_value_outlier_share", "-0.1"),
+        ("fair_value_outlier_share", "1"),  # would leave out everything under the median
+        ("fair_value_outlier_share", "true"),
+        ("probable_sale_max_fair_value_multiple", "0"),
+        ("probable_sale_max_fair_value_multiple", "[1.2]"),
+    ],
+)
+def test_rejects_bad_fair_value_knobs(tmp_path, key, value):
+    path = write_config(tmp_path, f"{key} = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)

@@ -175,7 +175,7 @@ def test_partial_sales_count_only_inside_windows(db):
     ]
 
 
-def test_probable_sale_candidates_are_disappearances_in_a_window_that_could_not_expire(db):
+def test_probable_sales_are_disappearances_in_a_window_that_could_not_expire(db):
     run(
         db,
         scan(
@@ -197,7 +197,7 @@ def test_probable_sale_candidates_are_disappearances_in_a_window_that_could_not_
             own=False,
             seen_at=T0 + 20 * MINUTE,
             units=3,
-            kind=SaleKind.PROBABLE_SALE_CANDIDATE,
+            kind=SaleKind.PROBABLE_SALE,
         )
     ]
 
@@ -205,7 +205,7 @@ def test_probable_sale_candidates_are_disappearances_in_a_window_that_could_not_
 def test_sale_events_are_counted_per_item_key(db):
     run(
         db,
-        scan(T0, row(quantity=20), row(item=SILK, unit=100), row(item=SILK, unit=200)),
+        scan(T0, row(quantity=20), row(item=SILK, unit=100), row(item=SILK, unit=110)),
         scan(T0 + 20 * MINUTE, row(quantity=15)),  # linen: 1 Partial Sale; silk: 2 gone
         scan(T0 + 40 * MINUTE, row(quantity=10)),  # linen: 1 more Partial Sale
     )
@@ -218,20 +218,20 @@ def test_sale_events_are_counted_per_item_key(db):
 # --- Reposts ---
 
 
-def candidates(evidence):
+def probable_sales(evidence):
     return [
         (e.item_key, e.unit_buyout, e.units)
         for e in evidence.sale_events
-        if e.kind == SaleKind.PROBABLE_SALE_CANDIDATE
+        if e.kind == SaleKind.PROBABLE_SALE
     ]
 
 
-def test_a_disappearance_reposted_cheaper_is_not_a_probable_sale_candidate(db):
+def test_a_disappearance_reposted_cheaper_is_not_a_probable_sale(db):
     run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, row(unit=90)))
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == []
+    assert probable_sales(evidence) == []
 
 
 def test_a_new_listing_explains_only_one_disappearance_and_the_cheapest_stays_a_sale(db):
@@ -240,7 +240,7 @@ def test_a_new_listing_explains_only_one_disappearance_and_the_cheapest_stays_a_
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == [(LINEN_KEY, 50, 1)]
+    assert probable_sales(evidence) == [(LINEN_KEY, 50, 1)]
 
 
 def test_pairing_takes_every_repost_the_data_allows(db):
@@ -254,7 +254,7 @@ def test_pairing_takes_every_repost_the_data_allows(db):
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == []
+    assert probable_sales(evidence) == []
 
 
 def own_row(**kwargs):
@@ -275,7 +275,7 @@ def test_a_new_listing_that_does_not_match_is_not_a_repost(db, new_listing):
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == [(LINEN_KEY, 100, 1)]
+    assert probable_sales(evidence) == [(LINEN_KEY, 100, 1)]
 
 
 def test_a_repost_at_the_same_price_is_not_a_sale(db):
@@ -285,7 +285,7 @@ def test_a_repost_at_the_same_price_is_not_a_sale(db):
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == []
+    assert probable_sales(evidence) == []
 
 
 def test_a_new_listing_from_a_later_window_is_not_a_repost(db):
@@ -298,7 +298,7 @@ def test_a_new_listing_from_a_later_window_is_not_a_repost(db):
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == [(LINEN_KEY, 100, 1)]
+    assert probable_sales(evidence) == [(LINEN_KEY, 100, 1)]
 
 
 def test_a_disappearance_that_could_have_expired_does_not_use_up_a_new_listing(db):
@@ -310,7 +310,7 @@ def test_a_disappearance_that_could_have_expired_does_not_use_up_a_new_listing(d
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
-    assert candidates(evidence) == []
+    assert probable_sales(evidence) == []
 
 
 def test_reposts_and_the_coincidence_baseline_are_counted_per_item_key(db):
@@ -350,3 +350,64 @@ def test_a_new_listing_does_not_explain_away_a_partial_sale(db):
 
     assert [(e.units, e.kind) for e in evidence.sale_events] == [(5, SaleKind.PARTIAL_SALE)]
     assert evidence.repost_counts() == {}
+
+
+# --- the Probable Sale price check ---
+
+
+@pytest.mark.parametrize(("unit", "sale"), [(120, True), (121, False)])
+def test_a_probable_sale_is_priced_at_most_1_2_times_fair_value(db, unit, sale):
+    # 11 units, so Fair Value is the cheapest 2: both at 100.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=unit)),
+        scan(T0 + 20 * MINUTE, row(quantity=10, unit=100)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert probable_sales(evidence) == ([(LINEN_KEY, unit, 1)] if sale else [])
+
+
+def test_the_price_check_uses_fair_value_from_the_scan_the_listing_was_last_seen_in(db):
+    # Fair Value was 100 when the 115 was last seen; cheap supply arriving later (today's
+    # Fair Value is 50) doesn't make it any less of a sale.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=115)),
+        scan(T0 + 20 * MINUTE, row(quantity=10, unit=100)),
+        scan(T0 + 40 * MINUTE, row(quantity=10, unit=100), row(quantity=10, unit=50)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert probable_sales(evidence) == [(LINEN_KEY, 115, 1)]
+
+
+def test_fair_value_counts_units_as_they_stood_in_that_scan(db):
+    # In the first Scan there are 21 units, so Fair Value is the cheapest 4, all at 100,
+    # and the 125 is too dear to be a sale. 9 of the 100s sell afterward; counting only
+    # the 1 left would put the 125 into the slice and let it through.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(quantity=10, unit=150), row(unit=125)),
+        scan(T0 + 20 * MINUTE, row(quantity=1, unit=100), row(quantity=10, unit=150)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert probable_sales(evidence) == []
+
+
+def test_a_disappearance_too_dear_to_be_a_sale_is_not_a_coincidence_either(db):
+    # The 200 fails the price check (Fair Value 100), so a pricier new Listing next to it
+    # says nothing about how often real sales look like Reposts.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=200)),
+        scan(T0 + 20 * MINUTE, row(quantity=10, unit=100), row(unit=250)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.coincidence_counts() == {}

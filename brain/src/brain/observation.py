@@ -15,6 +15,7 @@ from enum import StrEnum
 from itertools import pairwise
 
 from brain.config import Config
+from brain.fair_value import fair_values
 from brain.history import Listing, Market, listings, partial_sales, scan_times
 
 
@@ -124,9 +125,9 @@ def _pair_reposts(candidates: list[Disappearance], new: list[Listing]) -> _Pairi
 
 class SaleKind(StrEnum):
     PARTIAL_SALE = "partial_sale"
-    # A Disappearance that passes the expiry rule. It becomes a Probable Sale once the
-    # Fair Value price check exists.
-    PROBABLE_SALE_CANDIDATE = "probable_sale_candidate"
+    # A Disappearance that couldn't have expired, isn't a Repost and was priced near or
+    # below the Fair Value of the Scan it was last seen in.
+    PROBABLE_SALE = "probable_sale"
 
 
 @dataclass(frozen=True, order=True)
@@ -179,6 +180,17 @@ def sell_rate_evidence(
     ]
     new = [n for n in listings(conn, market) if n.first_seen in window_ends]
     pairing = _pair_reposts(candidates, new)
+    # Priced by the Scan it was last seen in, not today's: a sale is judged against the
+    # market it sold into.
+    fair_value_in = {
+        at: fair_values(conn, market, config, at=at) for at in {d.last_seen for d in pairing.sales}
+    }
+
+    def priced_like_a_sale(d: Disappearance) -> bool:
+        fair_value = fair_value_in[d.last_seen][d.item_key]
+        return d.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
+
+    probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]
     events += [
         SaleEvent(
             d.item_key,
@@ -186,14 +198,14 @@ def sell_rate_evidence(
             d.own,
             d.gone_at,
             d.quantity,
-            SaleKind.PROBABLE_SALE_CANDIDATE,
+            SaleKind.PROBABLE_SALE,
         )
-        for d in pairing.sales
+        for d in probable_sales
     ]
     events.sort(key=lambda e: e.seen_at)
     return SellRateEvidence(
         window_hours=sum(w.end - w.start for w in windows) / 3600,
         sale_events=events,
         reposts=pairing.reposts,
-        coincidences=pairing.coincidences,
+        coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],
     )

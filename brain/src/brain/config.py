@@ -6,6 +6,7 @@ SavedVariables file came from is what tells the Brain which Era it is.
 """
 
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -36,6 +37,15 @@ DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 48 * 60)
 DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
 
 
+# Fair Value averages the cheapest this share of a Market's units of an Item Key (#21).
+DEFAULT_FAIR_VALUE_SLICE_SHARE = 0.15
+# Units in that slice priced under this share of its median are Flips, not the price.
+DEFAULT_FAIR_VALUE_OUTLIER_SHARE = 0.5
+# A Disappearance priced over this multiple of the Fair Value of the Scan it was last
+# seen in is not a Probable Sale.
+DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE = 1.2
+
+
 DEFAULT_HISTORY_FILE = "history.sqlite"
 DEFAULT_ARCHIVE_DIR = "archive"
 
@@ -53,6 +63,12 @@ class Config:
     # The Archive folder (ADR-0005). A loaded config always has one; None, for
     # tests and for rebuilding from the archive itself, means Scans aren't archived.
     archive_dir: Path | None = None
+    # Fair Value is the average of the cheapest this share of units (always at least one).
+    fair_value_slice_share: float = DEFAULT_FAIR_VALUE_SLICE_SHARE
+    # ...leaving out units priced under this share of the slice's median.
+    fair_value_outlier_share: float = DEFAULT_FAIR_VALUE_OUTLIER_SHARE
+    # Probable Sales are priced at most this multiple of Fair Value in their last Scan.
+    probable_sale_max_fair_value_multiple: float = DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE
 
 
 def load_config(path: Path) -> Config:
@@ -95,13 +111,48 @@ def load_config(path: Path) -> Config:
     if not isinstance(archive, str) or not archive:
         raise ConfigError(f"{path}: archive_dir must be a folder path, got {archive!r}")
 
+    slice_share = _parse_number(
+        path,
+        raw.get("fair_value_slice_share", DEFAULT_FAIR_VALUE_SLICE_SHARE),
+        "fair_value_slice_share",
+        lambda x: 0 < x <= 1,
+        "above 0 and at most 1",
+    )
+    outlier_share = _parse_number(
+        path,
+        raw.get("fair_value_outlier_share", DEFAULT_FAIR_VALUE_OUTLIER_SHARE),
+        "fair_value_outlier_share",
+        lambda x: 0 <= x < 1,
+        "from 0 up to (not including) 1",
+    )
+    multiple = _parse_number(
+        path,
+        raw.get(
+            "probable_sale_max_fair_value_multiple", DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE
+        ),
+        "probable_sale_max_fair_value_multiple",
+        lambda x: x > 0,
+        "above 0",
+    )
+
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
         history_path=path.parent / history,
         observation_window_max_seconds=window_minutes * 60,
         archive_dir=path.parent / archive,
+        fair_value_slice_share=slice_share,
+        fair_value_outlier_share=outlier_share,
+        probable_sale_max_fair_value_multiple=multiple,
     )
+
+
+def _parse_number(
+    config_path: Path, value: object, key: str, allowed: Callable[[float], bool], wording: str
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not allowed(value):
+        raise ConfigError(f"{config_path}: {key} must be a number {wording}, got {value!r}")
+    return value
 
 
 def _parse_time_left(config_path: Path, value: object) -> tuple[int, ...]:

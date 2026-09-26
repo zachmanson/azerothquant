@@ -733,6 +733,30 @@ def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]
     return [PartialSale(k, u, bool(o), at, n) for k, u, o, at, n in rows]
 
 
+def supply_at(
+    conn: sqlite3.Connection, market: Market, at: int
+) -> dict[str, list[tuple[int, int]]]:
+    """The Market's Scan requested at `at`, as (unit buyout, quantity) per Item Key.
+    A Listing's quantity is stored as of its last-seen Scan, so the Partial Sales seen
+    after `at` are added back to get what it held then."""
+    rows = conn.execute(
+        "SELECT l.item_key, l.unit_buyout, l.quantity + COALESCE(("
+        "   SELECT SUM(p.units_sold) FROM partial_sale p JOIN scan ps ON ps.id = p.scan_id"
+        "   WHERE p.listing_id = l.id AND ps.requested_at > ?), 0)"
+        " FROM listing l"
+        " JOIN market m ON m.id = l.market_id"
+        " JOIN scan first ON first.id = l.first_seen_scan_id"
+        " JOIN scan last ON last.id = l.last_seen_scan_id"
+        f" WHERE {_MARKET_FILTER} AND first.requested_at <= ? AND last.requested_at >= ?"
+        " ORDER BY l.id",
+        (at, *_market_params(market), at, at),
+    )
+    result: dict[str, list[tuple[int, int]]] = {}
+    for item_key, unit_buyout, quantity in rows:
+        result.setdefault(item_key, []).append((unit_buyout, quantity))
+    return result
+
+
 def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
     """requested_at of the latest Scan imported for each Market in the Era."""
     rows = conn.execute(

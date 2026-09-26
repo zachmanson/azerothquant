@@ -16,6 +16,16 @@
 # Defaults to 60. Must come before the first [[installs]].
 # observation_window_max_minutes = 60
 
+# Optional: how Fair Value is found. It averages the cheapest fair_value_slice_share of
+# an Item Key's units in the latest Scan, leaving out units priced under
+# fair_value_outlier_share of that slice's median (those are Flips, not the price).
+# A Disappearance only counts as a Probable Sale when it was priced at most
+# probable_sale_max_fair_value_multiple times the Fair Value of the Scan it was last seen
+# in. Default to 0.15, 0.5 and 1.2. Must come before the first [[installs]].
+# fair_value_slice_share = 0.15
+# fair_value_outlier_share = 0.5
+# probable_sale_max_fair_value_multiple = 1.2
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'
