@@ -23,3 +23,7 @@ Character.lua
 
 # SPIKE (#15), throwaway: /aq maildump. Delete with the file.
 MailDumpSpike.lua
+
+# SPIKE (#18), throwaway: /aq recipedump. Delete with the file. Loads after the mail
+# spike so it can pass other /aq commands on to it.
+RecipeDumpSpike.lua
