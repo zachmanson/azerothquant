@@ -1,12 +1,14 @@
 -- WoW glue for Mailbox Reads: once per mailbox visit, records the Auction House mail
 -- in the inbox to AzerothQuantDB.mailboxReads. All shaping happens in MailboxRead.lua;
--- this file only talks to the WoW API.
+-- this file only talks to the WoW API. On load it also deletes the Reads the Brain has
+-- imported (Prune.lua).
 --
 -- Read-only (ADR-0003): only GetInboxNumItems, GetInboxHeaderInfo and
 -- GetInboxInvoiceInfo. Never GetInboxText (it marks mail read), never CheckInbox, and
 -- nothing that takes, returns, deletes or sends mail.
 local _, ns = ...
 local MailboxRead = ns.MailboxRead
+local Prune = ns.Prune
 
 -- MAIL_INBOX_UPDATE fires a few times as the inbox loads (twice within 0.4s in the
 -- spike). Read once it has been quiet this long.
@@ -74,6 +76,11 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       AzerothQuantDB = AzerothQuantDB or {}
       db = AzerothQuantDB
       db.mailboxReads = db.mailboxReads or {}
+      -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
+      local pruned = Prune.importedMailboxReads(db.mailboxReads, AzerothQuantRecommendations)
+      if pruned > 0 then
+        say(string.format("Deleted %d Mailbox Reads the Brain has imported.", pruned))
+      end
     end
   elseif event == "MAIL_SHOW" then
     visiting, readThisVisit = true, false

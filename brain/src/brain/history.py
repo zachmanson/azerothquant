@@ -409,6 +409,16 @@ def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
     return {Market(realm, faction, era): at for realm, faction, at in rows}
 
 
+def latest_mailbox_read_times(conn: sqlite3.Connection, era: Era) -> dict[tuple[str, str], int]:
+    """read_at of the latest Mailbox Read imported for each (realm, character) in the Era."""
+    rows = conn.execute(
+        "SELECT realm, character, MAX(read_at) FROM mailbox_read"
+        " WHERE era = ? GROUP BY realm, character ORDER BY realm, character",
+        (era.value,),
+    )
+    return {(realm, character): at for realm, character, at in rows}
+
+
 def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
     """requested_at of every Scan imported for the Market, oldest first."""
     rows = conn.execute(

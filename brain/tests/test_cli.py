@@ -103,8 +103,10 @@ def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_pat
     run_import(config, [file])
 
     # The fixture holds two Alliance Scans on "Classic Beta PvP"; the later one is 1790001200.
+    # Its two Mailbox Reads are Kash-Patel's; the later one is 1790001800.
     assert read_recommendations(install) == {
         "lastImported": {"Classic Beta PvP": {"Alliance": 1790001200}},
+        "lastMailboxRead": {"Classic Beta PvP": {"Kash-Patel": 1790001800}},
         "recommendations": [],
     }
 
@@ -123,6 +125,10 @@ def test_each_install_only_hears_about_its_own_era(tmp_path):
         "Classic Beta PvP": {"Alliance": 1790001200}
     }
     assert read_recommendations(live)["lastImported"] == []
+    assert read_recommendations(beta)["lastMailboxRead"] == {
+        "Classic Beta PvP": {"Kash-Patel": 1790001800}
+    }
+    assert read_recommendations(live)["lastMailboxRead"] == []
 
 
 def test_an_install_without_the_addon_gets_no_file(tmp_path):

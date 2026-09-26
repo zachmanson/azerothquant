@@ -8,6 +8,9 @@ For now it only holds, per Market, when the latest imported Scan was requested.
 The Addon then deletes every stored Scan in that Market requested at or before
 that time: each one is either imported already or older than an imported one,
 which the Brain rejects, so none of them can be of any more use.
+
+Likewise, per Character, when the latest imported Mailbox Read was taken. Reads are
+imported whatever their order, so every stored Read up to then is already archived.
 """
 
 import os
@@ -16,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 from brain.config import Install
-from brain.history import Market, latest_scan_times
+from brain.history import Market, latest_mailbox_read_times, latest_scan_times
 from brain.lua_literal import assignment
 
 FILE_NAME = "Recommendations.lua"
@@ -26,6 +29,8 @@ _HEADER = (
     "-- Written by the azerothquant Brain after every import; edits are overwritten.\n"
     "-- lastImported[realm][faction] is when the latest imported Scan in that Market\n"
     "-- was requested. The Addon deletes stored Scans up to then.\n"
+    "-- lastMailboxRead[realm][character] is when the latest imported Mailbox Read of\n"
+    "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
 )
 
 
@@ -33,11 +38,23 @@ def addon_folder(install: Install) -> Path:
     return install.path / "Interface" / "AddOns" / "AzerothQuant"
 
 
-def render(last_imported: dict[Market, int]) -> str:
+def render(
+    last_imported: dict[Market, int], last_mailbox_read: dict[tuple[str, str], int] | None = None
+) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
         by_realm.setdefault(market.realm, {})[market.faction] = requested_at
-    return _HEADER + assignment(GLOBAL_NAME, {"lastImported": by_realm, "recommendations": []})
+    reads_by_realm: dict[str, dict[str, int]] = {}
+    for (realm, character), read_at in (last_mailbox_read or {}).items():
+        reads_by_realm.setdefault(realm, {})[character] = read_at
+    return _HEADER + assignment(
+        GLOBAL_NAME,
+        {
+            "lastImported": by_realm,
+            "lastMailboxRead": reads_by_realm,
+            "recommendations": [],
+        },
+    )
 
 
 def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | None:
@@ -47,7 +64,9 @@ def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | 
     if not folder.is_dir():
         return None
     path = folder / FILE_NAME
-    text = render(latest_scan_times(conn, install.era))
+    text = render(
+        latest_scan_times(conn, install.era), latest_mailbox_read_times(conn, install.era)
+    )
     # Write a temp file and swap it in, so the client never reads a half-written file. The
     # temp name is unique so a `brain import` running beside `brain watch` can't clash.
     fd, temp = tempfile.mkstemp(dir=folder, prefix=FILE_NAME + ".", suffix=".tmp")
