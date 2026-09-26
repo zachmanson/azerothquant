@@ -1,17 +1,19 @@
 -- WoW glue for the full Scan: a "Scan" button on the Auction House that runs
 -- C_AuctionHouse.ReplicateItems and saves the result to AzerothQuantDB.scans.
 -- All shaping happens in Scan.lua; this file only talks to the WoW API.
--- On load it also deletes the Scans the Brain has imported (Prune.lua).
+-- On load it also deletes the Scans the Brain has imported (Prune.lua). While
+-- the AH is open it nudges when a Scan would complete an Observation Window (Nudge.lua).
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
 local Scan = ns.Scan
 local Prune = ns.Prune
+local Nudge = ns.Nudge
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
 -- at all, so the Addon keeps its own clock and disables the button.
-local COOLDOWN_SECONDS = 15 * 60
+local COOLDOWN_SECONDS = Nudge.COOLDOWN_SECONDS
 -- REPLICATE_ITEM_LIST_UPDATE keeps firing while item data loads. Read once it
 -- has been quiet this long.
 local QUIET_SECONDS = 2
@@ -26,6 +28,7 @@ local pending -- the in-flight Scan request, or nil
 local reading = false
 local debounceTimer, noResponseTimer
 local button, ticker
+local checkedAt -- last Nudge check while the AH is open
 
 local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
@@ -59,6 +62,27 @@ local function refreshButton()
     button:SetText("Scan")
     button:Enable()
   end
+end
+
+local function setNudged(on)
+  if not button then
+    return
+  end
+  if on then
+    button:LockHighlight()
+  else
+    button:UnlockHighlight()
+  end
+end
+
+local function tick()
+  local now = time()
+  if Nudge.due(db.lastScanAt, checkedAt, now) then
+    say("Scan ready: a second Scan now completes an Observation Window.")
+    setNudged(true)
+  end
+  checkedAt = now
+  refreshButton()
 end
 
 local function finish(rows)
@@ -116,6 +140,7 @@ local function requestScan()
   if pending or cooldownRemaining() > 0 then
     return
   end
+  setNudged(false)
   pending = {
     id = db.nextScanId,
     requestedAt = time(),
@@ -164,11 +189,15 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       createButton()
     end
     refreshButton()
+    -- Start checking from now, so a cooldown that ended while the AH was closed
+    -- doesn't nudge on open.
+    checkedAt = time()
     cancel(ticker)
-    ticker = C_Timer.NewTicker(1, refreshButton)
+    ticker = C_Timer.NewTicker(1, tick)
   elseif event == "AUCTION_HOUSE_CLOSED" then
     cancel(ticker)
     ticker = nil
+    setNudged(false)
     if pending then
       abort("Auction House closed before the Scan finished; nothing was saved.")
     end

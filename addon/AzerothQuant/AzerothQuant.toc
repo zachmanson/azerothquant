@@ -12,6 +12,7 @@ Recommendations.lua
 Money.lua
 Scan.lua
 Prune.lua
+Nudge.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua
