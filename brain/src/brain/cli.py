@@ -25,6 +25,7 @@ from brain.history import (
     ImportFileError,
     ImportReport,
     import_file,
+    import_mailbox_reads,
     import_scans,
     open_history,
 )
@@ -92,7 +93,7 @@ class RebuildError(Exception):
 
 
 def run_rebuild(config: Config) -> ImportReport:
-    """Recreate the history database from every Scan in the Archive.
+    """Recreate the history database from every Scan and Mailbox Read in the Archive.
 
     The new database is built beside the old one and only replaces it once complete, so
     a failed rebuild leaves the history as it was. An empty archive is refused rather
@@ -101,11 +102,15 @@ def run_rebuild(config: Config) -> ImportReport:
     """
     if config.archive_dir is None:
         raise RebuildError("no archive folder configured")
-    by_era: dict[Era, list[dict]] = {}
-    for era, raw in Archive(config.archive_dir).scans():
-        by_era.setdefault(era, []).append(raw)
-    if not by_era:
-        raise RebuildError(f"no Scans in the archive at {config.archive_dir}")
+    archive = Archive(config.archive_dir)
+    scans_by_era: dict[Era, list[dict]] = {}
+    for era, raw in archive.scans():
+        scans_by_era.setdefault(era, []).append(raw)
+    reads_by_era: dict[Era, list[dict]] = {}
+    for era, raw in archive.mailbox_reads():
+        reads_by_era.setdefault(era, []).append(raw)
+    if not scans_by_era and not reads_by_era:
+        raise RebuildError(f"no Scans or Mailbox Reads in the archive at {config.archive_dir}")
 
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
     rebuilt = config.history_path.with_name(config.history_path.name + ".rebuild")
@@ -115,8 +120,10 @@ def run_rebuild(config: Config) -> ImportReport:
     total = ImportReport()
     try:
         with closing(open_history(rebuilt)) as conn:
-            for era, raws in by_era.items():
+            for era, raws in scans_by_era.items():
                 _add_report(total, import_scans(conn, raws, era, from_archive))
+            for era, raws in reads_by_era.items():
+                import_mailbox_reads(conn, raws, era, from_archive, total)
         os.replace(rebuilt, config.history_path)
     except BaseException:
         rebuilt.unlink(missing_ok=True)
@@ -157,11 +164,15 @@ def _log_results(results: list[FileResult]) -> None:
             log.error("Couldn't import %s: %s", r.path, r.error)
         else:
             log.info(
-                "Imported %s: %d new Scans, %d already imported, %d rejected",
+                "Imported %s: %d new Scans, %d already imported, %d rejected;"
+                " %d new Mailbox Reads, %d already imported, %d unreadable",
                 r.path,
                 r.report.scans_imported,
                 r.report.scans_already_imported,
                 r.report.scans_out_of_order + r.report.scans_unreadable,
+                r.report.mailbox_reads_imported,
+                r.report.mailbox_reads_already_imported,
+                r.report.mailbox_reads_unreadable,
             )
 
 
@@ -182,11 +193,12 @@ def _rebuild(config: Config) -> int:
         log.error("Couldn't rebuild the history: %s", e)
         return 1
     log.info(
-        "Rebuilt %s from %s: %d Scans, %d rejected",
+        "Rebuilt %s from %s: %d Scans, %d rejected; %d Mailbox Reads",
         config.history_path,
         config.archive_dir,
         report.scans_imported,
         report.scans_out_of_order + report.scans_unreadable,
+        report.mailbox_reads_imported,
     )
     return 0
 

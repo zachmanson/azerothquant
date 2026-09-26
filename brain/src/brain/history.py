@@ -1,4 +1,5 @@
-"""The Brain's persistent history: Scans imported into SQLite as Listing lifetimes.
+"""The Brain's persistent history: Scans imported into SQLite as Listing lifetimes,
+plus a record of every imported Mailbox Read.
 
 Each Listing is stored once, with the first and last Scan it was seen in (ADR-0002).
 A Listing whose last Scan isn't its Market's latest one has disappeared. Each drop in
@@ -59,6 +60,17 @@ CREATE TABLE IF NOT EXISTS partial_sale (
     units_sold INTEGER NOT NULL,
     UNIQUE (listing_id, scan_id)
 );
+
+-- One row per imported Mailbox Read; its mail is read back from the Archive.
+CREATE TABLE IF NOT EXISTS mailbox_read (
+    id INTEGER PRIMARY KEY,
+    era TEXT NOT NULL,
+    realm TEXT NOT NULL,
+    character TEXT NOT NULL,
+    read_at INTEGER NOT NULL,  -- Unix time; with era, realm and character, its identity
+    mails INTEGER NOT NULL,    -- Auction House mails in it
+    UNIQUE (era, realm, character, read_at)
+);
 """
 
 
@@ -98,6 +110,10 @@ class ImportReport:
     # Missing a field the Brain needs.
     scans_unreadable: int = 0
     inexact_rows: int = 0
+    mailbox_reads_imported: int = 0
+    mailbox_reads_already_imported: int = 0
+    # Missing its realm, character or readAt, so it can't be named.
+    mailbox_reads_unreadable: int = 0
     unreadable_rows: int = 0
     warnings: list[str] = field(default_factory=list)
 
@@ -119,7 +135,7 @@ def open_history(path: str | Path) -> sqlite3.Connection:
 
 
 def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportReport:
-    """Import every Scan in the Addon's SavedVariables file.
+    """Import every Scan and Mailbox Read in the Addon's SavedVariables file.
 
     The Era comes from which configured install folder the file is in, since the Scans
     themselves don't say.
@@ -131,7 +147,12 @@ def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportR
     scans = data.get("scans", [])
     if not isinstance(scans, list):
         raise ImportFileError(f"{path}: AzerothQuantDB.scans must be a sequence")
-    return import_scans(conn, scans, era, config)
+    reads = data.get("mailboxReads", [])
+    if not isinstance(reads, list):
+        raise ImportFileError(f"{path}: AzerothQuantDB.mailboxReads must be a sequence")
+    report = import_scans(conn, scans, era, config)
+    import_mailbox_reads(conn, reads, era, config, report)
+    return report
 
 
 def _era_of(path: Path, config: Config) -> Era:
@@ -252,6 +273,58 @@ def _import_scan(
             (market_id, c.item_key, c.unit_buyout, c.own, scan_id, scan_id, c.quantity, c.time_left)
             for c in result.new
         ],
+    )
+
+
+def import_mailbox_reads(
+    conn: sqlite3.Connection,
+    raw_reads: list[object],
+    era: Era,
+    config: Config,
+    report: ImportReport | None = None,
+) -> ImportReport:
+    """Import the Addon's Mailbox Reads (entries of AzerothQuantDB.mailboxReads).
+
+    For now importing only archives each Read and records that it was imported; turning
+    its mail into Outcomes and Purchases comes later and will rebuild from the Archive.
+    As with Scans, a Read whose archive write fails isn't recorded, so the Addon keeps it.
+    """
+    report = report if report is not None else ImportReport()
+    archive = Archive(config.archive_dir) if config.archive_dir is not None else None
+    for raw in raw_reads:
+        if not _nameable_mailbox_read(raw):
+            report.mailbox_reads_unreadable += 1
+            report.warn(f"Skipped a Mailbox Read the Brain can't place: {raw!r:.200}")
+            continue
+        if archive is not None:
+            archive.write_mailbox_read(era, raw)
+        mails = raw.get("mails")
+        with conn:
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO mailbox_read (era, realm, character, read_at, mails)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    era.value,
+                    raw["realm"],
+                    raw["character"],
+                    raw["readAt"],
+                    len(mails) if isinstance(mails, list) else 0,
+                ),
+            ).rowcount
+        if inserted:
+            report.mailbox_reads_imported += 1
+        else:
+            report.mailbox_reads_already_imported += 1
+    return report
+
+
+def _nameable_mailbox_read(raw: object) -> bool:
+    return (
+        isinstance(raw, dict)
+        and isinstance(raw.get("realm"), str)
+        and isinstance(raw.get("character"), str)
+        and isinstance(raw.get("readAt"), int)
+        and not isinstance(raw.get("readAt"), bool)
     )
 
 

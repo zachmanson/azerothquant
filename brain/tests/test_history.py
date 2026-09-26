@@ -11,6 +11,7 @@ from brain.history import (
     Market,
     PartialSale,
     import_file,
+    import_mailbox_reads,
     import_scans,
     listings,
     open_history,
@@ -412,3 +413,46 @@ def test_without_an_archive_folder_nothing_is_archived(db, tmp_path):
     run(db, scan(T0, row()))
 
     assert list(tmp_path.iterdir()) == []
+
+
+# --- Mailbox Reads (#15) ---
+
+
+def mailbox_read(at=T0, character="Kash-Patel", **extra):
+    return {
+        "readAt": at,
+        "realm": "Classic Beta PvP",
+        "character": character,
+        "shownCount": 0,
+        "totalCount": 0,
+        "skippedMails": 0,
+        "mails": [],
+        **extra,
+    }
+
+
+def test_reimporting_the_same_mailbox_read_changes_nothing(db, tmp_path):
+    config = archived_config(tmp_path)
+    import_mailbox_reads(db, [mailbox_read()], Era.BETA, config)
+
+    report = import_mailbox_reads(db, [mailbox_read()], Era.BETA, config)
+
+    assert report.mailbox_reads_imported == 0
+    assert report.mailbox_reads_already_imported == 1
+    assert len(list(Archive(config.archive_dir).mailbox_reads())) == 1
+
+
+def test_a_mailbox_read_that_cant_be_named_is_skipped_and_not_archived(db, tmp_path):
+    # Without realm, character and readAt it has no identity or file name, so it stays in
+    # SavedVariables where it can at least be looked at.
+    config = archived_config(tmp_path)
+    no_time = mailbox_read()
+    del no_time["readAt"]
+
+    report = import_mailbox_reads(
+        db, [no_time, mailbox_read(character=None), "junk"], Era.BETA, config
+    )
+
+    assert report.mailbox_reads_unreadable == 3
+    assert len(report.warnings) == 3
+    assert list(Archive(config.archive_dir).mailbox_reads()) == []

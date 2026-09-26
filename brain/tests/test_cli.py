@@ -155,6 +155,21 @@ def test_import_archives_every_scan_in_the_file(tmp_path):
     assert archived == [1790000000, 1790001200]
 
 
+def test_import_archives_every_mailbox_read_in_the_file_verbatim(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    saved = parse_savedvariables(file.read_text(encoding="utf-8"))["AzerothQuantDB"]
+
+    results = run_import(config, [file])
+
+    assert results[0].report.mailbox_reads_imported == 2
+    archived = sorted(Archive(config.archive_dir).mailbox_reads(), key=lambda r: r[1]["readAt"])
+    assert archived == [(Era.BETA, raw) for raw in saved["mailboxReads"]]
+    # Kept apart from the Scans.
+    assert len(list(Archive(config.archive_dir).scans())) == 2
+
+
 def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_path):
     install = tmp_path / "_classic_beta_"
     file = install_with_savedvariables(install)
