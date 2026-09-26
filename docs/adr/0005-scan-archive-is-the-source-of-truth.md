@@ -15,3 +15,7 @@ ADR-0002 kept raw Listing lifetimes so history could be recomputed under new for
 - A Scan the Addon wrote without a readable Market or `requestedAt` can't be named, so it isn't archived or imported and stays in SavedVariables.
 - A Scan rejected at import for being older than the latest one in its Market is still archived, so a rebuild includes it in time order.
 - Scans imported before this ADR (two Beta smoke-test Scans) are not in the archive.
+
+## Amendment: the Archive also holds Mailbox Reads (#15)
+
+The Addon now also records Mailbox Reads: the headers and invoices of the Auction House mail in a Character's inbox, from which the Brain derives Outcomes and Purchases. They are archived under the same rules (verbatim, never overwritten, archive before import, prune only what was archived), so the Scan Archive is now just the Archive. They go in the same Archive, not a second one, so there is still exactly one thing to back up. Mail is recorded raw and interpreted in the Brain for the same reason Scans are: sender-to-Market mapping, subject parsing and de-duplicating the same mail seen on several visits can then be fixed and replayed with `brain rebuild`. The one filter the Addon applies (Auction House mail only) is made visible by counting what it skipped.

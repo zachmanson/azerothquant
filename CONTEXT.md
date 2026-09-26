@@ -33,9 +33,13 @@ Relative value learned from Beta (price ratios, turnover rank) that the Decision
 One full pass over every Listing on the Auction House, as it stood at the moment the Scan was requested.
 _Avoid_: snapshot, dump
 
-**Scan Archive**:
-Every Scan exactly as the Addon recorded it, one file per Scan, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
-_Avoid_: backup, raw dump
+**Mailbox Read**:
+The Auction House mail in one Character's inbox (sales, purchases, cancellations, expiries), exactly as it stood when the player opened the mailbox. Other mail, such as COD and player letters, is left out. Mail stays until the player takes it, so the same mail shows up in every Mailbox Read until then.
+_Avoid_: mail scan (a Scan is only ever the Auction House)
+
+**Archive**:
+Every Scan and every Mailbox Read exactly as the Addon recorded it, one file each, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
+_Avoid_: Scan Archive (it holds more than Scans), backup, raw dump
 
 **Item Key**:
 The identity used for pricing: itemID plus random suffix, so "of the Monkey" and "of the Eagle" versions are different Item Keys.
@@ -57,6 +61,14 @@ _Avoid_: relist, undercut (those are why a Repost happens, not the event)
 
 **Probable Sale**:
 A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below Fair Value. Cancellations without a Repost still can't be told apart.
+
+**Outcome**:
+What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one.
+_Avoid_: result, receipt, invoice (an invoice is one kind of mail)
+
+**Purchase**:
+One stack the player bought on the Auction House, with its price, read from a Mailbox Read. It is how an Auction House Lot starts, as an Outcome is how one ends. Only Auction House buys arrive by mail, so crafting, merchant buys and loot start Lots some other way.
+_Avoid_: buy, win
 
 **Observation Window**:
 The time between two consecutive Scans of a Market, when it is short enough that almost no sale goes unseen. Only Observation Windows count toward Sell Rate; longer gaps still track Listings but add nothing to it.
