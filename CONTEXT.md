@@ -48,14 +48,18 @@ A Listing that was in one Scan and missing from the next. It was sold, cancelled
 A drop in a Listing's quantity between two Scans. It is always a sale, since cancelling and expiring remove the whole Listing.
 
 **Probable Sale**:
-A Disappearance treated as a sale because the Listing was far from expiring and priced near or below Fair Value.
+A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows) and it was priced near or below Fair Value. Cancellations still can't be told apart.
+
+**Observation Window**:
+The time between two consecutive Scans of a Market, when it is short enough that almost no sale goes unseen. Only Observation Windows count toward Sell Rate; longer gaps still track Listings but add nothing to it.
+_Avoid_: gap (when you mean one that counts), interval
 
 **Fair Value**:
 The price an Item Key can realistically be sold at in its Market, based on the cheapest part of recent supply rather than the single lowest Listing.
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
-Units sold per day for an Item Key in a Market, counted from Partial Sales and Probable Sales; the Decision Engine's measure of liquidity.
+Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity.
 _Avoid_: volume, velocity
 
 **Vendor Price**:
