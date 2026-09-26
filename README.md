@@ -43,6 +43,7 @@ cd brain
 ..\.venv\Scripts\brain import   # import every SavedVariables file once
 ..\.venv\Scripts\brain watch    # keep running; import whenever the game rewrites the file
 ..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
+..\.venv\Scripts\brain recommend  # print Vendor vs Sell for Holdings, and the Shopping List
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.

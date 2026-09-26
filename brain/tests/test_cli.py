@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import sqlite3
 from contextlib import closing
@@ -7,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from brain.archive import Archive
-from brain.cli import RebuildError, run_import, run_rebuild, savedvariables_files
+from brain.cli import RebuildError, run_import, run_rebuild, run_recommend, savedvariables_files
 from brain.config import Config, Era, Install
 from brain.history import (
     Holding,
     Market,
     holdings,
+    import_character_reads,
+    import_scans,
     listings,
     open_history,
     outcomes,
@@ -291,3 +294,56 @@ def test_rebuild_tells_the_addon_what_is_in_the_rebuilt_history(tmp_path):
     assert read_recommendations(install)["lastImported"] == {
         "Classic Beta PvP": {"Alliance": 1790001200}
     }
+
+
+def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    linen = "item:2589::::::::20:1490"
+
+    def scan(at, quantity, *extra):
+        rows = [
+            {"itemString": linen, "quantity": quantity, "buyout": quantity * 1000, "timeLeft": 4},
+            *extra,
+        ]
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": rows,
+        }
+
+    cheap = {"itemString": linen, "quantity": 2, "buyout": 1400, "timeLeft": 4}
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 123456,
+        "vendorPrices": {2589: 10},
+        "bags": [
+            {
+                "bag": 0,
+                "slot": 1,
+                "count": 3,
+                "isBound": False,
+                "link": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+            }
+        ],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        # 2 Linen sold in an hour, so the 3 held all sell within the 7-day horizon.
+        import_scans(
+            conn, [scan(1_790_000_000, 20), scan(1_790_003_600, 18, cheap)], Era.BETA, config
+        )
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    text = run_recommend(config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Classic Beta PvP Alliance (beta)" in text
+    # Fair Value (700 + 700 + 1000) / 3 = 800, less the 5% cut: 760 each, 750 more than a
+    # vendor pays. The Flip resells at 950, once the two 700s are bought.
+    assert ["2589", "Sell", "3", "8s 00c", "22s 80c", "7s 50c", "1"] in lines
+    assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
+    assert ["2589", "Sell", "2", "7s 00c", "5s 00c", "14s 00c", "1"] in lines

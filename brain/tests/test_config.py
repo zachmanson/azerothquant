@@ -250,3 +250,50 @@ def test_rejects_bad_sell_rate_range(tmp_path, value):
 
     with pytest.raises(ConfigError, match="sell_rate_days"):
         load_config(path)
+
+
+def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.ah_cut == 0.05
+    assert config.neutral_ah_cut == 0.15
+    assert config.sale_horizon_seconds == 7 * 24 * 3600
+    assert config.flip_min_margin_share == 0.2
+    assert config.flip_min_margin_copper == 100
+
+
+def test_decision_engine_knobs_can_be_set(tmp_path):
+    text = (
+        "ah_cut = 0.1\n"
+        "neutral_ah_cut = 0.25\n"
+        "sale_horizon_days = 1.5\n"
+        "flip_min_margin_share = 0\n"
+        "flip_min_margin_copper = 500\n"
+    )
+    config = load_config(write_config(tmp_path, text + INSTALL))
+
+    assert config.ah_cut == 0.1
+    assert config.neutral_ah_cut == 0.25
+    assert config.sale_horizon_seconds == 36 * 3600
+    assert config.flip_min_margin_share == 0
+    assert config.flip_min_margin_copper == 500
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("ah_cut", "-0.05"),
+        ("ah_cut", "1"),  # a sale would bring in nothing
+        ("neutral_ah_cut", '"0.15"'),
+        ("sale_horizon_days", "0"),
+        ("sale_horizon_days", "true"),
+        ("flip_min_margin_share", "-0.2"),
+        ("flip_min_margin_copper", "-1"),
+        ("flip_min_margin_copper", "1.5"),  # whole copper
+    ],
+)
+def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):
+    path = write_config(tmp_path, f"{key} = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)

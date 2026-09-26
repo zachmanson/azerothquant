@@ -912,6 +912,21 @@ def pooled_gold(conn: sqlite3.Connection, era: Era, realm: str, faction: str) ->
     return total
 
 
+def character_markets(conn: sqlite3.Connection) -> dict[Market, list[str]]:
+    """The player's Characters in each Market, by the faction of each one's latest
+    Character Read. A Character whose faction isn't known is left out."""
+    rows = conn.execute(
+        "SELECT era, realm, faction, character FROM (SELECT * FROM character_read r"
+        " WHERE read_at = (SELECT MAX(read_at) FROM character_read"
+        " WHERE era = r.era AND realm = r.realm AND character = r.character))"
+        " WHERE faction IS NOT NULL ORDER BY era, realm, faction, character"
+    )
+    result: dict[Market, list[str]] = {}
+    for era, realm, faction, character in rows:
+        result.setdefault(Market(realm, faction, Era(era)), []).append(character)
+    return result
+
+
 def vendor_prices(conn: sqlite3.Connection, era: Era) -> dict[int, int]:
     """Copper a vendor pays for one unit, by itemID, as last seen in the Era."""
     rows = conn.execute("SELECT item_id, price FROM vendor_price WHERE era = ?", (era.value,))

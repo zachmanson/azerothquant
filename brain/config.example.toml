@@ -30,6 +30,18 @@
 # that many days before now count. Defaults to 14. Must come before the first [[installs]].
 # sell_rate_days = 14
 
+# Optional: how `brain recommend` decides. The Auction House keeps ah_cut of a sale at a
+# faction Auction House and neutral_ah_cut at a neutral one. Only the held units Sell Rate
+# says will sell within sale_horizon_days are worth Selling, and a Flip never buys more
+# than that. A Flip to Sell must make at least flip_min_margin_share of its buy price and
+# at least flip_min_margin_copper per unit. Default to 0.05, 0.15, 7, 0.2 and 100 (1 silver).
+# Must come before the first [[installs]].
+# ah_cut = 0.05
+# neutral_ah_cut = 0.15
+# sale_horizon_days = 7
+# flip_min_margin_share = 0.2
+# flip_min_margin_copper = 100
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

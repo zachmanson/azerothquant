@@ -1,10 +1,11 @@
 """The `brain` command.
 
-    brain import   import every SavedVariables file once
-    brain watch    import each SavedVariables file whenever the client rewrites it
-    brain rebuild  recreate the history database from the Archive (ADR-0005)
+    brain import     import every SavedVariables file once
+    brain watch      import each SavedVariables file whenever the client rewrites it
+    brain rebuild    recreate the history database from the Archive (ADR-0005)
+    brain recommend  print what to do with Holdings, and the Shopping List
 
-Both only read the Addon's SavedVariables and write the Brain's own files; nothing
+All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003).
 """
 
@@ -17,6 +18,7 @@ import sys
 import time
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from brain.archive import Archive
@@ -30,6 +32,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.recommend import MarketRecommendations, Row, recommend
 from brain.recommendations import write_recommendations
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
@@ -202,6 +205,19 @@ def _import_once(config: Config) -> int:
     return 1 if any(r.error is not None for r in results) else 0
 
 
+def _recommend(config: Config) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        text = run_recommend(config)
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
+        return 1
+    print(text, end="")
+    return 0
+
+
 def _rebuild(config: Config) -> int:
     try:
         report = run_rebuild(config)
@@ -221,6 +237,91 @@ def _rebuild(config: Config) -> int:
         report.character_reads_imported,
     )
     return 0
+
+
+def run_recommend(config: Config) -> str:
+    """The Recommendations for every Market the player has Characters in, as text."""
+    with closing(open_history(config.history_path)) as conn:
+        markets = recommend(conn, config)
+    if not markets:
+        return "No Character has a Market with a Scan yet.\n"
+    return "\n".join(_render_market(m) for m in markets)
+
+
+def _render_market(m: MarketRecommendations) -> str:
+    as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
+    holdings = _table(
+        ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "Note"],
+        [
+            [
+                r.item_key,
+                _action(r),
+                str(r.quantity),
+                _money(r.price),
+                _money(r.profit),
+                _money(r.margin),
+                _count(r.sale_events),
+                r.note,
+            ]
+            for r in m.holdings
+        ],
+    )
+    shopping = _table(
+        ["Item", "Action", "Qty", "Max price", "Profit", "Cost", "Sales"],
+        [
+            [
+                r.item_key,
+                _action(r),
+                str(r.quantity),
+                _money(r.price),
+                _money(r.profit),
+                _money(r.cost),
+                _count(r.sale_events),
+            ]
+            for r in m.shopping_list
+        ],
+    )
+    market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
+    return (
+        f"{market}, as of the Scan at {as_of}\n\n"
+        f"Holdings\n{holdings}\n"
+        f"Shopping List: {_money(m.gold)} to spend, {_money(m.shopping_cost)} in total\n"
+        f"{shopping}"
+    )
+
+
+def _table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "  (nothing)\n"
+    widths = [max(len(cell) for cell in column) for column in zip(headers, *rows, strict=True)]
+    return "".join(
+        "  "
+        + "  ".join(cell.ljust(w) for cell, w in zip(line, widths, strict=True)).rstrip()
+        + "\n"
+        for line in (headers, *rows)
+    )
+
+
+def _action(row: Row) -> str:
+    return "-" if row.action is None else row.action.value
+
+
+def _count(n: int | None) -> str:
+    return "" if n is None else str(n)
+
+
+def _money(copper: float | None) -> str:
+    """Copper as the game shows it: 12g 03s 05c, 3s 05c or 5c."""
+    if copper is None:
+        return ""
+    sign, copper = ("-" if copper < 0 else ""), abs(round(copper))
+    gold, rest = divmod(copper, 10000)
+    silver, copper = divmod(rest, 100)
+    if gold:
+        return f"{sign}{gold}g {silver:02d}s {copper:02d}c"
+    if silver:
+        return f"{sign}{silver}s {copper:02d}c"
+    return f"{sign}{copper}c"
 
 
 def _watch(config: Config) -> int:
@@ -262,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("import", help="import every SavedVariables file once")
     commands.add_parser("watch", help="import SavedVariables files whenever they change")
     commands.add_parser("rebuild", help="recreate the history database from the Archive")
+    commands.add_parser("recommend", help="print what to do with Holdings, and what to buy")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -275,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
         return _import_once(config)
     if args.command == "rebuild":
         return _rebuild(config)
+    if args.command == "recommend":
+        return _recommend(config)
     return _watch(config)
 
 

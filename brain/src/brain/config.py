@@ -50,6 +50,17 @@ DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE = 1.2
 DEFAULT_SELL_RATE_RANGE_DAYS = 14
 
 
+# The Decision Engine (#23). The Auction House keeps this share of a sale: 5% at a
+# faction Auction House, 15% at a neutral one.
+DEFAULT_AH_CUT = 0.05
+DEFAULT_NEUTRAL_AH_CUT = 0.15
+# Only the held units Sell Rate says will sell within this many days are worth Selling.
+DEFAULT_SALE_HORIZON_DAYS = 7
+# A Flip to Sell must clear both this share of its buy price and this much copper per unit.
+DEFAULT_FLIP_MIN_MARGIN_SHARE = 0.2
+DEFAULT_FLIP_MIN_MARGIN_COPPER = 100
+
+
 DEFAULT_HISTORY_FILE = "history.sqlite"
 DEFAULT_ARCHIVE_DIR = "archive"
 
@@ -75,6 +86,15 @@ class Config:
     probable_sale_max_fair_value_multiple: float = DEFAULT_PROBABLE_SALE_MAX_FAIR_VALUE_MULTIPLE
     # Sell Rate counts only the Observation Windows that ended this recently.
     sell_rate_range_seconds: int = DEFAULT_SELL_RATE_RANGE_DAYS * 24 * 3600
+    # Share of a sale the Auction House keeps, at a faction and at a neutral one.
+    ah_cut: float = DEFAULT_AH_CUT
+    neutral_ah_cut: float = DEFAULT_NEUTRAL_AH_CUT
+    # How long the player is willing to wait for held units to sell (CONTEXT.md).
+    sale_horizon_seconds: int = DEFAULT_SALE_HORIZON_DAYS * 24 * 3600
+    # A Flip to Sell must make at least this share of its buy price...
+    flip_min_margin_share: float = DEFAULT_FLIP_MIN_MARGIN_SHARE
+    # ...and at least this many copper per unit.
+    flip_min_margin_copper: int = DEFAULT_FLIP_MIN_MARGIN_COPPER
 
 
 def load_config(path: Path) -> Config:
@@ -150,6 +170,32 @@ def load_config(path: Path) -> Config:
         lambda x: x > 0,
         "above 0",
     )
+    ah_cut, neutral_ah_cut = (
+        _parse_number(
+            path, raw.get(key, default), key, lambda x: 0 <= x < 1, "from 0 up to (not including) 1"
+        )
+        for key, default in (("ah_cut", DEFAULT_AH_CUT), ("neutral_ah_cut", DEFAULT_NEUTRAL_AH_CUT))
+    )
+    horizon_days = _parse_number(
+        path,
+        raw.get("sale_horizon_days", DEFAULT_SALE_HORIZON_DAYS),
+        "sale_horizon_days",
+        lambda x: x > 0,
+        "of days above 0",
+    )
+    margin_share = _parse_number(
+        path,
+        raw.get("flip_min_margin_share", DEFAULT_FLIP_MIN_MARGIN_SHARE),
+        "flip_min_margin_share",
+        lambda x: x >= 0,
+        "of at least 0",
+    )
+    margin_copper = raw.get("flip_min_margin_copper", DEFAULT_FLIP_MIN_MARGIN_COPPER)
+    if isinstance(margin_copper, bool) or not isinstance(margin_copper, int) or margin_copper < 0:
+        raise ConfigError(
+            f"{path}: flip_min_margin_copper must be a whole number of copper of at least 0, "
+            f"got {margin_copper!r}"
+        )
 
     return Config(
         installs=installs,
@@ -161,6 +207,11 @@ def load_config(path: Path) -> Config:
         fair_value_outlier_share=outlier_share,
         probable_sale_max_fair_value_multiple=multiple,
         sell_rate_range_seconds=sell_rate_days * 24 * 3600,
+        ah_cut=ah_cut,
+        neutral_ah_cut=neutral_ah_cut,
+        sale_horizon_seconds=round(horizon_days * 24 * 3600),
+        flip_min_margin_share=margin_share,
+        flip_min_margin_copper=margin_copper,
     )
 
 
