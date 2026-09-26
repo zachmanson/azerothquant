@@ -103,6 +103,13 @@ def test_rejects_an_unterminated_table():
         parse_savedvariables("t = { 1, 2")
 
 
+@pytest.mark.parametrize("text", ["t = ", 't = { ["a"] = 1, [', "t = { 1, "])
+def test_a_file_cut_off_where_a_value_should_start_is_rejected(text):
+    # What a file read mid-write looks like; it must be a SavedVariablesError, not a crash.
+    with pytest.raises(SavedVariablesError, match="end of file"):
+        parse_savedvariables(text)
+
+
 def test_an_unterminated_string_reports_the_line_it_started_on():
     with pytest.raises(SavedVariablesError, match="line 2: unterminated string"):
         parse_savedvariables('t = {\n"abc')

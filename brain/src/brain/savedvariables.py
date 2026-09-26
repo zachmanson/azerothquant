@@ -63,6 +63,9 @@ class _Parser:
     def _value(self) -> Any:
         self._skip_space()
         c = self._peek()
+        # Checked first: "" (end of file) is "in" every string below.
+        if c == "":
+            raise self._error("unexpected end of file")
         if c == "{":
             return self._table()
         if c in "\"'":
