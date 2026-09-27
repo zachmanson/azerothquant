@@ -39,6 +39,16 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Sell 1 @ 50s" }, linesFor(r, "item:6581::::::::20:1490::1:2:12732:1500"))
   end)
 
+  it("ignores the bonus ID 3524 the AH adds to its browse-row links", function()
+    local r = recs({
+      holdings = { { itemKey = "1179", action = "Sell", quantity = 4, price = 49, profit = 187 } },
+    })
+
+    -- Captured in game (#37): the AH's Ice Cold Milk vs. the same milk in bags.
+    assert.are.same({ "AQ: Sell 4 @ 49c" }, linesFor(r, "item:1179::::::::20:1490:::1:3524::::::"))
+    assert.are.same({ "AQ: Sell 4 @ 49c" }, linesFor(r, "item:1179::::::::20:1490::::::::"))
+  end)
+
   it("gives a Craft its note and a Hold its Prediction instead of a price", function()
     local r = recs({
       holdings = {

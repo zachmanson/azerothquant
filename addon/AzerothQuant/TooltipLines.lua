@@ -15,6 +15,10 @@ local TooltipLines = {}
 -- modifiersMask:context:numBonusIDs:bonusID1:..." (1-based; the bonus IDs follow it).
 local NUM_BONUS_IDS = 13
 
+-- The AH builds its browse-row links from an auction item key and adds bonus ID 3524,
+-- which the item itself (in bags, or in a Scan's listing links) doesn't carry (#37).
+local AH_ITEM_KEY_BONUS_ID = 3524
+
 -- Splits on ":" keeping empty fields, which string.gmatch can't do reliably in Lua 5.1.
 local function fields(s)
   local out = {}
@@ -42,7 +46,10 @@ local function itemKey(link)
   local key = { f[1] }
   local bonusIDs = {}
   for i = NUM_BONUS_IDS + 1, NUM_BONUS_IDS + (tonumber(f[NUM_BONUS_IDS]) or 0) do
-    bonusIDs[#bonusIDs + 1] = tonumber(f[i])
+    local id = tonumber(f[i])
+    if id ~= AH_ITEM_KEY_BONUS_ID then
+      bonusIDs[#bonusIDs + 1] = id
+    end
   end
   table.sort(bonusIDs)
   for _, id in ipairs(bonusIDs) do
