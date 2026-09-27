@@ -17,7 +17,7 @@ local PADDING = 12
 -- Per section, the width of each column after the icon; the first is the item name.
 local COLUMN_WIDTHS = {
   ["Holdings"] = { 190, 50, 40, 90, 90, 150 },
-  ["Shopping List"] = { 190, 40, 100, 100, 100 },
+  ["Shopping List"] = { 190, 40, 80, 80, 80, 140 },
   ["Prediction buys"] = { 190, 120, 40, 100, 100 },
 }
 local MAX_COLUMNS = 6

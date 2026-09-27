@@ -61,8 +61,28 @@ local function money(copper)
   return copper and Money.format(copper) or ""
 end
 
-local function tooltip(r)
+-- The item's name, or its Item Key until the client has loaded it.
+local function nameFor(itemKey, nameOf)
+  return nameOf(itemString(itemKey)) or ("item:" .. itemKey)
+end
+
+-- A Flip to Craft's reagent buy, e.g. "Buy 12 Linen Cloth @ max 1s 20c". The Brain only
+-- knows names from own Listings, so naming reagents falls to the Addon (ADR-0009).
+local function reagentLine(buy, nameOf)
+  local where = buy.merchant and " from a merchant @ " or " @ max "
+  return "Buy " .. buy.quantity .. " " .. nameFor(buy.itemKey, nameOf) .. where
+    .. Money.format(buy.maxUnitPrice)
+end
+
+-- A Flip to Craft's tooltip lists its reagent buys; its note only names them by ID.
+local function tooltip(r, nameOf)
   local lines = {}
+  if r.buys then
+    for _, buy in ipairs(r.buys) do
+      lines[#lines + 1] = reagentLine(buy, nameOf)
+    end
+    return lines
+  end
   if r.margin then
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)
   end
@@ -88,8 +108,23 @@ function RecommendationTable.lowValue(r)
   return r.action == nil or (r.action == "Vendor" and r.profit == 0)
 end
 
+-- The Character a Craft row names in its note ("on <Character>: uses ..."), or nil.
+function RecommendationTable.crafter(r)
+  return r.note and r.note:match("^on ([^:]+):")
+end
+
+-- A Flip to Craft's note names reagents by ID, which is no use in game: the summary keeps
+-- the Character and leaves the reagents to the tooltip.
+local function flipToCraftNote(r)
+  local character = RecommendationTable.crafter(r)
+  local n = #r.buys
+  return "Craft" .. (character and (" on " .. character) or "") .. ", buy " .. n
+    .. (n == 1 and " reagent" or " reagents")
+end
+
 local function shoppingCells(r, name)
-  return { name, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost) }
+  local note = r.buys and flipToCraftNote(r) or r.note or ""
+  return { name, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost), note }
 end
 
 local function predictionBuyCells(r, name)
@@ -103,9 +138,9 @@ local function section(title, columns, rows, cells, nameOf)
     if RecommendationTable.lowValue(r) then
       folded = folded + 1
     else
-      local s = itemString(r.itemKey)
-      local name = nameOf(s) or ("item:" .. r.itemKey)
-      out.rows[#out.rows + 1] = { itemString = s, cells = cells(r, name), tooltip = tooltip(r) }
+      local name = nameFor(r.itemKey, nameOf)
+      out.rows[#out.rows + 1] =
+        { itemString = itemString(r.itemKey), cells = cells(r, name), tooltip = tooltip(r, nameOf) }
     end
   end
   if folded > 0 then
@@ -132,7 +167,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
       ),
       section(
         "Shopping List",
-        { "Item", "Qty", "Max price", "Profit", "Cost" },
+        { "Item", "Qty", "Max price", "Profit", "Cost", "Note" },
         entry.shoppingList,
         shoppingCells,
         nameOf

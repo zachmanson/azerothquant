@@ -130,9 +130,56 @@ describe("RecommendationTable.build", function()
 
     local shopping = view.sections[2]
     assert.are.equal("Shopping List", shopping.title)
-    assert.are.same({ "Item", "Qty", "Max price", "Profit", "Cost" }, shopping.columns)
-    assert.are.same({ "item:9749", "3", "10s", "94s 50c", "30s" }, shopping.rows[1].cells)
+    assert.are.same({ "Item", "Qty", "Max price", "Profit", "Cost", "Note" }, shopping.columns)
+    assert.are.same({ "item:9749", "3", "10s", "94s 50c", "30s", "" }, shopping.rows[1].cells)
     assert.are.same({ "Sales 4" }, shopping.rows[1].tooltip)
+  end)
+
+  -- A Flip to Craft as the Brain writes it (brain/tests/test_recommendations.py).
+  local function flipToCraft()
+    return {
+      itemKey = "2996",
+      action = "Craft",
+      quantity = 6,
+      profit = 4500.0,
+      cost = 1250.0,
+      note = "on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
+      buys = {
+        { itemKey = "2589", quantity = 12, maxUnitPrice = 120 },
+        { itemKey = "2320", quantity = 5, maxUnitPrice = 10.0, merchant = true },
+      },
+    }
+  end
+
+  it("lists a Flip to Craft's reagent buys by name in its tooltip, in place of the ID note", function()
+    local names = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread" }
+    local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, function(itemString)
+      return names[itemString]
+    end)
+
+    assert.are.same({
+      "Buy 12 Linen Cloth @ max 1s 20c",
+      "Buy 5 Coarse Thread from a merchant @ 10c",
+    }, view.sections[2].rows[1].tooltip)
+  end)
+
+  it("sums up a Flip to Craft in its note: who crafts it and how many reagents to buy", function()
+    local oneBuy = flipToCraft()
+    oneBuy.buys[2] = nil
+    local view = build(entry({ shoppingList = { flipToCraft(), oneBuy } }))
+
+    local rows = view.sections[2].rows
+    assert.are.same(
+      { "item:2996", "6", "", "45s", "12s 50c", "Craft on Kash-Patel, buy 2 reagents" },
+      rows[1].cells
+    )
+    assert.are.equal("Craft on Kash-Patel, buy 1 reagent", rows[2].cells[6])
+  end)
+
+  it("names a reagent not cached yet by its Item Key", function()
+    local view = build(entry({ shoppingList = { flipToCraft() } }))
+
+    assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[2].rows[1].tooltip[1])
   end)
 
   it("shows Prediction buys under the Shopping List", function()

@@ -63,8 +63,13 @@ local function holdingLine(r)
   return head .. " @ " .. Money.format(r.price)
 end
 
--- A Shopping List row is a Flip; a Prediction buy is held under its Prediction.
+-- A Shopping List row is a Flip; a Prediction buy is held under its Prediction. A Flip to
+-- Craft buys the output's reagents, not the output, so it has no price.
 local function buyLine(r)
+  if r.buys then
+    local character = RecommendationTable.crafter(r)
+    return "AQ: Buy reagents, Craft " .. r.quantity .. (character and (" on " .. character) or "")
+  end
   local line = "AQ: Buy " .. r.quantity .. " @ max " .. Money.format(r.price)
   if r.prediction then
     line = line .. " under " .. r.prediction

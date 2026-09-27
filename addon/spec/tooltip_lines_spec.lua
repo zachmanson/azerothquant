@@ -51,6 +51,24 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Hold 20 under Phase 2" }, linesFor(r, "item:12359"))
   end)
 
+  it("gives a Flip to Craft's output a buy-then-craft line, since it has no price", function()
+    local r = recs({
+      shoppingList = {
+        {
+          itemKey = "2996",
+          action = "Craft",
+          quantity = 6,
+          profit = 4500.0,
+          cost = 1250.0,
+          note = "on Kash-Patel: uses 12 of 2589 (buy 12)",
+          buys = { { itemKey = "2589", quantity = 12, maxUnitPrice = 120 } },
+        },
+      },
+    })
+
+    assert.are.same({ "AQ: Buy reagents, Craft 6 on Kash-Patel" }, linesFor(r, "item:2996"))
+  end)
+
   it("adds nothing for rows the Recommendation Table folds away", function()
     local r = recs({
       holdings = {
