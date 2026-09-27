@@ -17,6 +17,7 @@ KnownRecipes.lua
 MerchantCosts.lua
 Prune.lua
 Nudge.lua
+RecommendationTable.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua
@@ -27,3 +28,6 @@ Character.lua
 
 # SPIKE (#15), throwaway: /aq maildump. Delete with the file.
 MailDumpSpike.lua
+
+# After MailDumpSpike.lua: it takes over /aq and passes other commands on.
+RecommendationFrame.lua
