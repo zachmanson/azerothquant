@@ -2,9 +2,9 @@ local MerchantCosts = require("MerchantCosts")
 
 -- One merchant item as Merchant.lua reads it: the itemID, the price of one purchase in
 -- copper, how many units one purchase gives, how many the merchant has left (-1 for
--- unlimited) and whether it costs anything besides gold.
+-- unlimited) and how many costs it has besides gold.
 local function sold(itemID, price, fields)
-  local item = { itemID = itemID, price = price, stackCount = 1, numAvailable = -1, hasExtendedCost = false }
+  local item = { itemID = itemID, price = price, stackCount = 1, numAvailable = -1, extraCosts = 0 }
   for k, v in pairs(fields or {}) do
     item[k] = v
   end
@@ -31,7 +31,7 @@ describe("MerchantCosts.read", function()
     local costs = MerchantCosts.read({
       sold(COARSE_THREAD, 10),
       sold(PATTERN, 1200, { numAvailable = 1 }),
-      sold(HONOR_CLOAK, 5000, { hasExtendedCost = true }),
+      sold(HONOR_CLOAK, 5000, { extraCosts = 1 }),
     }, {})
 
     assert.are.same({ [COARSE_THREAD] = 10 }, costs)

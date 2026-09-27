@@ -17,16 +17,16 @@ local isOpen = false
 local timer
 local costs = {} -- itemID -> copper per unit, every merchant visited this session
 
--- { price, stackCount, numAvailable, hasExtendedCost } for one merchant slot, or nil.
+-- { price, stackCount, numAvailable } for one merchant slot, or nil.
 local function slotInfo(index)
   if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
     return C_MerchantFrame.GetItemInfo(index)
   end
-  local _, _, price, stackCount, numAvailable, _, _, extendedCost = GetMerchantItemInfo(index)
+  local _, _, price, stackCount, numAvailable = GetMerchantItemInfo(index)
   if price == nil then
     return nil
   end
-  return { price = price, stackCount = stackCount, numAvailable = numAvailable, hasExtendedCost = extendedCost }
+  return { price = price, stackCount = stackCount, numAvailable = numAvailable }
 end
 
 -- The itemID doesn't need the item cached; the link does, so it's only the fallback.
@@ -51,7 +51,9 @@ local function readWindow()
         price = info.price,
         stackCount = info.stackCount,
         numAvailable = info.numAvailable,
-        hasExtendedCost = info.hasExtendedCost and true or false,
+        -- Not the hasExtendedCost flag: this client sets it on items sold for gold
+        -- alone (the Black Market's Black Lotus), so count the extra costs instead (#65).
+        extraCosts = GetMerchantItemCostInfo(index) or 0,
       }
     end
   end
