@@ -3,6 +3,7 @@
 -- All shaping happens in Scan.lua; this file only talks to the WoW API.
 -- On load it also deletes the Scans the Brain has imported (Prune.lua). While
 -- the AH is open it nudges when a Scan would complete an Observation Window (Nudge.lua).
+-- ns.Scanner.busy() says whether a Scan is in flight.
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
@@ -223,3 +224,11 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     debounceTimer = C_Timer.NewTimer(QUIET_SECONDS, readRows)
   end
 end)
+
+-- True from the Scan request until it's saved or aborted. A reload then would lose the
+-- Scan, so the Reload button and /aq reload wait (#47).
+ns.Scanner = {
+  busy = function()
+    return pending ~= nil
+  end,
+}

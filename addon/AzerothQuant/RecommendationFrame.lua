@@ -9,6 +9,7 @@
 local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
 local Scan = ns.Scan
+local Scanner = ns.Scanner
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
@@ -374,6 +375,39 @@ local function createTabs()
   PanelTemplates_SetNumTabs(frame, #tabs)
 end
 
+-- Reloading flushes SavedVariables (new Scans reach the Brain) and rereads
+-- Recommendations.lua (a Brain import reaches the table). Not mid-Scan, which would lose it.
+local RELOAD_TIP = "Reload the UI: saves new Scans for the Brain and loads its latest Recommendations."
+local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
+
+local function reload()
+  if Scanner.busy() then
+    say(BUSY_TIP)
+    return
+  end
+  ReloadUI()
+end
+
+local function createReloadButton()
+  local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  button:SetSize(70, 22)
+  button:SetText("Reload")
+  button:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
+  button:SetScript("OnClick", reload)
+  -- Disabled buttons get no OnEnter unless told to, and the tooltip must say why it's off.
+  button:SetMotionScriptsWhileDisabled(true)
+  button:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(Scanner.busy() and BUSY_TIP or RELOAD_TIP, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  button:SetScript("OnLeave", GameTooltip_Hide)
+  -- A Scan starts and ends on its own clock, so follow it while the frame is shown.
+  button:SetScript("OnUpdate", function(self)
+    self:SetEnabled(not Scanner.busy())
+  end)
+end
+
 local function createFrame()
   frame = CreateFrame("Frame", "AzerothQuantRecommendationFrame", UIParent, "ButtonFrameTemplate")
   frame:SetSize(WIDTH, HEIGHT)
@@ -402,6 +436,8 @@ local function createFrame()
   frame.header1:SetPoint("TOPLEFT", frame, "TOPLEFT", 66, -32)
   frame.header2 = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   frame.header2:SetPoint("TOPLEFT", frame.header1, "BOTTOMLEFT", 0, -4)
+
+  createReloadButton()
 
   scroll = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", SCROLL_LEFT, -4 - HEADER_HEIGHT - 2)
@@ -477,9 +513,11 @@ SLASH_AZEROTHQUANT1 = "/aq"
 SlashCmdList.AZEROTHQUANT = function(msg)
   if msg:match("^%s*recs%s*$") then
     toggle()
+  elseif msg:match("^%s*reload%s*$") then
+    reload()
   elseif previousSlash then
     previousSlash(msg)
   else
-    say("Usage: /aq recs (toggle the Recommendation Table)")
+    say("Usage: /aq recs (toggle the Recommendation Table), /aq reload")
   end
 end
