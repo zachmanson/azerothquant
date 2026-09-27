@@ -41,6 +41,9 @@ else
   end
 end
 
+-- C_Item on newer clients (the Beta has no global GetItemInfo), the old global otherwise.
+local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+
 local db
 local atBank = false
 local bank -- { readAt, slots }: the latest read while the bank was open this session
@@ -58,7 +61,7 @@ local function readContainers(bags, into)
       local info = itemInfo(bag, slot)
       -- The Vendor Price is read now, with the item, rather than at logout. GetItemInfo's
       -- 11th return; nil until the client has loaded the item.
-      local sellPrice = info and select(11, GetItemInfo(info.hyperlink))
+      local sellPrice = info and select(11, getItemInfo(info.hyperlink))
       into[#into + 1] = { bag = bag, slot = slot, info = info, sellPrice = sellPrice }
     end
   end

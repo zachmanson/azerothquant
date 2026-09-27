@@ -85,9 +85,12 @@ local function tick()
   refreshButton()
 end
 
+-- C_Item on newer clients (the Beta has no global GetItemInfo), the old global otherwise.
+local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+
 -- The Vendor Price: GetItemInfo's 11th return. nil until the client has loaded the item.
 local function sellPrice(itemID)
-  return (select(11, GetItemInfo(itemID)))
+  return (select(11, getItemInfo(itemID)))
 end
 
 local function finish(rows)
