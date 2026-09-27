@@ -13,12 +13,14 @@ Money.lua
 Scan.lua
 MailboxRead.lua
 CharacterRead.lua
+KnownRecipes.lua
 Prune.lua
 Nudge.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua
 Mailbox.lua
+Professions.lua
 Character.lua
 
 # SPIKE (#15), throwaway: /aq maildump. Delete with the file.

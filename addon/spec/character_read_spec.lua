@@ -80,4 +80,24 @@ describe("CharacterRead.build", function()
     assert.are.same({ [2589] = 10, [6948] = 0, [3300] = 25 }, read.vendorPrices)
     assert.are.equal(1, read.vendorPricesMissing)
   end)
+
+  it("includes the Known Recipes of each profession read this session, and the profession list", function()
+    local tailoring = { readAt = 1790449500, professionID = 197, professionName = "Tailoring", recipes = {} }
+    local list = {
+      { professionID = 197, professionName = "Tailoring" },
+      { professionID = 333, professionName = "Enchanting" },
+    }
+
+    local read = CharacterRead.build(WHO, {}, nil, { [197] = tailoring }, list)
+
+    assert.are.same({ [197] = tailoring }, read.professions)
+    assert.are.same(list, read.professionList)
+  end)
+
+  it("leaves professions out when no window was opened this session", function()
+    local read = CharacterRead.build(WHO, {}, nil, {}, {})
+
+    assert.is_nil(read.professions)
+    assert.are.same({}, read.professionList)
+  end)
 end)

@@ -65,6 +65,43 @@ def test_every_character_read_is_archived_verbatim_and_imported(db, tmp_path):
     assert archived == [(Era.BETA, first), (Era.BETA, second)]
 
 
+def test_known_recipes_are_archived_but_change_nothing_the_brain_imports(db, tmp_path):
+    # Not parsed until the Craft Action (ADR-0005, #18 amendment); `brain rebuild` reads
+    # them back from the Archive then. Keyed by professionID, so JSON gives string keys.
+    config = archived_config(tmp_path)
+    recipe = {
+        "recipeID": 2963,
+        "name": "Bolt of Linen Cloth",
+        "recipeType": 1,
+        "outputItemID": 2996,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
+    }
+    tailoring = {"readAt": T0 - 30, "professionID": 197, "professionName": "Tailoring"}
+    profession_list = [{"professionID": 197, "professionName": "Tailoring"}]
+    plain = character_read(T0, money=100, bags=[item(count=3)])
+    with_recipes = plain | {
+        "professions": {197: tailoring | {"recipes": [recipe]}},
+        "professionList": profession_list,
+    }
+    plain_db = open_history(":memory:")
+    import_character_reads(plain_db, [plain], Era.BETA, CONFIG)
+
+    report = import_character_reads(db, [with_recipes], Era.BETA, config)
+
+    assert report.character_reads_imported == 1
+    assert report.warnings == []
+    assert holdings(db, Era.BETA, REALM, "Kash-Patel") == holdings(
+        plain_db, Era.BETA, REALM, "Kash-Patel"
+    )
+    assert pooled_gold(db, Era.BETA, REALM, "Alliance") == 100
+    [(_, archived)] = Archive(config.archive_dir).character_reads()
+    assert archived["professions"] == {"197": tailoring | {"recipes": [recipe]}}
+    assert archived["professionList"] == profession_list
+    plain_db.close()
+
+
 def test_reimporting_the_same_character_read_changes_nothing(db, tmp_path):
     config = archived_config(tmp_path)
     import_character_reads(db, [character_read()], Era.BETA, config)
