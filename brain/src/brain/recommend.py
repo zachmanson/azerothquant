@@ -69,8 +69,8 @@ class Row:
     # pay for the Shopping List.
     price: float | None = None
     profit: float | None = None  # expected copper for the whole quantity
-    # Per unit, a Flip to Sell's price to post at: the Fair Value its Profit rests on,
-    # before the cut (#59).
+    # Per unit, a Flip to Sell's price to post at, which its Profit rests on, before the
+    # cut (#59): just under the cheapest other player's Listing left once it's bought (#62).
     post_at: float | None = None
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
@@ -235,6 +235,7 @@ def recommend(
             plan.output: _outlet(
                 plan.recipe.bind_type in _BOUND_ON_CRAFT,
                 supply.get(plan.output, []),
+                for_sale.get(plan.output, []),
                 rates.get(plan.output),
                 vendor.get(_item_id(plan.output)),
                 _unbound(held.get(plan.output, Holding())),
@@ -697,6 +698,7 @@ class _Outlet:
 def _outlet(
     bound: bool,
     supply: Supply,
+    others: Supply,
     rate: SellRate | None,
     vendor_price: int | None,
     held: int,
@@ -706,11 +708,12 @@ def _outlet(
 ) -> _Outlet:
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
     within the Sale Horizon under the Flip priors, less the `held` units and the ones
-    `flipped` to Sell. It resells like them, at the Fair Value left once they're bought."""
+    `flipped` to Sell. It resells like them, posted under what's left once they're bought.
+    `others` is other players' asks."""
     room, resale = _flip_room(rate, config), None
     if room:
         room = max(0, room - held - sum(n for _, n in flipped))
-        resale = _resale(supply, flipped, cut, config, rate.max_sale_price)
+        resale = _resale(supply, others, flipped, cut, config, rate.max_sale_price)
     return _Outlet(room, resale, vendor_price or 0, bound)
 
 
@@ -996,33 +999,41 @@ def _flips(
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
 
-    Buy to Sell takes no more than sells within the Sale Horizon, and prices the resale
-    at the Fair Value of what's left once they're bought: buying the cheap units moves
-    the price, and a lone cheap Listing is left out of Fair Value as an outlier, though
-    it's the one most worth buying. The resale is never above the dearest Sale Event
-    behind the Sell Rate, so a lone ask far above every sale isn't taken at its word
-    (#41). Nothing is bought to Sell unless the Sell Rate rests on the minimum of Sale
-    Events for a Flip (#57). Anything else under the Vendor Price is bought to Vendor.
+    Buy to Sell takes no more than sells within the Sale Horizon, and posts just under
+    the cheapest other player's Listing left once they're bought (`_post_at`), so they
+    sell first. A cheap Listing that would undercut the resale is worth buying through,
+    so every run of the cheapest offers is tried, and the one with the most profit whose
+    every unit clears the Flip margin is bought (#62). The resale is never above the
+    dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
+    taken at its word (#41). Nothing is bought to Sell unless the Sell Rate rests on the
+    minimum of Sale Events for a Flip (#57). Anything else under the Vendor Price is
+    bought to Vendor.
     """
     offers = sorted(offers)
     to_sell: Supply = []
+    best_profit = 0.0
+    prefix: Supply = []
     room = _flip_room(rate, config)
     for unit, quantity in offers:
         take = min(quantity, room)
         if not take:
             break
-        resale = _resale(supply, [*to_sell, (unit, take)], cut, config, rate.max_sale_price)
+        prefix = [*prefix, (unit, take)]
+        room -= take
+        resale = _resale(supply, offers, prefix, cut, config, rate.max_sale_price)
+        # Offers are cheapest first, so if the dearest unit clears the margin, all do.
         if resale is None or resale - unit < max(
             unit * config.flip_min_margin_share, config.flip_min_margin_copper
         ):
-            break
+            continue
         if vendor_price is not None and resale <= vendor_price:
-            break  # a vendor pays more, so it's a Flip to Vendor
-        to_sell.append((unit, take))
-        room -= take
+            continue  # a vendor pays more, so it's a Flip to Vendor
+        profit = sum((resale - u) * n for u, n in prefix)
+        if profit > best_profit:
+            to_sell, best_profit = prefix, profit
     buys = []
     if to_sell:
-        post_at = _post_at(supply, to_sell, config, rate.max_sale_price)
+        post_at = _post_at(supply, offers, to_sell, config, rate.max_sale_price)
         resale = post_at * (1 - cut)
         buys = [
             _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events, post_at)
@@ -1062,7 +1073,7 @@ def _hold_buys(
     buys = []
     for unit, quantity in sorted(offers):
         take = min(quantity, room)
-        resale = _resale(supply, [*bought, (unit, take)], cut, config) if take else None
+        resale = _resale(supply, offers, [*bought, (unit, take)], cut, config) if take else None
         parts = [(take, max(resale or 0, vendor_price or 0)), (quantity - take, vendor_price or 0)]
         for n, exit_value in parts:
             if not n:
@@ -1143,22 +1154,32 @@ def sellable_units(
 
 
 def _resale(
-    supply: Supply, bought: Supply, cut: float, config: Config, cap: int | None = None
+    supply: Supply,
+    others: Supply,
+    bought: Supply,
+    cut: float,
+    config: Config,
+    cap: int | None = None,
 ) -> float | None:
-    """What one unit brings in after the cut, at the Fair Value of the supply left once
-    `bought` is gone, or at `cap` if that's lower."""
-    value = _post_at(supply, bought, config, cap)
+    """What one unit brings in after the cut, posted at `_post_at`."""
+    value = _post_at(supply, others, bought, config, cap)
     return None if value is None else value * (1 - cut)
 
 
 def _post_at(
-    supply: Supply, bought: Supply, config: Config, cap: int | None = None
+    supply: Supply, others: Supply, bought: Supply, config: Config, cap: int | None = None
 ) -> float | None:
-    """The price to post one unit at: the Fair Value of the supply left once `bought` is
-    gone, or `cap` if that's lower."""
-    value = fair_value(_without(supply, bought), config)
-    if value is None:
+    """The price to post one unit at once `bought` is gone from other players' `others`
+    (#62): just under the cheapest of them left, so it sells first, or `cap` if that's
+    lower. The player's own Listings, the rest of `supply`, are matched rather than
+    undercut. None if no Listing is left to price against."""
+    left = _without(others, bought)
+    own = _without(supply, others)
+    prices = [left[0][0] - config.post_undercut_copper] if left else []
+    prices += [own[0][0]] if own else []
+    if not prices:
         return None
+    value = min(prices)
     return value if cap is None else min(value, cap)
 
 

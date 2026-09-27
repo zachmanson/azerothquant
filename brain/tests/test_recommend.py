@@ -277,7 +277,7 @@ def test_listings_under_the_vendor_price_are_bought_to_vendor(db):
 def test_resale_is_priced_without_the_units_being_bought(db):
     # 20 Linen: Fair Value averages the cheapest 3, (700 + 700 + 1000) / 3 = 800. Resold at
     # that, the 700s clear only 60 after the cut, under the 1 silver minimum. But once
-    # they're bought the cheapest 3 are all 1000, so they resell for 950 each.
+    # they're bought the cheapest Listing left is 1000, so they're posted at 999.
     result = run(
         db,
         selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
@@ -290,23 +290,68 @@ def test_resale_is_priced_without_the_units_being_bought(db):
             Action.SELL,
             2,
             price=700,
-            profit=2 * 250,
-            post_at=1000,
+            profit=pytest.approx(2 * (999 * 0.95 - 700)),
+            post_at=999,
             sale_events=1,
             cost=1400,
         )
     ]
 
 
+def test_a_flip_to_sell_posts_just_under_the_cheapest_listing_left(db):
+    # #62: 3 at 1g and a wall at 1g 95s. Once the 3 are bought, the 1g 95s is the cheapest
+    # Listing left, so they're posted 1 copper under it to sell first.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500),
+        [character_read(money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.price, flip.post_at) == (3, 10000, 19499)
+    assert flip.profit == pytest.approx(3 * (19499 * 0.95 - 10000))
+
+
+def test_a_flip_to_sell_buys_through_a_listing_that_would_undercut_it(db):
+    # #62: posted under the 1g 05s, the 1g units would lose money, so a buy loop that
+    # stopped there would buy nothing. Buying the 1g 05s too leaves the 1g 95s wall, and
+    # all 4 are posted under it.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=3, unit=10000), row(unit=10500), unit=19500),
+        [character_read(money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.price, flip.post_at) == (4, 10500, 19499)
+    assert flip.profit == pytest.approx(3 * (19499 * 0.95 - 10000) + 19499 * 0.95 - 10500)
+
+
+def test_a_flip_to_sell_matches_an_own_listing_under_the_cheapest_other_one(db):
+    # The player already has one up at 900, under the 1000s: the 700s match it rather than
+    # undercut the player's own Listing.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=700), row(unit=900, own=True), unit=1000),
+        [character_read(money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at) == (2, 900)
+    assert flip.profit == pytest.approx(2 * (900 * 0.95 - 700))
+
+
 @pytest.mark.parametrize(
     ("fair", "unit", "bought"),
     [
-        # Resale 950: 158 over 792 is under 20% of it; 159 over 791 isn't.
-        (1000, 791, True),
-        (1000, 792, False),
-        # Resale 380: 100 over 280 is exactly 1 silver, and more than 20% of it.
-        (400, 280, True),
-        (400, 281, False),
+        # Posted at 999, resale 949.05: 158.05 over 791 is under 20% of it; 159.05 over
+        # 790 isn't.
+        (1000, 790, True),
+        (1000, 791, False),
+        # Posted at 399, resale 379.05: 100.05 over 279 clears 1 silver; 99.05 over 280
+        # doesn't.
+        (400, 279, True),
+        (400, 280, False),
     ],
 )
 def test_a_flip_to_sell_must_clear_20_percent_and_1_silver(db, fair, unit, bought):
@@ -333,12 +378,17 @@ def test_a_flip_to_sell_needs_the_minimum_of_sale_events_or_is_vendored(db, sale
 
 
 def test_a_flip_to_sell_buys_no_more_than_sells_within_the_horizon(db):
-    # A deep Market, so the 4 cheap units left behind don't drag the resale under 1 silver.
+    # 6 sell within the horizon, so the 700s aren't bought and the 500s are posted under them.
     result = run(
         db,
         [
             scan(T0, row(quantity=200, unit=1000)),
-            scan(T0 + HOUR, row(quantity=198, unit=1000), row(quantity=10, unit=500)),
+            scan(
+                T0 + HOUR,
+                row(quantity=198, unit=1000),
+                row(quantity=6, unit=500),
+                row(quantity=4, unit=700),
+            ),
         ],
         [character_read(money=GOLD)],
     )
@@ -363,7 +413,7 @@ def test_a_flip_to_sell_is_never_resold_above_the_dearest_sale(db):
 
 
 def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
-    # A sale at 1100, above the 1000 that's left once the 700s are bought: resold at 950.
+    # A sale at 1100, above the 999 they're posted at once the 700s are bought.
     result = run(
         db,
         [
@@ -379,8 +429,8 @@ def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
             Action.SELL,
             2,
             price=700,
-            profit=2 * 250,
-            post_at=1000,
+            profit=pytest.approx(2 * (999 * 0.95 - 700)),
+            post_at=999,
             sale_events=1,
             cost=1400,
         )
@@ -475,7 +525,7 @@ def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
     config = replace(DEFAULTS, sell_rate_prior_hours_flips=24, flip_min_sale_events=1)
     result = run(
         db,
-        one_sale_in_18_minutes(row(quantity=10, unit=500)),
+        one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700)),
         [character_read(money=GOLD)],
         config=config,
     )
@@ -489,7 +539,7 @@ def test_holdings_are_discounted_less_than_flips(db):
     # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought.
     result = run(
         db,
-        one_sale_in_18_minutes(row(quantity=10, unit=500)),
+        one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700)),
         [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
         config=replace(DEFAULTS, flip_min_sale_events=1),
     )
@@ -587,7 +637,7 @@ def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
     config = replace(CONFIG, sale_size_prior_events_holdings=1, sale_size_prior_events_flips=5)
     result = run(
         db,
-        one_buyer_takes_a_20_stack(row(quantity=40, unit=500)),
+        one_buyer_takes_a_20_stack(row(quantity=30, unit=500), row(quantity=10, unit=700)),
         [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
         config=config,
     )
@@ -936,7 +986,8 @@ def test_a_craft_must_gain_more_than_the_minimum(db, min_gain, crafts):
 
 def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
     # 1 Linen held, worth the 95 it Sells for. The first Bolt buys 1 Linen at 100, the
-    # next 5 buy 2 each, until the 6 Bolts that sell within the horizon at 950.
+    # next 5 buy 2 each, until the 6 Bolts that sell within the horizon, posted at 999
+    # for 949.05 after the cut.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -948,7 +999,7 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
             BOLT_KEY,
             Action.CRAFT,
             6,
-            profit=(950 - 95 - 100) + 5 * (950 - 200),
+            profit=pytest.approx((949.05 - 95 - 100) + 5 * (949.05 - 200)),
             cost=11 * 100,
             note="on Kash-Patel: uses 12 of 2589 (buy 11)",
             buys=(ReagentBuy(LINEN_KEY, 11, 100),),
@@ -959,13 +1010,14 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
 
 def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
     # A Linen at 60 and one at 80 go into the first Bolt; every later one pays 100 a Linen.
-    # Neither is a plain Flip: resold at 95 neither clears 1 silver.
+    # Neither is a plain Flip: posted under the next Listing up, neither clears 1 silver.
     scans = linen_and_bolts_selling()
     scans[1]["listings"] += [row(unit=60), row(unit=80)]
     result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
 
     [craft] = result[MARKET].shopping_list
-    assert (craft.quantity, craft.cost, craft.profit) == (6, 140 + 10 * 100, 6 * 950 - 1140)
+    assert (craft.quantity, craft.cost) == (6, 140 + 10 * 100)
+    assert craft.profit == pytest.approx(6 * 949.05 - 1140)
     assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 100),)
 
 
@@ -1075,7 +1127,7 @@ def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
             BOLT_KEY,
             Action.CRAFT,
             10,
-            profit=6 * (950 - 10) + 4 * (125 - 10),
+            profit=pytest.approx(6 * (949.05 - 10) + 4 * (125 - 10)),
             cost=100,
             note="on Kash-Patel: uses 10 of 2320 (buy 10)",
             buys=(ReagentBuy(THREAD_KEY, 10, 10, merchant=True),),
@@ -1291,9 +1343,9 @@ def test_a_prediction_buys_only_units_whose_max_loss_is_at_most_10_percent_of_co
 
 
 def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
-    # 6 sell within the horizon. Without the Prediction the two 700s are a Flip reselling
-    # at 950 (the Max Loss is negative), and 4 of the 1000s would resell at 950, losing 50
-    # each. Beyond the horizon there's no exit, so nothing more is bought.
+    # 6 sell within the horizon. Without the Prediction the two 700s are a Flip posted at
+    # 999 for 949.05 (the Max Loss is negative), and 4 of the 1000s would resell the same,
+    # losing 50.95 each. Beyond the horizon there's no exit, so nothing more is bought.
     result = run(
         db,
         selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
@@ -1309,7 +1361,7 @@ def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
             6,
             price=1000,
             cost=2 * 700 + 4 * 1000,
-            max_loss=2 * -250 + 4 * 50,
+            max_loss=pytest.approx(2 * -249.05 + 4 * 50.95),
             prediction="Linen spike",
         )
     ]
@@ -1317,7 +1369,7 @@ def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
 
 def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
     # 6 sell within the horizon, and the 4 held would go first if the Prediction is wrong,
-    # so only 2 of the 100s could be resold at 95.
+    # so only 2 of the 100s could be resold, posted at 99 under the rest for 94.05.
     result = run(
         db,
         selling_two_linen_an_hour(),
@@ -1326,7 +1378,8 @@ def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
     )
 
     [buy] = result[MARKET].prediction_buys
-    assert (buy.quantity, buy.max_loss) == (2, 2 * 5)
+    assert buy.quantity == 2
+    assert buy.max_loss == pytest.approx(2 * 5.95)
 
 
 @pytest.mark.parametrize(("sale_events", "bought"), [(2, 0), (3, 6)])

@@ -458,10 +458,11 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # The one Observation Window every Sell Rate here rests on.
     assert "Sell Rate observed for 1.0 h in the last 14 days" in text
     # Fair Value (700 + 700 + 1000) / 3 = 800, less the 5% cut: 760 each, 750 more than a
-    # vendor pays. The Flip resells at 950, once the two 700s are bought.
+    # vendor pays. The Flip is posted at 999 under the 1000s once the two 700s are bought,
+    # for 949.05 after the cut.
     assert ["2589", "Sell", "3", "8s 00c", "22s 80c", "7s 50c", "1"] in lines
     assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
-    assert ["2589", "Sell", "2", "7s 00c", "5s 00c", "14s 00c", "1"] in lines
+    assert ["2589", "Sell", "2", "7s 00c", "4s 98c", "14s 00c", "1"] in lines
 
 
 def _bolts_and_linen(tmp_path, money=0):

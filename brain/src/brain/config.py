@@ -73,6 +73,9 @@ DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS = 5
 # A buy is only resold on the Auction House when its Item Key's Sell Rate rests on at least
 # this many Sale Events: one or two can be a single seller cancelling (#57).
 DEFAULT_FLIP_MIN_SALE_EVENTS = 3
+# A Flip to Sell is posted this many copper under the cheapest other player's Listing left
+# once it's bought, so it sells first (#62).
+DEFAULT_POST_UNDERCUT_COPPER = 1
 # Predictions (ADR-0006): a unit is only bought under one while its Max Loss is at most
 # this share of its cost, and the gold under Predictions is capped at these shares of the
 # Market's pooled gold, per Prediction and in total.
@@ -130,6 +133,8 @@ class Config:
     # A Flip, a Flip to Craft's output or a Hold buy's Max Loss only counts on Selling
     # when the Sell Rate rests on at least this many Sale Events.
     flip_min_sale_events: int = DEFAULT_FLIP_MIN_SALE_EVENTS
+    # A Flip to Sell is posted this many copper under the cheapest other player's Listing.
+    post_undercut_copper: int = DEFAULT_POST_UNDERCUT_COPPER
     # The player's Predictions, always next to the config file (ADR-0006).
     predictions_path: Path = Path(PREDICTIONS_FILE)
     # The most a unit bought under a Prediction may lose, as a share of its cost.
@@ -266,6 +271,12 @@ def load_config(path: Path) -> Config:
             f"{path}: flip_min_sale_events must be a whole number of Sale Events of at least 1, "
             f"got {min_sale_events!r}"
         )
+    undercut = raw.get("post_undercut_copper", DEFAULT_POST_UNDERCUT_COPPER)
+    if isinstance(undercut, bool) or not isinstance(undercut, int) or undercut < 0:
+        raise ConfigError(
+            f"{path}: post_undercut_copper must be a whole number of copper of at least 0, "
+            f"got {undercut!r}"
+        )
     max_loss_share, cap_share, total_cap_share = (
         _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
         for key, default in (
@@ -302,6 +313,7 @@ def load_config(path: Path) -> Config:
         sale_size_prior_events_holdings=size_prior_holdings,
         sale_size_prior_events_flips=size_prior_flips,
         flip_min_sale_events=min_sale_events,
+        post_undercut_copper=undercut,
         predictions_path=path.parent / PREDICTIONS_FILE,
         prediction_max_loss_share=max_loss_share,
         prediction_cap_share=cap_share,

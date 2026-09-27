@@ -70,6 +70,12 @@
 # own aren't affected. Defaults to 3. Must come before the first [[installs]].
 # flip_min_sale_events = 3
 
+# Optional: how far `brain recommend` undercuts. A Flip to Sell is posted this many copper
+# under the cheapest other player's Listing left once it's bought, so it sells first. A
+# Listing of your own that's cheaper is matched instead. Your other Characters' Listings
+# count as other players'. Defaults to 1. Must come before the first [[installs]].
+# post_undercut_copper = 1
+
 # Optional: the guards on Predictions (see predictions.example.toml and ADR-0006). A unit
 # is only bought under a Prediction while its Max Loss, what it cost less what it would
 # bring today if the Prediction is wrong, is at most prediction_max_loss_share of its cost.

@@ -265,6 +265,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.sale_size_prior_events_holdings == 1
     assert config.sale_size_prior_events_flips == 5
     assert config.flip_min_sale_events == 3
+    assert config.post_undercut_copper == 1
     assert config.craft_min_gain == 0
 
 
@@ -280,6 +281,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "sale_size_prior_events_holdings = 0\n"
         "sale_size_prior_events_flips = 2.5\n"
         "flip_min_sale_events = 5\n"
+        "post_undercut_copper = 0\n"
         "craft_min_gain = 50\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
@@ -294,6 +296,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.sale_size_prior_events_holdings == 0
     assert config.sale_size_prior_events_flips == 2.5
     assert config.flip_min_sale_events == 5
+    assert config.post_undercut_copper == 0
     assert config.craft_min_gain == 50
 
 
@@ -319,6 +322,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("flip_min_sale_events", "0"),
         ("flip_min_sale_events", "2.5"),  # whole Sale Events
         ("flip_min_sale_events", "true"),
+        ("post_undercut_copper", "-1"),
+        ("post_undercut_copper", "0.5"),  # whole copper
+        ("post_undercut_copper", "true"),
         ("craft_min_gain", "-1"),
         ("craft_min_gain", '"0"'),
     ],
