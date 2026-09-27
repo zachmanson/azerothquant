@@ -26,9 +26,14 @@ local function age(seconds)
   return math.floor(hours / 24) .. " days ago"
 end
 
+-- The WoW client has no os library, only a global date; plain Lua (busted) has os.date.
+local function formatTime(t)
+  return (date or os.date)("%H:%M", t)
+end
+
 local function header(entry, now)
   return {
-    "as of " .. os.date("%H:%M", entry.asOf) .. ", " .. age(now - entry.asOf),
+    "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf),
     "Gold " .. Money.format(entry.gold)
       .. ", Shopping List " .. Money.format(entry.shoppingCost)
       .. ", Prediction buys " .. Money.format(entry.predictionCost),

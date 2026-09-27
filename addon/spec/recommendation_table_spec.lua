@@ -40,6 +40,16 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Observation Window 0.3 h", view.header[3])
   end)
 
+  it("formats the time with WoW's global date, since the client has no os library", function()
+    local realOs = os
+    _G.date, _G.os = realOs.date, nil
+    local ok, view = pcall(build, entry(), AS_OF)
+    _G.date, _G.os = nil, realOs
+
+    assert.is_true(ok, tostring(view))
+    assert.matches("^as of %d%d:%d%d, ", view.header[1])
+  end)
+
   it("gives older Scans' age in hours, then days", function()
     assert.matches(", 5 h ago$", build(entry(), AS_OF + 5 * 3600 + 59 * 60).header[1])
     assert.matches(", 3 days ago$", build(entry(), AS_OF + 3 * 86400 + 3600).header[1])
