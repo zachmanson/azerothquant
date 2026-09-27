@@ -2,7 +2,8 @@
 -- C_AuctionHouse.ReplicateItems and saves the result to AzerothQuantDB.scans.
 -- All shaping happens in Scan.lua; this file only talks to the WoW API.
 -- On load it also deletes the Scans the Brain has imported (Prune.lua). While
--- the AH is open it nudges when a Scan would complete an Observation Window (Nudge.lua).
+-- the AH is open the button pulses whenever a Scan can run, and it says in chat when a
+-- Scan would complete an Observation Window (Nudge.lua).
 -- ns.Scanner.busy() says whether a Scan is in flight.
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
@@ -28,7 +29,7 @@ local marketFaction -- decided on AUCTION_HOUSE_SHOW, while the auctioneer is th
 local pending -- the in-flight Scan request, or nil
 local reading = false
 local debounceTimer, noResponseTimer
-local button, ticker
+local button, pulse, ticker
 local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 
@@ -49,6 +50,18 @@ local function cooldownRemaining()
   return math.max(0, db.lastScanAt + COOLDOWN_SECONDS - time())
 end
 
+-- refreshButton runs every second, so only start or stop the pulse on a change.
+local function setPulsing(on)
+  if on and not pulse:IsPlaying() then
+    pulse.glow:Show()
+    pulse:Play()
+  elseif not on and pulse:IsPlaying() then
+    pulse:Stop()
+    pulse.glow:Hide()
+  end
+end
+
+-- The button pulses exactly while it's enabled: whenever a Scan can run (#48).
 local function refreshButton()
   if not button then
     return
@@ -57,23 +70,15 @@ local function refreshButton()
   if pending then
     button:SetText("Scanning...")
     button:Disable()
+    setPulsing(false)
   elseif remaining > 0 then
     button:SetText(string.format("Scan (%d:%02d)", math.floor(remaining / 60), remaining % 60))
     button:Disable()
+    setPulsing(false)
   else
     button:SetText("Scan")
     button:Enable()
-  end
-end
-
-local function setNudged(on)
-  if not button then
-    return
-  end
-  if on then
-    button:LockHighlight()
-  else
-    button:UnlockHighlight()
+    setPulsing(true)
   end
 end
 
@@ -81,7 +86,6 @@ local function tick()
   local now = time()
   if Nudge.due(db.lastScanAt, checkedAt, now) then
     say("Scan ready: a second Scan now completes an Observation Window.")
-    setNudged(true)
   end
   checkedAt = now
   refreshButton()
@@ -152,7 +156,6 @@ local function requestScan()
   if pending or cooldownRemaining() > 0 then
     return
   end
-  setNudged(false)
   pending = {
     id = db.nextScanId,
     requestedAt = time(),
@@ -175,6 +178,22 @@ local function createButton()
   button:SetSize(110, 22)
   button:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -25, 2)
   button:SetScript("OnClick", requestScan)
+
+  -- Our own glow rather than ActionButton_ShowOverlayGlow: the Beta's modern UI has
+  -- already dropped Blizzard helpers we relied on.
+  local glow = button:CreateTexture(nil, "OVERLAY")
+  glow:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
+  glow:SetTexCoord(0, 0.625, 0, 0.6875)
+  glow:SetBlendMode("ADD")
+  glow:SetAllPoints()
+  glow:Hide()
+  pulse = glow:CreateAnimationGroup()
+  pulse:SetLooping("BOUNCE")
+  local fade = pulse:CreateAnimation("Alpha")
+  fade:SetFromAlpha(0.3)
+  fade:SetToAlpha(1)
+  fade:SetDuration(0.8)
+  pulse.glow = glow
 end
 
 local frame = CreateFrame("Frame")
@@ -215,7 +234,6 @@ frame:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "AUCTION_HOUSE_CLOSED" then
     cancel(ticker)
     ticker = nil
-    setNudged(false)
     if pending then
       abort("Auction House closed before the Scan finished; nothing was saved.")
     end

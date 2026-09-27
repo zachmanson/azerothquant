@@ -1,6 +1,8 @@
--- Decides when to tell the player a Scan is ready: the moment the Scan cooldown
--- ends while the Auction House is open, if a Scan then would complete an
--- Observation Window with the previous one (ADR-0004).
+-- Decides when to tell the player in chat that a Scan is ready: the moment the
+-- Scan cooldown ends while the Auction House is open, if a Scan then would
+-- complete an Observation Window with the previous one (ADR-0004). Separately,
+-- the Scan button pulses whenever a Scan can run, which is exactly when it's
+-- enabled: AH open, cooldown over, no Scan pending (Scanner.lua, #48).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
