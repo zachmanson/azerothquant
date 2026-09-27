@@ -244,6 +244,42 @@ def test_held_units_undercut_what_is_left_once_the_flips_are_bought(db):
     assert (flip.quantity, flip.post_at) == (2, 999)
 
 
+def test_a_flip_cut_short_by_gold_posts_under_the_first_listing_it_didnt_buy(db):
+    # #68: all 5 would post under the 3g wall, but the gold buys only the 3 at 1g, so the
+    # 1g 50s are still there. The Flip and the held unit post at 1g 49s 99c.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=30000, vendor_prices={2589: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at) == (3, 14999)
+    assert flip.profit == pytest.approx(3 * (14999 * 0.95 - 10000))
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.price) == (Action.SELL, 14999)
+
+
+def test_a_flip_cut_short_by_gold_under_the_margin_there_is_dropped(db):
+    # #68: all 5 clear the margin under the 3g wall, but the gold buys only the 3 at 1g,
+    # and posted under the 1g 10s they'd make 4s 49c each, short of the 20%. The Flip is
+    # dropped and spends nothing, so the held unit posts under the 1g Listings.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=11000), unit=30000
+        ),
+        [character_read(item(), money=30000, vendor_prices={2589: 10})],
+    )
+
+    assert result[MARKET].shopping_list == []
+    assert result[MARKET].shopping_cost == 0
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.price) == (Action.SELL, 9999)
+
+
 def test_everything_is_vendored_when_a_vendor_pays_more_than_a_sale_brings_in(db):
     # Fair Value 100 less the 5% cut is 95.
     result = run(
@@ -1216,6 +1252,18 @@ def test_asks_a_plain_flip_takes_are_not_bought_to_craft(db):
     assert (craft.action, craft.cost) == (Action.CRAFT, 6 * 2 * 300)
 
 
+def test_a_flip_to_sell_posts_after_what_flips_to_craft_buy_of_it(db):
+    # #68: the 2 Linen at 10 are a Flip to Sell and the Bolts buy all 12 at 250, so the
+    # Flip posts under the 300s, not under the 250s.
+    scans = linen_and_bolts_selling(linen=300)
+    scans[1]["listings"] += [row(quantity=12, unit=250), row(quantity=2, unit=10)]
+    result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
+
+    [flip, craft] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.post_at) == (Action.SELL, 2, 299)
+    assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 250),)
+
+
 def test_a_flip_to_crafts_sell_room_is_net_of_held_and_flipped_output(db):
     # 6 Bolts sell within the horizon: 2 are held and 1 is a Flip to Sell at 500, so 3
     # crafted ones Sell. A 4th would Vendor for 15, less than its 2 Linen cost.
@@ -1745,11 +1793,34 @@ def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(d
             scan(later, row(quantity=20, unit=500)),
             scan(later + HOUR, row(quantity=18, unit=500)),
         ],
-        [character_read(item(count=10), vendor_prices={2589: 10})],
+        [character_read(item(count=10), money=GOLD, vendor_prices={2589: 10})],
     )
 
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
         Held("Linen spike", LINEN_KEY, units=10, cost=5734)  # 6 * 949.05 + 4 * 10
+    ]
+
+
+def test_a_best_exit_counts_only_the_flips_the_gold_held_then_would_buy(db):
+    # #68: on the written day the gold bought 1 of the two 700s, and resold under the
+    # other one it clears no margin, so nothing is bought and the 6 that Sell post at 699,
+    # 664.05 after the cut. The gold read later must not count.
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    later = T0 + 3 * DAY
+    run(
+        db,
+        [
+            *selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+            scan(later, row(quantity=20, unit=500)),
+        ],
+        [
+            character_read(item(count=10), money=700, vendor_prices={2589: 10}),
+            character_read(item(count=10), money=GOLD, at=later),
+        ],
+    )
+
+    assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
+        Held("Linen spike", LINEN_KEY, units=10, cost=4024)  # 6 * 664.05 + 4 * 10
     ]
 
 

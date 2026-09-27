@@ -1116,13 +1116,18 @@ _LATEST_CHARACTER_READS = (
 )
 
 
-def pooled_gold(conn: sqlite3.Connection, era: Era, realm: str, faction: str) -> int:
+def pooled_gold(
+    conn: sqlite3.Connection, era: Era, realm: str, faction: str, at: int | None = None
+) -> int:
     """Copper held by the Characters on the realm and faction, each as of its latest
-    Character Read. Mail can't move gold any further, so this is what sizing can use."""
+    Character Read, or its latest up to `at`. Mail can't move gold any further, so this
+    is what sizing can use."""
     (total,) = conn.execute(
-        f"SELECT COALESCE(SUM(money), 0) FROM ({_LATEST_CHARACTER_READS})"
-        " WHERE realm = ? AND faction = ?",
-        (era.value, realm, faction),
+        "SELECT COALESCE(SUM(money), 0) FROM character_read r"
+        " WHERE era = ? AND realm = ? AND faction = ? AND read_at = ("
+        " SELECT MAX(read_at) FROM character_read WHERE era = r.era AND realm = r.realm"
+        " AND character = r.character AND (? IS NULL OR read_at <= ?))",
+        (era.value, realm, faction, at, at),
     ).fetchone()
     return total
 

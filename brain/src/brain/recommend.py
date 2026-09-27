@@ -178,19 +178,7 @@ def recommend(
             _market_holdings(conn, market, characters), plans, merchant, valuer, set(under), config
         )
         held, crafted = crafting.after, crafting.counts
-        rows = [
-            _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
-            for item_key, holding in held.items()
-            for row in valuer.rows(item_key, holding)
-        ] + crafting.rows
         gold = pooled_gold(conn, market.era, market.realm, market.faction)
-        graded = grades(conn, config, market, predictions, now)
-        pooled = pooled_return(graded)
-        caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
-        bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
-        rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
-        # Most expected profit first; rows without a number to rank by go last.
-        rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
         hold_buys = [
             buy
             for item_key, offers in sorted(for_sale.items())
@@ -229,7 +217,19 @@ def recommend(
         crafts = _flips_to_craft(
             plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config
         )
-        shopping = _shopping_list(buys, crafts, gold)
+        shopping, valuer = _buy_what_fits(valuer, buys, crafts, gold, config)
+        rows = [
+            _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
+            for item_key, holding in held.items()
+            for row in valuer.rows(item_key, holding)
+        ] + crafting.rows
+        graded = grades(conn, config, market, predictions, now)
+        pooled = pooled_return(graded)
+        caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
+        bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
+        rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
+        # Most expected profit first; rows without a number to rank by go last.
+        rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
         shopping_cost = round(sum(r.cost for r in shopping))
         prediction_buys = _spend_on_predictions(hold_buys, gold - shopping_cost, caps)
         linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
@@ -336,11 +336,15 @@ def _exit_value(
     conn: sqlite3.Connection, config: Config, market: Market, item_key: str, units: int, at: int
 ) -> float:
     """What `units` of an Item Key would have brought by their best Action, as of the
-    latest Scan up to `at`. Vendor Prices are the latest seen, since a vendor's price
-    doesn't move, and so are Merchant Costs. Units without enough data to choose an exit
-    count at the Vendor Price, as when Holding them (_hold)."""
+    latest Scan up to `at`, after the Flips the gold held then would have bought
+    (ADR-0010; Flips to Craft aren't considered). Vendor Prices are the latest seen,
+    since a vendor's price doesn't move, and so are Merchant Costs. Units without enough
+    data to choose an exit count at the Vendor Price, as when Holding them (_hold)."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
-    valuer, _ = _valuer(conn, config, market, scanned[-1] if scanned else None)
+    scan = scanned[-1] if scanned else None
+    valuer, buys = _valuer(conn, config, market, scan)
+    gold = pooled_gold(conn, market.era, market.realm, market.faction, scan)
+    _, valuer = _buy_what_fits(valuer, buys, [], gold, config)
     return valuer.worth(item_key, Holding(bags=units))
 
 
@@ -401,18 +405,34 @@ class _Valuer:
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self._config = cut, config
 
+    def after(self, bought: dict[str, Supply]) -> "_Valuer":
+        """This Valuer with `bought` as the units taken off other players' Listings."""
+        return _Valuer(
+            self.supply,
+            self.others,
+            bought,
+            self.rates,
+            self.vendor,
+            self.merchant,
+            self.cut,
+            self._config,
+        )
+
+    def post_at(self, item_key: str) -> float | None:
+        """The price to post one unit at once `flipped` is bought (`_post_at`)."""
+        rate = self.rates.get(item_key)
+        return _post_at(
+            self.supply.get(item_key, []),
+            self.others.get(item_key, []),
+            self.flipped.get(item_key, []),
+            self._config,
+            _ceiling(rate.max_sale_price if rate else None, self.merchant.get(item_key)),
+        )
+
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
         rate = self.rates.get(item_key)
         has_data = self.has_data(item_key)
-        post_at = None
-        if has_data:
-            post_at = _post_at(
-                self.supply.get(item_key, []),
-                self.others.get(item_key, []),
-                self.flipped.get(item_key, []),
-                self._config,
-                _ceiling(rate.max_sale_price, self.merchant.get(item_key)),
-            )
+        post_at = self.post_at(item_key) if has_data else None
         return _holding_rows(
             item_key,
             holding,
@@ -1063,12 +1083,8 @@ def _flips(
         room -= take
         resale = _resale(supply, offers, prefix, cut, config, cap)
         # Offers are cheapest first, so if the dearest unit clears the margin, all do.
-        if resale is None or resale - unit < max(
-            unit * config.flip_min_margin_share, config.flip_min_margin_copper
-        ):
+        if not _resells(resale, unit, vendor_price, config):
             continue
-        if vendor_price is not None and resale <= vendor_price:
-            continue  # a vendor pays more, so it's a Flip to Vendor
         profit = sum((resale - u) * n for u, n in prefix)
         if profit > best_profit:
             to_sell, best_profit = prefix, profit
@@ -1245,16 +1261,19 @@ def _without(supply: Supply, bought: Supply) -> Supply:
     return [(unit, quantity) for unit, quantity in sorted(left.items()) if quantity > 0]
 
 
-def _shopping_list(buys: list[_Buy], crafts: list[_CraftBuy], gold: float) -> list[Row]:
+def _shopping_list(
+    buys: list[_Buy], crafts: list[_CraftBuy], gold: float
+) -> list[tuple[Row, dict[str, Supply]]]:
     """The buys and Flips to Craft that fit in `gold`, most profit per gold spent first,
-    as one row per Item Key and Action, or per recipe, in that order.
+    as one row per Item Key and Action, or per recipe, in that order, each with the
+    Auction House units it buys by Item Key.
 
-    A Flip to Sell cut short by gold keeps the resale worked out for all of it, which is
-    a little high: some of the cheap units it expected gone are still on sale. Likewise a
-    Flip to Craft left out leaves the asks it would have bought idle. Once one is left
-    out, so are the later crafts of its recipe, which were costed after it.
+    Prices are still the ones worked out as if every Flip were bought; `_buy_what_fits`
+    reprices them. Once a Flip to Craft is left out, so are the later crafts of its
+    recipe, which were costed after it.
     """
     rows: dict[object, Row] = {}
+    taken: dict[object, dict[str, Supply]] = {}
     plans: dict[int, _Plan] = {}  # the Flips to Craft taken of each recipe
     cut: set[int] = set()
     for buy in sorted([*buys, *crafts], key=lambda buy: -buy.per_gold):
@@ -1274,6 +1293,8 @@ def _shopping_list(buys: list[_Buy], crafts: list[_CraftBuy], gold: float) -> li
             rows[recipe_id] = replace(
                 plan.row(), cost=r.cost + buy.gold, buys=_merged(r.buys, buy.buys)
             )
+            for key, units in buy.asks.items():
+                taken.setdefault(recipe_id, {}).setdefault(key, []).extend(units)
             continue
         quantity = min(buy.quantity, int(gold // buy.unit_buyout))
         if not quantity:
@@ -1283,6 +1304,7 @@ def _shopping_list(buys: list[_Buy], crafts: list[_CraftBuy], gold: float) -> li
         cost = buy.unit_buyout * buy.quantity
         profit = buy.unit_profit * buy.quantity
         key = (buy.item_key, buy.action)
+        taken.setdefault(key, {}).setdefault(buy.item_key, []).append((buy.unit_buyout, quantity))
         if key not in rows:
             rows[key] = Row(
                 buy.item_key,
@@ -1303,7 +1325,66 @@ def _shopping_list(buys: list[_Buy], crafts: list[_CraftBuy], gold: float) -> li
                 profit=r.profit + profit,
                 cost=r.cost + cost,
             )
-    return list(rows.values())
+    return [(r, taken.get(key, {})) for key, r in rows.items()]
+
+
+def _resells(resale: float | None, unit: float, vendor_price: int | None, config: Config) -> bool:
+    """Whether a unit bought at `unit` and resold for `resale` after the cut is a Flip to
+    Sell: it clears the Flip margin, and no vendor pays as much (that's a Flip to Vendor)."""
+    if resale is None or resale - unit < max(
+        unit * config.flip_min_margin_share, config.flip_min_margin_copper
+    ):
+        return False
+    return vendor_price is None or resale > vendor_price
+
+
+def _buy_what_fits(
+    valuer: _Valuer, buys: list[_Buy], crafts: list[_CraftBuy], gold: float, config: Config
+) -> tuple[list[Row], _Valuer]:
+    """The Shopping List `gold` buys, and the Valuer priced after only what it buys
+    (ADR-0010). `valuer`, and so the Shopping List's choice, assumed every Flip bought.
+    In one pass, each Flip to Sell is reposted under what the Shopping List leaves and
+    dropped if it no longer resells; its gold isn't spent on another Flip."""
+    chosen = _shopping_list(buys, crafts, gold)
+    after = valuer.after(_bought(chosen))
+    kept = [
+        (row, units)
+        for row, units in chosen
+        if row.action is not Action.SELL
+        or _resells(
+            _resale_of(after, row.item_key),
+            row.price,
+            valuer.vendor.get(_item_id(row.item_key)),
+            config,
+        )
+    ]
+    after = valuer.after(_bought(kept))
+    rows = []
+    for row, _ in kept:
+        if row.action is Action.SELL:
+            resale = _resale_of(after, row.item_key)
+            row = replace(
+                row,
+                post_at=after.post_at(row.item_key),
+                profit=row.quantity * resale - row.cost,
+            )
+        rows.append(row)
+    return rows, after
+
+
+def _resale_of(valuer: _Valuer, item_key: str) -> float | None:
+    """What one unit of an Item Key brings in after the cut, posted at `post_at`."""
+    post_at = valuer.post_at(item_key)
+    return None if post_at is None else post_at * (1 - valuer.cut)
+
+
+def _bought(chosen: list[tuple[Row, dict[str, Supply]]]) -> dict[str, Supply]:
+    """The Auction House units the chosen Shopping List rows buy, by Item Key."""
+    bought: dict[str, Supply] = {}
+    for _, units in chosen:
+        for key, supply in units.items():
+            bought.setdefault(key, []).extend(supply)
+    return bought
 
 
 def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[ReagentBuy, ...]:
