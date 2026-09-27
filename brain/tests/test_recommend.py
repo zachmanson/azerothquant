@@ -285,7 +285,16 @@ def test_resale_is_priced_without_the_units_being_bought(db):
     )
 
     assert result[MARKET].shopping_list == [
-        Row(LINEN_KEY, Action.SELL, 2, price=700, profit=2 * 250, sale_events=1, cost=1400)
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            2,
+            price=700,
+            profit=2 * 250,
+            post_at=1000,
+            sale_events=1,
+            cost=1400,
+        )
     ]
 
 
@@ -365,7 +374,16 @@ def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
     )
 
     assert result[MARKET].shopping_list == [
-        Row(LINEN_KEY, Action.SELL, 2, price=700, profit=2 * 250, sale_events=1, cost=1400)
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            2,
+            price=700,
+            profit=2 * 250,
+            post_at=1000,
+            sale_events=1,
+            cost=1400,
+        )
     ]
 
 

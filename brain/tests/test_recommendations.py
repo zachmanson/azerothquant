@@ -144,6 +144,7 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
                             quantity=20,
                             price=15.0,
                             profit=300.0,
+                            post_at=40.0,
                             cost=300.0,
                             sale_events=12,
                         )
@@ -167,7 +168,9 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
         encoding="utf-8",
     )
 
-    fields = "itemKey action quantity price profit margin saleEvents note cost prediction maxLoss"
+    fields = (
+        "itemKey action quantity price profit postAt margin saleEvents note cost prediction maxLoss"
+    )
     out = _run_in_lua(
         lua,
         file,
@@ -183,11 +186,11 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
     )
 
     assert out.splitlines() == [
-        "1179|nil|4|nil|nil|nil|nil|no data|nil|nil|nil",
-        "2996|Craft|3|nil|42|nil|nil|on Kash-Patel: uses 6 of 2589|nil|nil|nil",
-        "12360|Hold|5|nil|nil|nil|nil|nil|90000|BWL opens|nil",
-        "2589|Sell|20|15|300|nil|12|nil|300|nil|nil",
-        "12359|Hold|10|800|nil|nil|nil|nil|8000|BWL opens|1500",
+        "1179|nil|4|nil|nil|nil|nil|nil|no data|nil|nil|nil",
+        "2996|Craft|3|nil|42|nil|nil|nil|on Kash-Patel: uses 6 of 2589|nil|nil|nil",
+        "12360|Hold|5|nil|nil|nil|nil|nil|nil|90000|BWL opens|nil",
+        "2589|Sell|20|15|300|40|nil|12|nil|300|nil|nil",
+        "12359|Hold|10|800|nil|nil|nil|nil|nil|8000|BWL opens|1500",
     ]
 
 

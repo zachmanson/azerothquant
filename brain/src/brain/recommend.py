@@ -69,6 +69,9 @@ class Row:
     # pay for the Shopping List.
     price: float | None = None
     profit: float | None = None  # expected copper for the whole quantity
+    # Per unit, a Flip to Sell's price to post at: the Fair Value its Profit rests on,
+    # before the cut (#59).
+    post_at: float | None = None
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
     note: str = ""
@@ -92,6 +95,7 @@ class _Buy:
     quantity: int
     unit_profit: float
     sale_events: int | None = None
+    post_at: float | None = None  # a Flip to Sell's resale, before the cut
 
     @property
     def per_gold(self) -> float:
@@ -1018,9 +1022,10 @@ def _flips(
         room -= take
     buys = []
     if to_sell:
-        resale = _resale(supply, to_sell, cut, config, rate.max_sale_price)
+        post_at = _post_at(supply, to_sell, config, rate.max_sale_price)
+        resale = post_at * (1 - cut)
         buys = [
-            _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events)
+            _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events, post_at)
             for unit, quantity in to_sell
         ]
     if vendor_price is not None:
@@ -1142,12 +1147,19 @@ def _resale(
 ) -> float | None:
     """What one unit brings in after the cut, at the Fair Value of the supply left once
     `bought` is gone, or at `cap` if that's lower."""
+    value = _post_at(supply, bought, config, cap)
+    return None if value is None else value * (1 - cut)
+
+
+def _post_at(
+    supply: Supply, bought: Supply, config: Config, cap: int | None = None
+) -> float | None:
+    """The price to post one unit at: the Fair Value of the supply left once `bought` is
+    gone, or `cap` if that's lower."""
     value = fair_value(_without(supply, bought), config)
     if value is None:
         return None
-    if cap is not None:
-        value = min(value, cap)
-    return value * (1 - cut)
+    return value if cap is None else min(value, cap)
 
 
 def _without(supply: Supply, bought: Supply) -> Supply:
@@ -1204,6 +1216,7 @@ def _shopping_list(buys: list[_Buy], crafts: list[_CraftBuy], gold: float) -> li
                 buy.quantity,
                 buy.unit_buyout,
                 profit,
+                post_at=buy.post_at,
                 sale_events=buy.sale_events,
                 cost=cost,
             )

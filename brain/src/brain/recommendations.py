@@ -98,6 +98,7 @@ _ROW_KEYS = {
     "quantity": "quantity",
     "price": "price",
     "profit": "profit",
+    "post_at": "postAt",
     "margin": "margin",
     "sale_events": "saleEvents",
     "note": "note",

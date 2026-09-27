@@ -126,7 +126,9 @@ end
 local function shoppingCells(r, name)
   local action = r.buys and "Craft" or "Buy"
   local note = r.buys and flipToCraftNote(r) or r.note or ""
-  return { name, action, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost), note }
+  return {
+    name, action, tostring(r.quantity), money(r.price), money(r.postAt), money(r.profit), money(r.cost), note,
+  }
 end
 
 -- Raw sort keys, column for column with the cells, so money never sorts as text. A nil key
@@ -137,7 +139,7 @@ local function holdingKeys(r, name, cells)
 end
 
 local function shoppingKeys(r, name, cells)
-  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.profit, r.cost, cells[7]:lower() }
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.postAt, r.profit, r.cost, cells[8]:lower() }
 end
 
 local function predictionBuyCells(r, name)
@@ -265,11 +267,11 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
       ),
       section(
         "Shopping List",
-        { "Item", "Action", "Qty", "Max price", "Profit", "Cost", "Note" },
+        { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" },
         entry.shoppingList,
         shoppingCells,
         shoppingKeys,
-        { column = 5, descending = true },
+        { column = 6, descending = true },
         nameOf
       ),
       section(

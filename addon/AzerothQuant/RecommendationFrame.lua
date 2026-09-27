@@ -15,7 +15,7 @@ local Scanner = ns.Scanner
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
 -- column headers). The Classic-era names (CharacterFrameTabButtonTemplate,
 -- WhoFrameColumnHeaderTemplate) are missing there.
-local WIDTH, HEIGHT = 820, 540
+local WIDTH, HEIGHT = 915, 540
 local PORTRAIT = "Interface\\Icons\\INV_Misc_Coin_01"
 local INSET_TOP = -64 -- leaves room for the two header lines under the title bar
 local LINE_HEIGHT = 22
@@ -30,10 +30,10 @@ local CONTENT_WIDTH = WIDTH - 10 - SCROLL_LEFT - SCROLLBAR_WIDTH
 -- gets the leftover width. The first is the item name.
 local COLUMN_WIDTHS = {
   ["Holdings"] = { 230, 70, 50, 110, 110 },
-  ["Shopping List"] = { 190, 60, 45, 95, 95, 95 },
+  ["Shopping List"] = { 190, 60, 45, 95, 95, 95, 95 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
 }
-local MAX_COLUMNS = 7
+local MAX_COLUMNS = 8
 local STRIPE_ALPHA = 0.04
 
 local db
