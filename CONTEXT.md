@@ -71,7 +71,7 @@ One Partial Sale or Probable Sale: one drop in the units on offer seen between t
 _Avoid_: sale, purchase (a Purchase is the player's own buy)
 
 **Outcome**:
-What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one.
+What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one. A Sold Outcome's mail names the item but doesn't carry it, so its Item Key is found by that name from own Listings and other Auction House mail; one whose name matches no Item Key, or more than one, is Unlinked and closes no Lot.
 _Avoid_: result, receipt, invoice (an invoice is one kind of mail)
 
 **Purchase**:
@@ -141,7 +141,7 @@ Buying on the Auction House because the price is below that Item Key's Best Exit
 _Avoid_: snipe, arbitrage
 
 **Prediction**:
-A call the player writes down from game knowledge that a group of Item Keys will be worth much more after a Catalyst, with the reason. It names no target price: the Decision Engine never estimates the upside, it only allows buying and Holding those Item Keys while the Max Loss stays small. Units of those Item Keys the player already holds are Held under it too, costed at their Best Exit Value on the day it was written, since that is the gold given up by not letting them go. It ends when the player marks its Catalyst as happened, or when it Lapses. It is graded by the realized return on the gold it tied up, from Outcomes, never by the player's own judgment.
+A call the player writes down from game knowledge that a group of Item Keys will be worth much more after a Catalyst, with the reason. It names no target price: the Decision Engine never estimates the upside, it only allows buying and Holding those Item Keys while the Max Loss stays small. Units of those Item Keys the player already holds are Held under it too, costed at their Best Exit Value on the day it was written, since that is the gold given up by not letting them go. It ends when the player marks its Catalyst as happened, or when it Lapses. Its units are the ones held when it was written (as of the start of that day) plus every Purchase of its Item Keys from then until it ends. It is graded by the realized return on the gold it tied up, from Outcomes, never by the player's own judgment: once a Sale Horizon has passed after it ended, its Sold units at their price after the Auction House cut, plus its still-open units at their Best Exit Value at that moment, against their cost. A Grade never changes afterwards.
 _Avoid_: thesis, tip, hunch, bet
 
 **Catalyst**:
@@ -157,7 +157,7 @@ For a unit bought or held under a Prediction, what it cost minus its Best Exit V
 _Avoid_: risk, downside
 
 **Lot**:
-A quantity of one Item Key acquired together at one cost, tracked until it is sold, vendored, disenchanted or crafted away. Realized profit is measured per Lot.
+A quantity of one Item Key acquired together at one cost, tracked until it is sold. Realized profit is measured per Lot. Lots belong to a realm and faction, not a Character, since units move between Characters by mail the Brain doesn't see. There are two kinds: one per Purchase, at its price, and the units already held when a Prediction is written, at their Best Exit Value that day. Writing a Prediction ends the open Lots of its Item Keys and folds their units into that second kind. Only a Sold Outcome closes units, from the oldest Lot first; a unit that leaves without one (vendored, disenchanted, crafted away, mailed off) stays open, because the Brain can't tell which of those happened. Loot, crafting and merchant buys don't start Lots.
 _Avoid_: position, stack (a stack is an in-game bag concept)
 
 **Best Exit Value**:
