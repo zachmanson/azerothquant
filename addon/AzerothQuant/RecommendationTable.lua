@@ -82,8 +82,9 @@ local function holdingCells(r, name)
   return { name, r.action, tostring(r.quantity), money(r.price), profit, note }
 end
 
--- A row the Brain couldn't choose an Action for, or a Vendor that brings nothing.
-local function lowValue(r)
+-- A row the Brain couldn't choose an Action for, or a Vendor that brings nothing. The
+-- Table folds these into a count, and item tooltips leave them out.
+function RecommendationTable.lowValue(r)
   return r.action == nil or (r.action == "Vendor" and r.profit == 0)
 end
 
@@ -99,7 +100,7 @@ local function section(title, columns, rows, cells, nameOf)
   local out = { title = title, columns = columns, rows = {} }
   local folded = 0
   for _, r in ipairs(rows) do
-    if lowValue(r) then
+    if RecommendationTable.lowValue(r) then
       folded = folded + 1
     else
       local s = itemString(r.itemKey)
