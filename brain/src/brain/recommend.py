@@ -759,8 +759,9 @@ def _flips(
     Buy to Sell takes no more than sells within the Sale Horizon, and prices the resale
     at the Fair Value of what's left once they're bought: buying the cheap units moves
     the price, and a lone cheap Listing is left out of Fair Value as an outlier, though
-    it's the one most worth buying. Anything else under the Vendor Price is bought to
-    Vendor.
+    it's the one most worth buying. The resale is never above the dearest Sale Event
+    behind the Sell Rate, so a lone ask far above every sale isn't taken at its word
+    (#41). Anything else under the Vendor Price is bought to Vendor.
     """
     offers = sorted(offers)
     to_sell: Supply = []
@@ -774,7 +775,7 @@ def _flips(
         take = min(quantity, room)
         if not take:
             break
-        resale = _resale(supply, [*to_sell, (unit, take)], cut, config)
+        resale = _resale(supply, [*to_sell, (unit, take)], cut, config, rate.max_sale_price)
         if resale is None or resale - unit < max(
             unit * config.flip_min_margin_share, config.flip_min_margin_copper
         ):
@@ -785,7 +786,7 @@ def _flips(
         room -= take
     buys = []
     if to_sell:
-        resale = _resale(supply, to_sell, cut, config)
+        resale = _resale(supply, to_sell, cut, config, rate.max_sale_price)
         buys = [
             _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events)
             for unit, quantity in to_sell
@@ -899,11 +900,17 @@ def sellable_units(
     return math.floor(per_day * horizon_seconds / 86400)
 
 
-def _resale(supply: Supply, bought: Supply, cut: float, config: Config) -> float | None:
+def _resale(
+    supply: Supply, bought: Supply, cut: float, config: Config, cap: int | None = None
+) -> float | None:
     """What one unit brings in after the cut, at the Fair Value of the supply left once
-    `bought` is gone."""
+    `bought` is gone, or at `cap` if that's lower."""
     value = fair_value(_without(supply, bought), config)
-    return None if value is None else value * (1 - cut)
+    if value is None:
+        return None
+    if cap is not None:
+        value = min(value, cap)
+    return value * (1 - cut)
 
 
 def _without(supply: Supply, bought: Supply) -> Supply:

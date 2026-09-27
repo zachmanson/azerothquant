@@ -23,6 +23,9 @@ class SellRate:
     # of one to shrink their average size toward.
     sale_units: int = 0
     typical_sale_size: float = 1.0
+    # The dearest unit buyout among those Sale Events, so a Flip never counts on reselling
+    # above what's been seen to sell (#41). None without any.
+    max_sale_price: int | None = None
 
 
 def sell_rates(
@@ -45,8 +48,10 @@ def sell_rates(
     market_sizes = [e.units for e in evidence.sale_events if e.item_key in stacking]
     market_size = median(market_sizes) if market_sizes else None
     units: Counter[str] = Counter()
+    max_price: dict[str, int] = {}
     for event in evidence.sale_events:
         units[event.item_key] += event.units
+        max_price[event.item_key] = max(max_price.get(event.item_key, 0), event.unit_buyout)
     events = evidence.event_counts()
     reposts = evidence.repost_counts()
     coincidences = evidence.coincidence_counts()
@@ -59,6 +64,7 @@ def sell_rates(
             coincidences=coincidences.get(item_key, 0),
             sale_units=units[item_key],
             typical_sale_size=_typical_sale_size(market_size, quantities.get(item_key, [])),
+            max_sale_price=max_price.get(item_key),
         )
         for item_key in {listing.item_key for listing in seen}
     }

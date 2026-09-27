@@ -320,6 +320,37 @@ def test_a_flip_to_sell_buys_no_more_than_sells_within_the_horizon(db):
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 6, 500)
 
 
+def test_a_flip_to_sell_is_never_resold_above_the_dearest_sale(db):
+    # #41: a lone 845 is all that's left once the 300 is bought, but the only sale was at
+    # 100. Resold at 100 less the cut, the 300 is a loss.
+    result = run(
+        db,
+        [
+            scan(T0, row(unit=100), row(unit=845)),
+            scan(T0 + HOUR, row(unit=845), row(unit=300)),
+        ],
+        [character_read(money=GOLD)],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
+    # A sale at 1100, above the 1000 that's left once the 700s are bought: resold at 950.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=1000), row(unit=1100)),
+            scan(T0 + HOUR, row(quantity=20, unit=1000), row(quantity=2, unit=700)),
+        ],
+        [character_read(money=GOLD)],
+    )
+
+    assert result[MARKET].shopping_list == [
+        Row(LINEN_KEY, Action.SELL, 2, price=700, profit=2 * 250, sale_events=1, cost=1400)
+    ]
+
+
 def test_own_listings_are_never_bought(db):
     result = run(
         db,

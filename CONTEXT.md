@@ -141,7 +141,7 @@ The Action of turning held reagents into a Known Recipe's output. A craft is wor
 _Avoid_: make, produce
 
 **Flip**:
-Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action.
+Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action. A Flip to Sell's resale is never priced above the highest price among the Sale Events behind its Sell Rate.
 _Avoid_: snipe, arbitrage
 
 **Prediction**:

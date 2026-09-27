@@ -116,10 +116,26 @@ def test_each_sell_rate_carries_its_evidence(db):
         reposts=0,
         coincidences=1,
         sale_units=6,
+        max_sale_price=100,
     )
     assert rates[SILK_KEY] == SellRate(
         units_per_day=0, sale_events=0, window_hours=0.5, reposts=1, coincidences=0
     )
+
+
+def test_the_max_sale_price_is_the_dearest_of_the_sale_events(db):
+    # 2 of the stack sell at 100 and the 110 is a Probable Sale. The 200 is gone too, but
+    # too dear to be a sale, so it doesn't count.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=110), row(unit=200)),
+        scan(T0 + 30 * MINUTE, row(quantity=8, unit=100)),
+    )
+
+    rates = sell_rates(db, MARKET, CONFIG, now=T0 + 30 * MINUTE)
+
+    assert rates[LINEN_KEY].sale_events == 2
+    assert rates[LINEN_KEY].max_sale_price == 110
 
 
 @pytest.mark.parametrize(("ended_ago", "counted"), [(14 * DAY - 1, True), (14 * DAY, False)])
