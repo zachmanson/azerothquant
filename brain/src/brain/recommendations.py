@@ -32,7 +32,7 @@ from brain.history import (
     latest_scan_times,
 )
 from brain.lua_literal import assignment
-from brain.recommend import Action, MarketRecommendations, Row
+from brain.recommend import Action, MarketRecommendations, ReagentBuy, Row
 
 FILE_NAME = "Recommendations.lua"
 GLOBAL_NAME = "AzerothQuantRecommendations"
@@ -44,6 +44,9 @@ _HEADER = (
     "-- lastMailboxRead[realm][character] is when the latest imported Mailbox Read of\n"
     "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
+    "-- recommendations[realm][faction] is that Market's Recommendations, in copper. A\n"
+    "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
+    "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
 )
 
 
@@ -111,6 +114,19 @@ def _row(row: Row) -> dict[str, object]:
         if value is None or value == "":
             continue
         out[key] = str(value) if isinstance(value, Action) else value
+    if row.buys:
+        out["buys"] = [_buy(b) for b in row.buys]
+    return out
+
+
+def _buy(buy: ReagentBuy) -> dict[str, object]:
+    out: dict[str, object] = {
+        "itemKey": buy.item_key,
+        "quantity": buy.quantity,
+        "maxUnitPrice": buy.max_unit_price,
+    }
+    if buy.merchant:
+        out["merchant"] = True
     return out
 
 

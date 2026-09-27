@@ -284,7 +284,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         ],
     )
     shopping = _table(
-        ["Item", "Action", "Qty", "Max price", "Profit", "Cost", "Sales"],
+        ["Item", "Action", "Qty", "Max price", "Profit", "Cost", "Sales", "Note"],
         [
             [
                 r.item_key,
@@ -294,6 +294,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
                 _money(r.profit),
                 _money(r.cost),
                 _count(r.sale_events),
+                r.note,
             ]
             for r in m.shopping_list
         ],

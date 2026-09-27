@@ -17,6 +17,7 @@ from brain.predictions import Prediction
 from brain.recommend import (
     Action,
     Grade,
+    ReagentBuy,
     Row,
     grades,
     held_at_writing,
@@ -886,6 +887,227 @@ def test_a_craft_must_gain_more_than_the_minimum(db, min_gain, crafts):
 
     made = [r.quantity for r in result[MARKET].holdings if r.action is Action.CRAFT]
     assert sum(made) == crafts
+
+
+# --- Flip to Craft (#32, ADR-0009) ---
+
+
+def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
+    # 1 Linen held, worth the 95 it Sells for. The first Bolt buys 1 Linen at 100, the
+    # next 5 buy 2 each, until the 6 Bolts that sell within the horizon at 950.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(), money=GOLD, recipes=[recipe()])],
+    )
+
+    assert result[MARKET].shopping_list == [
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            6,
+            profit=(950 - 95 - 100) + 5 * (950 - 200),
+            cost=11 * 100,
+            note="on Kash-Patel: uses 12 of 2589 (buy 11)",
+            buys=(ReagentBuy(LINEN_KEY, 11, 100),),
+        )
+    ]
+    assert result[MARKET].shopping_cost == 1100
+
+
+def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
+    # A Linen at 60 and one at 80 go into the first Bolt; every later one pays 100 a Linen.
+    # Neither is a plain Flip: resold at 95 neither clears 1 silver.
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"] += [row(unit=60), row(unit=80)]
+    result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.quantity, craft.cost, craft.profit) == (6, 140 + 10 * 100, 6 * 950 - 1140)
+    assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 100),)
+
+
+def test_asks_a_plain_flip_takes_are_not_bought_to_craft(db):
+    # The 2 Linen at 10 are a Flip to Sell (resold at 285). The Bolts buy the 300s instead.
+    scans = linen_and_bolts_selling(linen=300)
+    scans[1]["listings"].append(row(quantity=2, unit=10))
+    result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
+
+    [flip, craft] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 2, 10)
+    assert (craft.action, craft.cost) == (Action.CRAFT, 6 * 2 * 300)
+
+
+def test_a_flip_to_crafts_sell_room_is_net_of_held_and_flipped_output(db):
+    # 6 Bolts sell within the horizon: 2 are held and 1 is a Flip to Sell at 500, so 3
+    # crafted ones Sell. A 4th would Vendor for 15, less than its 2 Linen cost.
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"].append(row(BOLT, unit=500))
+    result = run(
+        db,
+        scans,
+        [
+            character_read(
+                item(BOLT_LINK, count=2),
+                money=GOLD,
+                vendor_prices={2996: 15},
+                recipes=[recipe()],
+            )
+        ],
+    )
+
+    [craft, flip] = result[MARKET].shopping_list
+    assert (flip.item_key, flip.action, flip.quantity) == (BOLT_KEY, Action.SELL, 1)
+    assert (craft.action, craft.quantity) == (Action.CRAFT, 3)
+
+
+@pytest.mark.parametrize(("bolt", "crafts"), [(1000, 6), (400, 6), (300, 0)])
+def test_a_flip_to_craft_must_clear_the_flip_margin_on_its_gold(db, bolt, crafts):
+    # 2 Linen at 100 a Bolt: 200 of gold needs 1 silver back. A Bolt at 400 Sells for 380
+    # (180 profit), one at 300 for 285 (85).
+    result = run(
+        db,
+        linen_and_bolts_selling(bolt=bolt),
+        [character_read(money=GOLD, recipes=[recipe()])],
+    )
+
+    made = [r.quantity for r in result[MARKET].shopping_list if r.action is Action.CRAFT]
+    assert sum(made) == crafts
+
+
+def test_flips_to_craft_and_plain_flips_share_gold_by_profit_per_gold(db):
+    # 15 copper. The Ore Flip to Vendor makes 1 per 5 copper (0.2 per gold); a Bolt from
+    # 2 Linen at 5 sells for 950 (94 per gold) and is bought first. The 5 left fit 1 Ore,
+    # and the Prediction on Tin gets nothing.
+    tin = "item:2771::::::::20:1490"
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"] += [row(quantity=2, unit=5), row(ORE, quantity=3, unit=5)]
+    scans[1]["listings"].append(row(tin, unit=1))
+    result = run(
+        db,
+        scans,
+        [character_read(money=15, vendor_prices={2770: 6, 2771: 1}, recipes=[recipe()])],
+        predictions=[prediction("2771")],
+    )
+
+    assert [(r.item_key, r.action, r.quantity) for r in result[MARKET].shopping_list] == [
+        (BOLT_KEY, Action.CRAFT, 1),
+        (ORE_KEY, Action.VENDOR, 1),
+    ]
+    assert result[MARKET].shopping_cost == 15
+    assert result[MARKET].prediction_buys == []
+
+
+def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
+    # A Bolt from 1 Thread at 10 Vendors for 125. With 1 silver of gold, only 10 crafts.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                money=100,
+                vendor_prices={2996: 125},
+                recipes=[recipe(reagents=[(2320, 1)])],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    assert result[MARKET].shopping_list == [
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            10,
+            profit=6 * (950 - 10) + 4 * (125 - 10),
+            cost=100,
+            note="on Kash-Patel: uses 10 of 2320 (buy 10)",
+            buys=(ReagentBuy(THREAD_KEY, 10, 10, merchant=True),),
+        )
+    ]
+
+
+def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
+    # The Thread held goes into the first Bolt; the other 5 buy theirs from a merchant.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(THREAD_LINK),
+                money=GOLD,
+                recipes=[recipe(reagents=LINEN_AND_THREAD)],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.quantity, craft.cost) == (6, 6 * 200 + 5 * 10)
+    assert craft.buys == (
+        ReagentBuy(LINEN_KEY, 12, 100),
+        ReagentBuy(THREAD_KEY, 5, 10, merchant=True),
+    )
+
+
+@pytest.mark.parametrize(
+    "item_key", [LINEN_KEY, BOLT_KEY], ids=["reagent under it", "output under it"]
+)
+def test_nothing_is_flipped_to_craft_from_or_into_a_predictions_item_keys(db, item_key):
+    # Buying them would be a Prediction buy.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(money=GOLD, recipes=[recipe()])],
+        predictions=[prediction(item_key)],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_reagent_without_market_data_is_bought_but_never_taken_from_held(db):
+    # Ore has asks but no sales. The 2 held can't be valued, so both Bolts buy theirs.
+    ore = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"].append(row(ORE, quantity=4, unit=100))
+    result = run(
+        db,
+        scans,
+        [character_read(item(ore, count=2), money=GOLD, recipes=[recipe(reagents=[(2770, 2)])])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.quantity, craft.note) == (2, "on Kash-Patel: uses 4 of 2770 (buy 4)")
+
+
+def test_a_recipe_on_cooldown_or_with_unknown_bind_type_is_not_flipped_to_craft(db):
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                money=GOLD,
+                recipes=[recipe(cooldown=3 * HOUR), recipe(2964, bind_type=None)],
+            )
+        ],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_cooldown_recipe_flips_to_craft_only_what_held_crafts_left_of_its_limit(db):
+    # Two Characters are off cooldown. One Bolt is crafted from the 2 Linen held.
+    ready = recipe(cooldown=30 * MINUTE)
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(item(count=2), money=GOLD, recipes=[ready]),
+            character_read(character="Alt-One", recipes=[ready]),
+        ],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert craft.quantity == 1
 
 
 # --- Predictions (#26) ---

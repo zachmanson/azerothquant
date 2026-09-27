@@ -3,7 +3,7 @@ from pathlib import Path
 
 from brain.config import Era
 from brain.history import Market
-from brain.recommend import Action, MarketRecommendations, Row
+from brain.recommend import Action, MarketRecommendations, ReagentBuy, Row
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
@@ -188,4 +188,52 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
         "12360|Hold|5|nil|nil|nil|nil|nil|90000|BWL opens|nil",
         "2589|Sell|20|15|300|nil|12|nil|300|nil|nil",
         "12359|Hold|10|800|nil|nil|nil|nil|8000|BWL opens|1500",
+    ]
+
+
+def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render(
+            {},
+            markets=[
+                MarketRecommendations(
+                    market=MARKET,
+                    as_of=1790000000,
+                    gold=500000,
+                    shopping_list=[
+                        Row(
+                            item_key="2996",
+                            action=Action.CRAFT,
+                            quantity=6,
+                            profit=4500.0,
+                            cost=1250.0,
+                            note="on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
+                            buys=(
+                                ReagentBuy("2589", 12, 100),
+                                ReagentBuy("2320", 5, 10.0, merchant=True),
+                            ),
+                        )
+                    ],
+                    shopping_cost=1250,
+                )
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local row = r.recommendations["Quel\'Thalas"].Horde.shoppingList[1] '
+        "print(row.action, row.quantity, row.cost, #row.buys) "
+        "for _, b in ipairs(row.buys) do "
+        "  print(b.itemKey, b.quantity, b.maxUnitPrice, tostring(b.merchant)) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "Craft	6	1250	2",
+        "2589	12	100	nil",
+        "2320	5	10	true",
     ]

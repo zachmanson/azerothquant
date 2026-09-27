@@ -460,7 +460,9 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Sell", "2", "7s 00c", "5s 00c", "14s 00c", "1"] in lines
 
 
-def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
+def _bolts_and_linen(tmp_path, money=0):
+    """Linen at 1s and Bolts at 10s, each selling 2 an hour; 2 Linen held and the Bolt's
+    recipe known."""
     config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
 
     def scan(at, quantity):
@@ -494,7 +496,7 @@ def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
         "realm": MARKET.realm,
         "character": "Kash-Patel",
         "faction": "Alliance",
-        "money": 0,
+        "money": money,
         "bags": [
             {
                 "bag": 0,
@@ -510,7 +512,11 @@ def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
     with closing(open_history(config.history_path)) as conn:
         import_scans(conn, [scan(1_790_000_000, 20), scan(1_790_003_600, 18)], Era.BETA, config)
         import_character_reads(conn, [read], Era.BETA, config)
+    return config
 
+
+def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
+    config = _bolts_and_linen(tmp_path)
     lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
 
     # The Bolt Sells for 9s 50c after the cut; the 2 Linen would have brought 1s 90c.
@@ -642,3 +648,16 @@ happened = 2026-09-22
     # Breaking even is not a profit.
     assert "Graded Predictions: 1 graded, 0 profitable, pooled return 0.0%, caps not halved" in text
     assert ["Linen spike", "2026-09-29", "0c", "2s 85c", "2s 85c", "0.0%"] in lines
+
+
+def test_recommend_prints_a_flip_to_crafts_reagent_buys(tmp_path):
+    config = dataclasses.replace(
+        _bolts_and_linen(tmp_path, money=100_000),
+        sell_rate_prior_hours_flips=0,
+        sale_size_prior_events_flips=0,
+    )
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
+
+    [craft] = [line for line in lines if line[:2] == ["2996", "Craft"] and "(buy" in line[-1]]
+    assert craft[-1].startswith("on Kash-Patel: uses ") and "of 2589 (buy " in craft[-1]
