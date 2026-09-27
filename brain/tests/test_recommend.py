@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -37,6 +37,7 @@ LINEN_KEY = "2589"
 ORE = "item:2770::::::::20:1490"
 ORE_KEY = "2770"
 GOLD = 100 * 100 * 100  # copper
+TAILORING = 197
 
 # Default knobs (5% faction cut, 20% and 1 silver Flip margin), except a Sale Horizon of
 # 3 hours, so a Sell Rate from a single short Observation Window is small enough to cap,
@@ -82,9 +83,17 @@ def item(link=LINEN_LINK, count=1, bound=False):
 
 
 def character_read(
-    *bags, character="Kash-Patel", faction="Alliance", money=0, vendor_prices=None, at=T0
+    *bags,
+    character="Kash-Patel",
+    faction="Alliance",
+    money=0,
+    vendor_prices=None,
+    at=T0,
+    recipes=None,
+    merchant_costs=None,
+    professions=(TAILORING,),
 ):
-    return {
+    read = {
         "readAt": at,
         "realm": REALM,
         "character": character,
@@ -93,6 +102,35 @@ def character_read(
         "bags": list(bags),
         "vendorPrices": vendor_prices or {},
     }
+    if recipes is not None:
+        # The same recipes in each profession's window, as some of Forever's are.
+        read["professions"] = {
+            p: {"readAt": at, "professionID": p, "recipes": list(recipes)} for p in professions
+        }
+        read["professionList"] = [{"professionID": p} for p in professions]
+    if merchant_costs is not None:
+        read["merchantCosts"] = merchant_costs
+    return read
+
+
+BOLT = "item:2996::::::::20:1490"
+BOLT_KEY = "2996"
+BOLT_LINK = "|cffffffff|Hitem:2996::::::::20:1490:::::::::|h[Bolt of Linen Cloth]|h|r"
+THREAD_KEY = "2320"
+
+
+def recipe(recipe_id=2963, output=2996, reagents=((2589, 2),), quantity=1, bind_type=0, **fields):
+    """A Known Recipe as the Addon records it, with Basic reagents only."""
+    return {
+        "recipeID": recipe_id,
+        "outputItemID": output,
+        "quantityMin": quantity,
+        "quantityMax": quantity,
+        "bindType": bind_type,
+        "reagents": [
+            {"itemID": item_id, "quantity": n, "reagentType": 1} for item_id, n in reagents
+        ],
+    } | fields
 
 
 @pytest.fixture
@@ -490,6 +528,333 @@ def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
     assert (vendor.action, vendor.quantity) == (Action.VENDOR, 34)
     [flip] = result[MARKET].shopping_list
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 30, 500)
+
+
+# --- Craft (#31, ADR-0008) ---
+
+
+def linen_and_bolts_selling(linen=100, bolt=1000):
+    """Linen and Bolts of Linen Cloth each selling 2 an hour: 6 of each sell within the
+    3 h horizon, at Fair Values of `linen` and `bolt`."""
+    return [
+        scan(T0, row(quantity=20, unit=linen), row(BOLT, quantity=20, unit=bolt)),
+        scan(T0 + HOUR, row(quantity=18, unit=linen), row(BOLT, quantity=18, unit=bolt)),
+    ]
+
+
+def test_held_reagents_are_crafted_when_the_output_is_worth_more(db):
+    # Two Linen would Sell for 95 each after the cut; the Bolt they make Sells for 950.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), vendor_prices={2589: 10}, recipes=[recipe()])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            BOLT_KEY,
+            Action.SELL,
+            1,
+            price=1000,
+            profit=950,
+            sale_events=1,
+            note="incl. 1 crafted",
+        ),
+        Row(BOLT_KEY, Action.CRAFT, 1, profit=950 - 2 * 95, note="on Kash-Patel: uses 2 of 2589"),
+    ]
+
+
+def test_crafting_stops_once_more_output_would_not_sell_within_the_horizon(db):
+    # 20 Linen: 6 would Sell and 14 be Vendored at 10, so the first crafts use Linen worth
+    # 20 a craft. The first 6 Bolts Sell for 950; a 7th would only Vendor for 15.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=20), vendor_prices={2589: 10, 2996: 15}, recipes=[recipe()])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            BOLT_KEY,
+            Action.SELL,
+            6,
+            price=1000,
+            profit=6 * 950,
+            margin=935,
+            sale_events=1,
+            note="incl. 6 crafted",
+        ),
+        Row(
+            BOLT_KEY, Action.CRAFT, 6, profit=6 * (950 - 20), note="on Kash-Patel: uses 12 of 2589"
+        ),
+        Row(LINEN_KEY, Action.SELL, 6, price=100, profit=6 * 95, margin=85, sale_events=1),
+        Row(LINEN_KEY, Action.VENDOR, 2, price=10, profit=20),
+    ]
+
+
+def test_recipes_competing_for_a_reagent_make_the_better_craft_first(db):
+    # 4 Linen, each worth 95. A Linen Bag (2 Linen) Sells for 475, a Bolt (2 Linen) for 950,
+    # so the Linen all goes to Bolts, though the Bag's recipe comes first.
+    bag = "item:5762::::::::20:1490"
+    result = run(
+        db,
+        [
+            scan(T0, *linen_and_bolts_selling()[0]["listings"], row(bag, quantity=20, unit=500)),
+            scan(
+                T0 + HOUR,
+                *linen_and_bolts_selling()[1]["listings"],
+                row(bag, quantity=18, unit=500),
+            ),
+        ],
+        [
+            character_read(
+                item(count=4),
+                recipes=[recipe(2000, output=5762), recipe(2963, output=2996)],
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert craft == Row(
+        BOLT_KEY, Action.CRAFT, 2, profit=2 * (950 - 190), note="on Kash-Patel: uses 4 of 2589"
+    )
+
+
+def test_a_reagent_without_market_data_blocks_the_recipe(db):
+    # Valuing the Ore at its Vendor Price would understate what crafting it away costs.
+    ore = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(ore, count=2),
+                vendor_prices={2770: 5},
+                recipes=[recipe(3000, reagents=[(2770, 2)])],
+            )
+        ],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(ORE_KEY, None, 2, note="no data"),
+        Row(BOLT_KEY, Action.CRAFT, 0, note="on Kash-Patel: no data for 2770"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "item_key", [LINEN_KEY, BOLT_KEY], ids=["reagent under it", "output under it"]
+)
+def test_nothing_is_crafted_from_or_into_a_predictions_item_keys(db, item_key):
+    # Its reagents are Held, never crafted away. Crafting into one would Hold units that
+    # don't exist yet, at a cost no Lot could back.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), money=GOLD, recipes=[recipe()])],
+        predictions=[prediction(item_key)],
+    )
+
+    assert [r.action for r in result[MARKET].holdings] == [
+        Action.HOLD if item_key == LINEN_KEY else Action.SELL
+    ]
+
+
+def test_an_output_whose_bind_type_is_unknown_blocks_the_recipe(db):
+    # The client hadn't cached the Bolt, so whether it can go on the AH isn't known.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), recipes=[recipe(bind_type=None)])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.SELL, 2, price=100, profit=2 * 95, sale_events=1),
+        Row(BOLT_KEY, Action.CRAFT, 0, note="on Kash-Patel: unknown bind type"),
+    ]
+
+
+def test_a_bind_on_pickup_output_is_only_worth_its_vendor_price(db):
+    # Bolts Sell for 950, but these would be bound: a vendor pays 300, still more than the
+    # 190 the Linen would bring.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), vendor_prices={2996: 300}, recipes=[recipe(bind_type=1)])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(BOLT_KEY, Action.VENDOR, 1, price=300, profit=300, note="incl. 1 crafted"),
+        Row(BOLT_KEY, Action.CRAFT, 1, profit=300 - 190, note="on Kash-Patel: uses 2 of 2589"),
+    ]
+
+
+def test_a_recipe_still_on_cooldown_as_of_its_read_is_blocked(db):
+    # Read at T0 with 3 hours left; the latest Scan is only an hour on.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), recipes=[recipe(cooldown=3 * HOUR)])],
+    )
+
+    until = datetime.fromtimestamp(T0 + 3 * HOUR).strftime("%Y-%m-%d %H:%M")
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert craft == Row(BOLT_KEY, Action.CRAFT, 0, note=f"on Kash-Patel: on cooldown until {until}")
+
+
+def test_a_cooldown_recipe_crafts_once_per_character_whose_cooldown_has_passed(db):
+    # Enough Linen for 5 Bolts, but only Alt-One and Zed-Alt are off cooldown.
+    ready = recipe(cooldown=30 * MINUTE)
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=10),
+                vendor_prices={2589: 10},
+                recipes=[recipe(cooldown=3 * HOUR)],
+            ),
+            character_read(character="Alt-One", recipes=[ready]),
+            character_read(character="Zed-Alt", recipes=[ready]),
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert craft == Row(
+        BOLT_KEY, Action.CRAFT, 2, profit=2 * (950 - 20), note="on Alt-One: uses 4 of 2589"
+    )
+
+
+def test_a_cooldown_recipe_in_several_professions_is_still_once_per_character(db):
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=10),
+                recipes=[recipe(cooldown=30 * MINUTE)],
+                professions=(TAILORING, 185, 356),
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert craft.quantity == 1
+
+
+def test_bound_reagents_are_used_and_before_ones_that_would_sell(db):
+    # Pooled across Characters. The 2 bound Linen would only Vendor for 10 each, so the
+    # first Bolt loses 20 of Linen and the second the 190 the other 2 would Sell for.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(item(count=2), vendor_prices={2589: 10}, recipes=[recipe()]),
+            character_read(item(count=2, bound=True), character="Alt-One"),
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert (craft.quantity, craft.profit) == (2, (950 - 20) + (950 - 190))
+    assert not [r for r in result[MARKET].holdings if r.item_key == LINEN_KEY]
+
+
+def test_an_output_without_market_data_counts_at_its_vendor_price(db):
+    shirt = 2576  # never seen on the Auction House
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), vendor_prices={shirt: 300}, recipes=[recipe(output=shirt)])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row("2576", Action.CRAFT, 1, profit=300 - 190, note="on Kash-Patel: uses 2 of 2589"),
+        Row("2576", None, 1, note="no data, incl. 1 crafted"),
+    ]
+
+
+THREAD_LINK = "|cffffffff|Hitem:2320::::::::20:1490:::::::::|h[Coarse Thread]|h|r"
+LINEN_AND_THREAD = [(2589, 2), (2320, 1)]
+
+
+def test_merchant_reagents_cost_their_merchant_cost_and_missing_ones_are_bought(db):
+    # 4 Linen and 1 Coarse Thread for two Bolts: the second Thread is bought. Thread has no
+    # market data, but could be bought back for its 10, so that's what each one costs.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=4),
+                item(THREAD_LINK),
+                recipes=[recipe(reagents=LINEN_AND_THREAD)],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            BOLT_KEY,
+            Action.SELL,
+            2,
+            price=1000,
+            profit=2 * 950,
+            sale_events=1,
+            note="incl. 2 crafted",
+        ),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            2,
+            profit=2 * (950 - 2 * 95 - 10),
+            note="on Kash-Patel: uses 4 of 2589, 2 of 2320 (buy 1)",
+        ),
+    ]
+
+
+def test_a_missing_reagent_no_merchant_sells_means_no_craft(db):
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), recipes=[recipe(reagents=LINEN_AND_THREAD)])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.SELL, 2, price=100, profit=2 * 95, sale_events=1)
+    ]
+
+
+def test_a_craft_uses_at_least_one_held_reagent(db):
+    # Bolts from Thread alone would vendor for more than the Thread costs: bought Thread
+    # could be crafted forever. Only the one held is.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(THREAD_LINK),
+                vendor_prices={2996: 15},
+                recipes=[recipe(reagents=[(2320, 1)])],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert (craft.quantity, craft.profit) == (1, 950 - 10)
+
+
+@pytest.mark.parametrize(("min_gain", "crafts"), [(929, 6), (930, 0)])
+def test_a_craft_must_gain_more_than_the_minimum(db, min_gain, crafts):
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=20), vendor_prices={2589: 10, 2996: 15}, recipes=[recipe()])],
+        config=replace(CONFIG, craft_min_gain=min_gain),
+    )
+
+    made = [r.quantity for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert sum(made) == crafts
 
 
 # --- Predictions (#26) ---

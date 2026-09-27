@@ -74,6 +74,11 @@
 # prediction_cap_share = 0.15
 # predictions_cap_share = 0.40
 
+# Optional: how `brain recommend` crafts (see ADR-0008). It crafts from held reagents,
+# one craft at a time, the one that gains the most first, while a craft still gains more
+# than craft_min_gain copper. Defaults to 0. Must come before the first [[installs]].
+# craft_min_gain = 0
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

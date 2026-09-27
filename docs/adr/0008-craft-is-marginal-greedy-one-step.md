@@ -16,3 +16,14 @@ The Craft Action (#28) is the first Action that uses up several Item Keys and ma
 - Reagents Held under an active Prediction are never crafted away.
 - Crafting still starts no Lots (ADR-0007): the Brain recommends a craft but never sees one happen.
 - Chaining and buying reagents to craft are separate follow-ups, each able to revisit this.
+
+## Amendment (#31)
+
+Settled while building it:
+
+- A reagent with a Merchant Cost costs that per unit whether held or bought, since it can always be bought back at that price. It needs no market data, so thread and vials don't block every recipe.
+- Every craft uses at least one held reagent unit. From merchant reagents alone the greedy loop would never end whenever a vendor pays more for the output than the merchant charges, and that would be buying to craft anyway.
+- Nothing is crafted into an Item Key under an active Prediction: its Hold would include units not made yet.
+- Quest-bound outputs count as bound, like Bind on Pickup.
+- A blocked recipe shows as a Craft row of 0 with the reason, only when one craft's reagents are on hand.
+- The client seems to give no cooldown for a cooldown recipe that's ready (a spike dump shows `GetRecipeCooldown` returning nil), so the once-per-Character limit only applies when some Character's Read caught it cooling down.

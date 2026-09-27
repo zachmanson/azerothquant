@@ -11,17 +11,20 @@ import sqlite3
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 
 from brain.config import Config
 from brain.fair_value import Supply, fair_value
 from brain.history import (
     Holding,
+    KnownRecipe,
     Market,
     character_markets,
     holdings,
+    known_recipes,
     listings,
+    merchant_costs,
     outcomes,
     pooled_gold,
     purchases,
@@ -38,6 +41,7 @@ from brain.sell_rate import SellRate, observation_window_hours, sell_rates
 class Action(StrEnum):
     VENDOR = "Vendor"
     SELL = "Sell"
+    CRAFT = "Craft"  # from held reagents, valued one step deep (ADR-0008)
     HOLD = "Hold"  # only ever under a Prediction (ADR-0006)
 
 
@@ -145,23 +149,25 @@ def recommend(
         rates = sell_rates(conn, market, config, now)
         vendor = vendor_prices(conn, market.era)
         cut = _cut(market, config)
-        held = _market_holdings(conn, market, characters)
-        rows = [
-            row
-            for item_key, holding in held.items()
-            for row in _holding_rows(
-                item_key,
-                holding,
-                fair_value(supply.get(item_key, []), config),
-                rates.get(item_key),
-                vendor.get(_item_id(item_key)),
-                cut,
-                config,
-            )
-        ]
-        gold = pooled_gold(conn, market.era, market.realm, market.faction)
+        valuer = _Valuer(supply, rates, vendor, cut, config)
         today = date.fromtimestamp(now)
         active = [p for p in predictions if p.active_on(today)]
+        under = {k: p.name for p in active for k in p.item_keys}
+        crafts, held, crafted = _crafts(
+            _market_holdings(conn, market, characters),
+            known_recipes(conn, market),
+            {str(item_id): cost for item_id, cost in merchant_costs(conn, market).items()},
+            valuer,
+            set(under),
+            now,
+            config,
+        )
+        rows = [
+            _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
+            for item_key, holding in held.items()
+            for row in valuer.rows(item_key, holding)
+        ] + crafts
+        gold = pooled_gold(conn, market.era, market.realm, market.faction)
         graded = grades(conn, config, market, predictions, now)
         pooled = pooled_return(graded)
         caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
@@ -176,7 +182,6 @@ def recommend(
                 for_sale.setdefault(listing.item_key, []).append(
                     (listing.unit_buyout, listing.quantity)
                 )
-        under = {k: p.name for p in active for k in p.item_keys}
         hold_buys = [
             buy
             for item_key, offers in sorted(for_sale.items())
@@ -320,17 +325,50 @@ def _exit_value(
     scanned = [t for t in scan_times(conn, market) if t <= at]
     supply = supply_at(conn, market, scanned[-1]) if scanned else {}
     rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
-    vendor = vendor_prices(conn, market.era).get(_item_id(item_key))
-    rows = _holding_rows(
-        item_key,
-        Holding(bags=units),
-        fair_value(supply.get(item_key, []), config),
-        rates.get(item_key),
-        vendor,
-        _cut(market, config),
-        config,
-    )
-    return sum(r.profit if r.profit is not None else r.quantity * (vendor or 0) for r in rows)
+    vendor = vendor_prices(conn, market.era)
+    valuer = _Valuer(supply, rates, vendor, _cut(market, config), config)
+    return valuer.worth(item_key, Holding(bags=units))
+
+
+class _Valuer:
+    """A Market's Sell/Vendor split of held units, as of one Scan."""
+
+    def __init__(
+        self,
+        supply: dict[str, Supply],
+        rates: dict[str, SellRate],
+        vendor: dict[int, int],
+        cut: float,
+        config: Config,
+    ):
+        self._supply, self._rates, self._vendor = supply, rates, vendor
+        self._cut, self._config = cut, config
+
+    def rows(self, item_key: str, holding: Holding) -> list[Row]:
+        return _holding_rows(
+            item_key,
+            holding,
+            fair_value(self._supply.get(item_key, []), self._config),
+            self._rates.get(item_key),
+            self._vendor.get(_item_id(item_key)),
+            self._cut,
+            self._config,
+        )
+
+    def has_data(self, item_key: str) -> bool:
+        """Whether there's a Fair Value and a Sell Rate with sales to value it by."""
+        rate = self._rates.get(item_key)
+        value = fair_value(self._supply.get(item_key, []), self._config)
+        return value is not None and rate is not None and bool(rate.sale_events)
+
+    def worth(self, item_key: str, holding: Holding) -> float:
+        """What the units would bring by their best Actions. Units without enough data to
+        choose an exit count at the Vendor Price, or nothing without one."""
+        vendor = self._vendor.get(_item_id(item_key), 0)
+        return sum(
+            r.profit if r.profit is not None else r.quantity * vendor
+            for r in self.rows(item_key, holding)
+        )
 
 
 def _cut(market: Market, config: Config) -> float:
@@ -412,6 +450,200 @@ def _holding_rows(
     return rows
 
 
+# Enum.ItemBind values whose items can't go on the Auction House: Bind on Pickup and
+# quest items.
+_BOUND_ON_CRAFT = {1, 4}
+
+
+@dataclass
+class _Plan:
+    """The crafts chosen so far of one Known Recipe."""
+
+    recipe: KnownRecipe
+    character: str  # one that knows it
+    limit: int | None = None  # the most crafts, for a cooldown recipe
+    crafts: int = 0
+    gain: float = 0.0
+    used: Counter[str] = field(default_factory=Counter)  # reagent units, bought ones included
+    bought: Counter[str] = field(default_factory=Counter)
+
+    @property
+    def output(self) -> str:
+        return str(self.recipe.output_item_id)
+
+    @property
+    def needs(self) -> dict[str, int]:
+        needs: Counter[str] = Counter()
+        for reagent in self.recipe.reagents:
+            needs[str(reagent.item_id)] += reagent.quantity
+        return needs
+
+    def row(self) -> Row:
+        uses = ", ".join(
+            f"{n} of {key}" + (f" (buy {self.bought[key]})" if self.bought[key] else "")
+            for key, n in self.used.items()
+        )
+        return Row(
+            self.output,
+            Action.CRAFT,
+            self.crafts,
+            profit=self.gain,
+            note=f"on {self.character}: uses {uses}",
+        )
+
+
+def _crafts(
+    held: dict[str, Holding],
+    recipes: list[KnownRecipe],
+    merchant: dict[str, float],
+    valuer: _Valuer,
+    under: set[str],
+    now: int,
+    config: Config,
+) -> tuple[list[Row], dict[str, Holding], Counter[str]]:
+    """The Craft rows, the Holdings once they're made, and the units crafted of each
+    output (ADR-0008).
+
+    Greedy at the margin: each step makes the one craft that gains the most, the output's
+    worth with its units added less the reagents' worth lost and any Merchant Cost paid,
+    until the best gain is no more than `craft_min_gain`. Outputs are valued by Sell and
+    Vendor only, never crafted further.
+
+    A recipe with a cooldown crafts at most once per Character that knows it and whose
+    cooldown has passed as of its read. The client may give no cooldown for one that's
+    ready, so it's only limited when some Character's read caught it cooling down.
+    """
+    held = dict(held)
+    crafted: dict[str, Holding] = {}
+    by_id: dict[int, list[KnownRecipe]] = {}
+    for r in recipes:
+        by_id.setdefault(r.recipe_id, []).append(r)
+    plans, blocked = [], []
+    for known in by_id.values():
+        ready = [k for k in known if not k.cooldown or k.read_at + k.cooldown <= now]
+        has_cooldown = any(k.cooldown is not None for k in known)
+        first = (ready or known)[0]
+        plan = _Plan(
+            first,
+            first.character,
+            limit=len({k.character for k in ready}) if has_cooldown else None,
+        )
+        if plan.output in under:
+            continue  # its Held units would include ones not made yet
+        reason = _blocked(plan, merchant, valuer)
+        if reason is None and not ready:
+            until = min(k.read_at + k.cooldown for k in known)
+            reason = f"on cooldown until {datetime.fromtimestamp(until):%Y-%m-%d %H:%M}"
+        if reason is None:
+            plans.append(plan)
+        elif _step(plan, held, crafted, merchant, valuer, under) is not None:
+            # Only shown when the reagents are there, or every recipe would be.
+            blocked.append(Row(plan.output, Action.CRAFT, 0, note=f"on {plan.character}: {reason}"))
+    while True:
+        best = None
+        for plan in plans:
+            if plan.limit is not None and plan.crafts >= plan.limit:
+                continue
+            step = _step(plan, held, crafted, merchant, valuer, under)
+            if step is not None and (best is None or step[0] > best[1][0]):
+                best = (plan, step)
+        if best is None or best[1][0] <= config.craft_min_gain:
+            break
+        plan, (gain, takes) = best
+        plan.crafts += 1
+        plan.gain += gain
+        for key, (take, buy) in takes.items():
+            held[key] = _take(held[key], take) if take else held.get(key, Holding())
+            plan.used[key] += take + buy
+            plan.bought[key] += buy
+        crafted[plan.output] = _crafted(plan, crafted.get(plan.output, Holding()))
+    after = dict(held)
+    for key, h in crafted.items():
+        after[key] = _plus(after.get(key, Holding()), h)
+    counts = Counter({key: _units(h) for key, h in crafted.items()})
+    rows = [p.row() for p in plans if p.crafts] + blocked
+    return rows, dict(sorted(after.items())), counts
+
+
+def _blocked(plan: _Plan, merchant: dict[str, float], valuer: _Valuer) -> str | None:
+    """Why the recipe can't be valued, if it can't. The guesses lean toward crafting less:
+    a reagent with no market data would be undervalued at its Vendor Price."""
+    if plan.recipe.bind_type is None:
+        return "unknown bind type"
+    for key in plan.needs:
+        if key not in merchant and not valuer.has_data(key):
+            return f"no data for {key}"
+    return None
+
+
+def _step(
+    plan: _Plan,
+    held: dict[str, Holding],
+    crafted: dict[str, Holding],
+    merchant: dict[str, float],
+    valuer: _Valuer,
+    under: set[str],
+) -> tuple[float, dict[str, tuple[int, int]]] | None:
+    """What one more craft gains, and per reagent the held units it uses and the units it
+    buys; None if the reagents aren't there. Crafted units and units Held under a
+    Prediction are never reagents."""
+    loss = 0.0
+    takes = {}
+    for key, n in plan.needs.items():
+        have = Holding() if key in under else held.get(key, Holding())
+        take = min(n, _units(have))
+        buy = n - take
+        if key in merchant:
+            loss += n * merchant[key]
+        elif buy:
+            return None
+        else:
+            now = _plus(have, crafted.get(key, Holding()))
+            loss += valuer.worth(key, now) - valuer.worth(key, _take(now, take))
+        takes[key] = (take, buy)
+    if not any(take for take, _ in takes.values()):
+        # Crafts are from held reagents: with merchant ones alone the loop wouldn't end
+        # whenever a vendor pays more for the output than the merchant charges.
+        return None
+    now = _plus(held.get(plan.output, Holding()), crafted.get(plan.output, Holding()))
+    gain = valuer.worth(plan.output, _crafted(plan, now)) - valuer.worth(plan.output, now)
+    return gain - loss, takes
+
+
+def _crafted(plan: _Plan, holding: Holding) -> Holding:
+    """`holding` with one more craft's output added, at the recipe's least quantity."""
+    q = plan.recipe.quantity_min
+    if plan.recipe.bind_type in _BOUND_ON_CRAFT:
+        return replace(holding, bags_bound=holding.bags_bound + q)
+    return replace(holding, bags=holding.bags + q)
+
+
+def _units(h: Holding) -> int:
+    return h.bags + h.bags_bound + h.bank + h.bank_bound
+
+
+def _plus(a: Holding, b: Holding) -> Holding:
+    return Holding(
+        a.bags + b.bags, a.bags_bound + b.bags_bound, a.bank + b.bank, a.bank_bound + b.bank_bound
+    )
+
+
+def _take(h: Holding, n: int) -> Holding:
+    """`h` less `n` units, bound ones first: they'd only ever be Vendored."""
+    left = {}
+    for place in ("bags_bound", "bank_bound", "bags", "bank"):
+        taken = min(n, getattr(h, place))
+        left[place] = getattr(h, place) - taken
+        n -= taken
+    return Holding(**left)
+
+
+def _with_note(row: Row, note: str) -> Row:
+    if not note:
+        return row
+    return replace(row, note=f"{row.note}, {note}" if row.note else note)
+
+
 class _Caps:
     """The gold still allowed under each Prediction and under all of them together, as
     shares of the Market's pooled gold (ADR-0006), halved while the brake is on."""
@@ -474,7 +706,12 @@ def _hold(
             h = held.get(key, Row(key, Action.HOLD, 0, cost=0, prediction=p.name))
             held[key] = replace(h, quantity=h.quantity + n, cost=h.cost + n * value)
         holds += held.values()
-    rest = [_fewer(r, r.quantity - taken[i]) for i, r in enumerate(rows) if r.quantity > taken[i]]
+    # A row is dropped once Held empties it; a blocked Craft's row has no units to start with.
+    rest = [
+        _fewer(r, r.quantity - taken[i])
+        for i, r in enumerate(rows)
+        if not taken[i] or r.quantity > taken[i]
+    ]
     return rest + holds
 
 

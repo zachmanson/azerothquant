@@ -264,6 +264,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.sell_rate_prior_hours_flips == 24
     assert config.sale_size_prior_events_holdings == 1
     assert config.sale_size_prior_events_flips == 5
+    assert config.craft_min_gain == 0
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -277,6 +278,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "sell_rate_prior_hours_flips = 12.5\n"
         "sale_size_prior_events_holdings = 0\n"
         "sale_size_prior_events_flips = 2.5\n"
+        "craft_min_gain = 50\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -289,6 +291,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.sell_rate_prior_hours_flips == 12.5
     assert config.sale_size_prior_events_holdings == 0
     assert config.sale_size_prior_events_flips == 2.5
+    assert config.craft_min_gain == 50
 
 
 @pytest.mark.parametrize(
@@ -310,6 +313,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("sale_size_prior_events_holdings", '"1"'),
         ("sale_size_prior_events_flips", "true"),
         ("sale_size_prior_events_flips", "-0.5"),
+        ("craft_min_gain", "-1"),
+        ("craft_min_gain", '"0"'),
     ],
 )
 def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):

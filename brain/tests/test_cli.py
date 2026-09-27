@@ -425,6 +425,64 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Sell", "2", "7s 00c", "5s 00c", "14s 00c", "1"] in lines
 
 
+def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+
+    def scan(at, quantity):
+        rows = [
+            {
+                "itemString": f"item:{item_id}",
+                "quantity": quantity,
+                "buyout": quantity * unit,
+                "timeLeft": 4,
+            }
+            for item_id, unit in ((2589, 100), (2996, 1000))
+        ]
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": rows,
+        }
+
+    bolt = {
+        "recipeID": 2963,
+        "outputItemID": 2996,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
+    }
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [
+            {
+                "bag": 0,
+                "slot": 1,
+                "count": 2,
+                "isBound": False,
+                "link": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+            }
+        ],
+        "professions": {197: {"readAt": 1_790_000_000, "professionID": 197, "recipes": [bolt]}},
+        "professionList": [{"professionID": 197}],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, [scan(1_790_000_000, 20), scan(1_790_003_600, 18)], Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
+
+    # The Bolt Sells for 9s 50c after the cut; the 2 Linen would have brought 1s 90c.
+    assert ["2996", "Craft", "1", "7s 60c", "on Kash-Patel: uses 2 of 2589"] in lines
+    assert ["2996", "Sell", "1", "10s 00c", "9s 50c", "1", "incl. 1 crafted"] in lines
+
+
 def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),

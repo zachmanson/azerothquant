@@ -76,6 +76,9 @@ DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS = 5
 DEFAULT_PREDICTION_MAX_LOSS_SHARE = 0.10
 DEFAULT_PREDICTION_CAP_SHARE = 0.15
 DEFAULT_PREDICTIONS_CAP_SHARE = 0.40
+# Crafting (ADR-0008): one more craft is only made while it gains more than this many
+# copper.
+DEFAULT_CRAFT_MIN_GAIN = 0
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -128,6 +131,8 @@ class Config:
     # The most gold under one Prediction, and under all of them, as a share of pooled gold.
     prediction_cap_share: float = DEFAULT_PREDICTION_CAP_SHARE
     predictions_cap_share: float = DEFAULT_PREDICTIONS_CAP_SHARE
+    # A craft is only made while it gains more than this many copper (ADR-0008).
+    craft_min_gain: float = DEFAULT_CRAFT_MIN_GAIN
 
 
 def load_config(path: Path) -> Config:
@@ -253,6 +258,13 @@ def load_config(path: Path) -> Config:
             ("predictions_cap_share", DEFAULT_PREDICTIONS_CAP_SHARE),
         )
     )
+    craft_min_gain = _parse_number(
+        path,
+        raw.get("craft_min_gain", DEFAULT_CRAFT_MIN_GAIN),
+        "craft_min_gain",
+        lambda x: x >= 0,
+        "of copper of at least 0",
+    )
 
     return Config(
         installs=installs,
@@ -277,6 +289,7 @@ def load_config(path: Path) -> Config:
         prediction_max_loss_share=max_loss_share,
         prediction_cap_share=cap_share,
         predictions_cap_share=total_cap_share,
+        craft_min_gain=craft_min_gain,
     )
 
 
