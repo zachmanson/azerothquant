@@ -1,9 +1,9 @@
 """The Decision Engine: Vendor vs Sell for Holdings, and Flips (#23), and Hold under a
 Prediction, both for Holdings and for buying (#26, ADR-0006).
 
-Each Market the player has Characters in is valued as of its latest Scan: Fair Value
-from that Scan, and Sell Rate from the Observation Windows before it. All amounts are
-copper.
+Each Market the player has Characters in is valued as of its latest Scan: every Sell
+posted just under the Listings left in that Scan once its Flips are bought (#62, #64),
+and Sell Rate from the Observation Windows before it. All amounts are copper.
 """
 
 import math
@@ -65,8 +65,8 @@ class Row:
     item_key: str
     action: Action | None  # None when there isn't enough data to choose one
     quantity: int
-    # Per unit: Fair Value to Sell at or the Vendor Price for Holdings, and the most to
-    # pay for the Shopping List.
+    # Per unit: the price to post at for a Sell or the Vendor Price for Holdings (#64), and
+    # the most to pay for the Shopping List.
     price: float | None = None
     profit: float | None = None  # expected copper for the whole quantity
     # Per unit, a Flip to Sell's price to post at, which its Profit rests on, before the
@@ -167,15 +167,12 @@ def recommend(
         if not times:
             continue
         now = times[-1]
-        supply = supply_at(conn, market, now)
-        rates = sell_rates(conn, market, config, now)
-        vendor = vendor_prices(conn, market.era)
-        cut = _cut(market, config)
-        merchant = _merchant(conn, market)
-        valuer = _Valuer(supply, rates, vendor, merchant, cut, config)
         today = date.fromtimestamp(now)
         active = [p for p in predictions if p.active_on(today)]
         under = {k: p.name for p in active for k in p.item_keys}
+        valuer, buys = _valuer(conn, config, market, now, set(under))
+        supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
+        vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
         plans = _plans(known_recipes(conn, market), now)
         crafting = _crafts(
             _market_holdings(conn, market, characters), plans, merchant, valuer, set(under), config
@@ -194,13 +191,6 @@ def recommend(
         rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
         # Most expected profit first; rows without a number to rank by go last.
         rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
-        market_listings = listings(conn, market)
-        for_sale: dict[str, list[tuple[int, int]]] = {}
-        for listing in market_listings:
-            if listing.last_seen == now and not listing.own:
-                for_sale.setdefault(listing.item_key, []).append(
-                    (listing.unit_buyout, listing.quantity)
-                )
         hold_buys = [
             buy
             for item_key, offers in sorted(for_sale.items())
@@ -218,21 +208,6 @@ def recommend(
                 config,
             )
         ]
-        buys = [
-            buy
-            for item_key, offers in sorted(for_sale.items())
-            if item_key not in under
-            for buy in _flips(
-                item_key,
-                offers,
-                supply[item_key],
-                rates.get(item_key),
-                vendor.get(_item_id(item_key)),
-                merchant.get(item_key),
-                cut,
-                config,
-            )
-        ]
         outlets = {
             plan.output: _outlet(
                 plan.recipe.bind_type in _BOUND_ON_CRAFT,
@@ -242,15 +217,14 @@ def recommend(
                 vendor.get(_item_id(plan.output)),
                 merchant.get(plan.output),
                 _unbound(held.get(plan.output, Holding())),
-                [(b.unit_buyout, b.quantity) for b in buys if b.item_key == plan.output],
+                valuer.flipped.get(plan.output, []),
                 cut,
                 config,
             )
             for plan in plans
         }
         asks = {
-            key: _without(offers, [(b.unit_buyout, b.quantity) for b in buys if b.item_key == key])
-            for key, offers in for_sale.items()
+            key: _without(offers, valuer.flipped.get(key, [])) for key, offers in for_sale.items()
         }
         crafts = _flips_to_craft(
             plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config
@@ -258,7 +232,7 @@ def recommend(
         shopping = _shopping_list(buys, crafts, gold)
         shopping_cost = round(sum(r.cost for r in shopping))
         prediction_buys = _spend_on_predictions(hold_buys, gold - shopping_cost, caps)
-        linked = link_sales(outcomes(conn, market), market_listings, purchases(conn, market))
+        linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
         result.append(
             MarketRecommendations(
                 market,
@@ -366,51 +340,100 @@ def _exit_value(
     doesn't move, and so are Merchant Costs. Units without enough data to choose an exit
     count at the Vendor Price, as when Holding them (_hold)."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
-    supply = supply_at(conn, market, scanned[-1]) if scanned else {}
-    rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
-    vendor = vendor_prices(conn, market.era)
-    valuer = _Valuer(supply, rates, vendor, _merchant(conn, market), _cut(market, config), config)
+    valuer, _ = _valuer(conn, config, market, scanned[-1] if scanned else None)
     return valuer.worth(item_key, Holding(bags=units))
 
 
+def _valuer(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    at: int | None,
+    under: set[str] = frozenset(),
+) -> tuple["_Valuer", list[_Buy]]:
+    """The Market's Valuer as of its Scan requested at `at` (none without one), and the
+    Flips in that Scan, which held units are priced after (#64). Item Keys `under` a
+    Prediction aren't Flipped."""
+    scanned = at is not None
+    supply = supply_at(conn, market, at) if scanned else {}
+    others = supply_at(conn, market, at, others_only=True) if scanned else {}
+    rates = sell_rates(conn, market, config, at) if scanned else {}
+    vendor = vendor_prices(conn, market.era)
+    merchant = _merchant(conn, market)
+    cut = _cut(market, config)
+    buys = [
+        buy
+        for item_key, offers in sorted(others.items())
+        if item_key not in under
+        for buy in _flips(
+            item_key,
+            offers,
+            supply[item_key],
+            rates.get(item_key),
+            vendor.get(_item_id(item_key)),
+            merchant.get(item_key),
+            cut,
+            config,
+        )
+    ]
+    flipped: dict[str, Supply] = {}
+    for b in buys:
+        flipped.setdefault(b.item_key, []).append((b.unit_buyout, b.quantity))
+    return _Valuer(supply, others, flipped, rates, vendor, merchant, cut, config), buys
+
+
 class _Valuer:
-    """A Market's Sell/Vendor split of held units, as of one Scan."""
+    """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
+    on sale, `others` other players' Listings, and `flipped` the ones the Flips buy."""
 
     def __init__(
         self,
         supply: dict[str, Supply],
+        others: dict[str, Supply],
+        flipped: dict[str, Supply],
         rates: dict[str, SellRate],
         vendor: dict[int, int],
         merchant: dict[str, float],
         cut: float,
         config: Config,
     ):
-        self._supply, self._rates, self._vendor = supply, rates, vendor
-        self._merchant = merchant
-        self._cut, self._config = cut, config
+        self.supply, self.others, self.flipped = supply, others, flipped
+        self.rates, self.vendor, self.merchant = rates, vendor, merchant
+        self.cut, self._config = cut, config
 
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
+        rate = self.rates.get(item_key)
+        has_data = self.has_data(item_key)
+        post_at = None
+        if has_data:
+            post_at = _post_at(
+                self.supply.get(item_key, []),
+                self.others.get(item_key, []),
+                self.flipped.get(item_key, []),
+                self._config,
+                _ceiling(rate.max_sale_price, self.merchant.get(item_key)),
+            )
         return _holding_rows(
             item_key,
             holding,
-            fair_value(self._supply.get(item_key, []), self._config),
-            self._rates.get(item_key),
-            self._vendor.get(_item_id(item_key)),
-            self._merchant.get(item_key),
-            self._cut,
+            has_data,
+            post_at,
+            rate,
+            self.vendor.get(_item_id(item_key)),
+            self.cut,
             self._config,
         )
 
     def has_data(self, item_key: str) -> bool:
         """Whether there's a Fair Value and a Sell Rate with sales to value it by."""
-        rate = self._rates.get(item_key)
-        value = fair_value(self._supply.get(item_key, []), self._config)
+        rate = self.rates.get(item_key)
+        value = fair_value(self.supply.get(item_key, []), self._config)
         return value is not None and rate is not None and bool(rate.sale_events)
 
     def worth(self, item_key: str, holding: Holding) -> float:
         """What the units would bring by their best Actions. Units without enough data to
         choose an exit count at the Vendor Price, or nothing without one."""
-        vendor = self._vendor.get(_item_id(item_key), 0)
+        vendor = self.vendor.get(_item_id(item_key), 0)
         return sum(
             r.profit if r.profit is not None else r.quantity * vendor
             for r in self.rows(item_key, holding)
@@ -447,24 +470,23 @@ def _market_holdings(
 def _holding_rows(
     item_key: str,
     holding: Holding,
-    value: float | None,
+    has_data: bool,
+    post_at: float | None,
     rate: SellRate | None,
     vendor_price: int | None,
-    merchant_cost: float | None,
     cut: float,
     config: Config,
 ) -> list[Row]:
-    """How held units split between Sell, at their Fair Value but never above what a
-    merchant charges (#63), and Vendor."""
+    """How held units split between Sell, posted at `post_at` like a Flip (#64), and
+    Vendor. With no Listing to price against there's no `post_at`, and they're Vendored."""
     rows = []
     vendoring = holding.bags_bound + holding.bank_bound  # bound can't go on the AH
     unbound = holding.bags + holding.bank
-    if unbound and (value is None or rate is None or not rate.sale_events):
+    if unbound and not has_data:
         # No sale seen yet mostly means not watched long enough, not unsellable.
         rows.append(Row(item_key, None, unbound, note="no data"))
     elif unbound:
-        value = _ceiling(value, merchant_cost)
-        sell_price = value * (1 - cut)
+        sell_price = 0.0 if post_at is None else post_at * (1 - cut)
         selling = min(
             unbound,
             sellable_units(
@@ -475,7 +497,7 @@ def _holding_rows(
             ),
         )
         margin = None if vendor_price is None else sell_price - vendor_price
-        if not selling or (margin is not None and margin <= 0):
+        if post_at is None or not selling or (margin is not None and margin <= 0):
             selling = 0
         else:
             rows.append(
@@ -483,7 +505,7 @@ def _holding_rows(
                     item_key,
                     Action.SELL,
                     selling,
-                    price=value,
+                    price=post_at,
                     profit=selling * sell_price,
                     margin=margin,
                     sale_events=rate.sale_events,

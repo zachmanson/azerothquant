@@ -170,8 +170,16 @@ def test_units_that_sell_within_the_horizon_are_sold_and_the_rest_vendored(db):
     )
 
     assert result[MARKET].holdings == [
-        # Sold at Fair Value less the 5% cut: 95 each, 85 more than a vendor pays.
-        Row(LINEN_KEY, Action.SELL, 6, price=100, profit=6 * 95, margin=85, sale_events=1),
+        # #64: posted 1 copper under the cheapest other Listing, the 100s, like a Flip.
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            6,
+            price=99,
+            profit=pytest.approx(6 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 10),
+            sale_events=1,
+        ),
         Row(LINEN_KEY, Action.VENDOR, 4, price=10, profit=40),
     ]
 
@@ -188,6 +196,52 @@ def test_held_units_are_never_sold_above_what_a_merchant_charges(db):
         Row(LINEN_KEY, Action.SELL, 6, price=80, profit=6 * 76, margin=66, sale_events=1),
         Row(LINEN_KEY, Action.VENDOR, 4, price=10, profit=40),
     ]
+
+
+def test_held_units_match_an_own_listing_under_the_cheapest_other_one(db):
+    # #64: the player already has one up at 90, under the 100s, so held units match it.
+    # Fair Value would be (90 + 100 + 100) / 3.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=90, own=True)),
+        [character_read(item(count=2), vendor_prices={2589: 10})],
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 2, 90)
+    assert sell.profit == pytest.approx(2 * 90 * 0.95)
+
+
+def test_held_units_are_never_sold_above_the_dearest_sale(db):
+    # #64, as for Flips (#41): a lone 845 is all that's on sale, but the only sale was at
+    # 100. Fair Value would be 845.
+    result = run(
+        db,
+        [
+            scan(T0, row(unit=100), row(unit=845)),
+            scan(T0 + HOUR, row(unit=845)),
+        ],
+        [character_read(item(), vendor_prices={2589: 10})],
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.price) == (Action.SELL, 100)
+    assert sell.profit == pytest.approx(100 * 0.95)
+
+
+def test_held_units_undercut_what_is_left_once_the_flips_are_bought(db):
+    # #64: the two 700s are a Flip to Sell, so they aren't there to undercut. Held units
+    # are posted with the Flip at 999, under the 1000s, not at Fair Value's 800.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+        [character_read(item(count=3), money=GOLD, vendor_prices={2589: 10})],
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 3, 999)
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at) == (2, 999)
 
 
 def test_everything_is_vendored_when_a_vendor_pays_more_than_a_sale_brings_in(db):
@@ -235,7 +289,15 @@ def test_bound_units_are_always_vendored(db):
     )
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 4, price=100, profit=4 * 95, margin=85, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            4,
+            price=99,
+            profit=pytest.approx(4 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 10),
+            sale_events=1,
+        ),
         Row("5000", Action.VENDOR, 1, price=250, profit=250),
         Row(LINEN_KEY, Action.VENDOR, 3, price=10, profit=30),
     ]
@@ -246,7 +308,14 @@ def test_an_item_with_no_vendor_price_is_shown_as_such(db):
     result = run(db, selling_two_linen_an_hour(), [character_read(item(count=10))])
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 6, price=100, profit=6 * 95, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            6,
+            price=99,
+            profit=pytest.approx(6 * 99 * 0.95),
+            sale_events=1,
+        ),
         Row(LINEN_KEY, Action.VENDOR, 4, note="no Vendor Price"),
     ]
 
@@ -266,7 +335,15 @@ def test_holdings_are_pooled_across_the_characters_in_a_market(db):
 
     assert list(result) == [MARKET]
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 6, price=100, profit=6 * 95, margin=85, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            6,
+            price=99,
+            profit=pytest.approx(6 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 10),
+            sale_events=1,
+        ),
         Row(LINEN_KEY, Action.VENDOR, 4, price=10, profit=40),
     ]
 
@@ -539,7 +616,7 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
 
     assert [(r.item_key, r.action, r.profit) for r in result[MARKET].holdings] == [
         ("3300", Action.VENDOR, 300),
-        (LINEN_KEY, Action.SELL, 190),
+        (LINEN_KEY, Action.SELL, pytest.approx(2 * 99 * 0.95)),
         ("2770", None, None),
         ("6303", None, None),
     ]
@@ -706,7 +783,8 @@ def linen_and_bolts_selling(linen=100, bolt=1000, sale_events=1):
 
 
 def test_held_reagents_are_crafted_when_the_output_is_worth_more(db):
-    # Two Linen would Sell for 95 each after the cut; the Bolt they make Sells for 950.
+    # Posted 1 copper under the walls (#64), two Linen would Sell for 94.05 each after the
+    # cut; the Bolt they make Sells for 949.05.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -718,18 +796,24 @@ def test_held_reagents_are_crafted_when_the_output_is_worth_more(db):
             BOLT_KEY,
             Action.SELL,
             1,
-            price=1000,
-            profit=950,
+            price=999,
+            profit=pytest.approx(949.05),
             sale_events=1,
             note="incl. 1 crafted",
         ),
-        Row(BOLT_KEY, Action.CRAFT, 1, profit=950 - 2 * 95, note="on Kash-Patel: uses 2 of 2589"),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            1,
+            profit=pytest.approx(949.05 - 2 * 94.05),
+            note="on Kash-Patel: uses 2 of 2589",
+        ),
     ]
 
 
 def test_crafting_stops_once_more_output_would_not_sell_within_the_horizon(db):
     # 20 Linen: 6 would Sell and 14 be Vendored at 10, so the first crafts use Linen worth
-    # 20 a craft. The first 6 Bolts Sell for 950; a 7th would only Vendor for 15.
+    # 20 a craft. The first 6 Bolts Sell for 949.05; a 7th would only Vendor for 15.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -741,22 +825,34 @@ def test_crafting_stops_once_more_output_would_not_sell_within_the_horizon(db):
             BOLT_KEY,
             Action.SELL,
             6,
-            price=1000,
-            profit=6 * 950,
-            margin=935,
+            price=999,
+            profit=pytest.approx(6 * 949.05),
+            margin=pytest.approx(949.05 - 15),
             sale_events=1,
             note="incl. 6 crafted",
         ),
         Row(
-            BOLT_KEY, Action.CRAFT, 6, profit=6 * (950 - 20), note="on Kash-Patel: uses 12 of 2589"
+            BOLT_KEY,
+            Action.CRAFT,
+            6,
+            profit=pytest.approx(6 * (949.05 - 20)),
+            note="on Kash-Patel: uses 12 of 2589",
         ),
-        Row(LINEN_KEY, Action.SELL, 6, price=100, profit=6 * 95, margin=85, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            6,
+            price=99,
+            profit=pytest.approx(6 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 10),
+            sale_events=1,
+        ),
         Row(LINEN_KEY, Action.VENDOR, 2, price=10, profit=20),
     ]
 
 
 def test_recipes_competing_for_a_reagent_make_the_better_craft_first(db):
-    # 4 Linen, each worth 95. A Linen Bag (2 Linen) Sells for 475, a Bolt (2 Linen) for 950,
+    # 4 Linen, each worth 94.05. A Linen Bag (2 Linen) Sells for 474.05, a Bolt for 949.05,
     # so the Linen all goes to Bolts, though the Bag's recipe comes first.
     bag = "item:5762::::::::20:1490"
     result = run(
@@ -779,7 +875,11 @@ def test_recipes_competing_for_a_reagent_make_the_better_craft_first(db):
 
     [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
     assert craft == Row(
-        BOLT_KEY, Action.CRAFT, 2, profit=2 * (950 - 190), note="on Kash-Patel: uses 4 of 2589"
+        BOLT_KEY,
+        Action.CRAFT,
+        2,
+        profit=pytest.approx(2 * (949.05 - 2 * 94.05)),
+        note="on Kash-Patel: uses 4 of 2589",
     )
 
 
@@ -831,14 +931,21 @@ def test_an_output_whose_bind_type_is_unknown_blocks_the_recipe(db):
     )
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 2, price=100, profit=2 * 95, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            2,
+            price=99,
+            profit=pytest.approx(2 * 99 * 0.95),
+            sale_events=1,
+        ),
         Row(BOLT_KEY, Action.CRAFT, 0, note="on Kash-Patel: unknown bind type"),
     ]
 
 
 def test_a_bind_on_pickup_output_is_only_worth_its_vendor_price(db):
-    # Bolts Sell for 950, but these would be bound: a vendor pays 300, still more than the
-    # 190 the Linen would bring.
+    # Bolts Sell for 949.05, but these would be bound: a vendor pays 300, still more than
+    # the 188.10 the Linen would bring.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -847,7 +954,13 @@ def test_a_bind_on_pickup_output_is_only_worth_its_vendor_price(db):
 
     assert result[MARKET].holdings == [
         Row(BOLT_KEY, Action.VENDOR, 1, price=300, profit=300, note="incl. 1 crafted"),
-        Row(BOLT_KEY, Action.CRAFT, 1, profit=300 - 190, note="on Kash-Patel: uses 2 of 2589"),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            1,
+            profit=pytest.approx(300 - 2 * 94.05),
+            note="on Kash-Patel: uses 2 of 2589",
+        ),
     ]
 
 
@@ -883,7 +996,11 @@ def test_a_cooldown_recipe_crafts_once_per_character_whose_cooldown_has_passed(d
 
     [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
     assert craft == Row(
-        BOLT_KEY, Action.CRAFT, 2, profit=2 * (950 - 20), note="on Alt-One: uses 4 of 2589"
+        BOLT_KEY,
+        Action.CRAFT,
+        2,
+        profit=pytest.approx(2 * (949.05 - 20)),
+        note="on Alt-One: uses 4 of 2589",
     )
 
 
@@ -906,7 +1023,7 @@ def test_a_cooldown_recipe_in_several_professions_is_still_once_per_character(db
 
 def test_bound_reagents_are_used_and_before_ones_that_would_sell(db):
     # Pooled across Characters. The 2 bound Linen would only Vendor for 10 each, so the
-    # first Bolt loses 20 of Linen and the second the 190 the other 2 would Sell for.
+    # first Bolt loses 20 of Linen and the second the 188.10 the other 2 would Sell for.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -917,7 +1034,8 @@ def test_bound_reagents_are_used_and_before_ones_that_would_sell(db):
     )
 
     [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
-    assert (craft.quantity, craft.profit) == (2, (950 - 20) + (950 - 190))
+    assert craft.quantity == 2
+    assert craft.profit == pytest.approx((949.05 - 20) + (949.05 - 2 * 94.05))
     assert not [r for r in result[MARKET].holdings if r.item_key == LINEN_KEY]
 
 
@@ -930,7 +1048,13 @@ def test_an_output_without_market_data_counts_at_its_vendor_price(db):
     )
 
     assert result[MARKET].holdings == [
-        Row("2576", Action.CRAFT, 1, profit=300 - 190, note="on Kash-Patel: uses 2 of 2589"),
+        Row(
+            "2576",
+            Action.CRAFT,
+            1,
+            profit=pytest.approx(300 - 2 * 94.05),
+            note="on Kash-Patel: uses 2 of 2589",
+        ),
         Row("2576", None, 1, note="no data, incl. 1 crafted"),
     ]
 
@@ -960,8 +1084,8 @@ def test_merchant_reagents_cost_their_merchant_cost_and_missing_ones_are_bought(
             BOLT_KEY,
             Action.SELL,
             2,
-            price=1000,
-            profit=2 * 950,
+            price=999,
+            profit=pytest.approx(2 * 949.05),
             sale_events=1,
             note="incl. 2 crafted",
         ),
@@ -969,7 +1093,7 @@ def test_merchant_reagents_cost_their_merchant_cost_and_missing_ones_are_bought(
             BOLT_KEY,
             Action.CRAFT,
             2,
-            profit=2 * (950 - 2 * 95 - 10),
+            profit=pytest.approx(2 * (949.05 - 2 * 94.05 - 10)),
             note="on Kash-Patel: uses 4 of 2589, 2 of 2320 (buy 1)",
         ),
     ]
@@ -983,7 +1107,14 @@ def test_a_missing_reagent_no_merchant_sells_means_no_craft(db):
     )
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 2, price=100, profit=2 * 95, sale_events=1)
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            2,
+            price=99,
+            profit=pytest.approx(2 * 99 * 0.95),
+            sale_events=1,
+        )
     ]
 
 
@@ -1004,7 +1135,8 @@ def test_a_craft_uses_at_least_one_held_reagent(db):
     )
 
     [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
-    assert (craft.quantity, craft.profit) == (1, 950 - 10)
+    assert craft.quantity == 1
+    assert craft.profit == pytest.approx(949.05 - 10)
 
 
 @pytest.mark.parametrize(("min_gain", "crafts"), [(929, 6), (930, 0)])
@@ -1024,7 +1156,7 @@ def test_a_craft_must_gain_more_than_the_minimum(db, min_gain, crafts):
 
 
 def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
-    # 1 Linen held, worth the 95 it Sells for. The first Bolt buys 1 Linen at 100, the
+    # 1 Linen held, worth the 94.05 it Sells for. The first Bolt buys 1 Linen at 100, the
     # next 5 buy 2 each, until the 6 Bolts that sell within the horizon, posted at 999
     # for 949.05 after the cut.
     result = run(
@@ -1038,7 +1170,7 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
             BOLT_KEY,
             Action.CRAFT,
             6,
-            profit=pytest.approx((949.05 - 95 - 100) + 5 * (949.05 - 200)),
+            profit=pytest.approx((949.05 - 94.05 - 100) + 5 * (949.05 - 200)),
             cost=11 * 100,
             note="on Kash-Patel: uses 12 of 2589 (buy 11)",
             buys=(ReagentBuy(LINEN_KEY, 11, 100),),
@@ -1057,7 +1189,7 @@ def test_a_flip_to_crafts_output_is_never_resold_above_what_a_merchant_charges(d
 
     [craft] = result[MARKET].shopping_list
     assert (craft.action, craft.quantity) == (Action.CRAFT, 6)
-    assert craft.profit == pytest.approx((475 - 95 - 100) + 5 * (475 - 200))
+    assert craft.profit == pytest.approx((475 - 94.05 - 100) + 5 * (475 - 200))
 
 
 def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
@@ -1296,10 +1428,16 @@ def test_held_units_of_a_predictions_item_keys_are_held_under_it(db):
         predictions=[prediction(LINEN_KEY)],
     )
 
-    # The gold they tie up is what letting them go would bring today: 6 Sold at 95 after
+    # The gold they tie up is what letting them go would bring today: 6 Sold at 94.05 after
     # the cut and 4 Vendored at 10.
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.HOLD, 10, cost=6 * 95 + 4 * 10, prediction="Linen spike")
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            10,
+            cost=pytest.approx(6 * 94.05 + 4 * 10),
+            prediction="Linen spike",
+        )
     ]
 
 
@@ -1327,9 +1465,9 @@ def test_a_prediction_ends_when_its_catalyst_happens_or_it_lapses(db, ended, pre
 
 
 def test_units_held_since_a_prediction_was_written_tie_up_their_written_day_cost(db):
-    # Written the day after the first Scans, when the 10 Linen held would have brought 610
-    # (6 Sold at 95 and 4 Vendored at 10). Linen has since gone to 500, so letting them go
-    # today would bring 2890, but they tie up the 610. 15% of 41s fits 610, not 2890.
+    # Written the day after the first Scans, when the 10 Linen held would have brought 604
+    # (6 Sold at 94.05 and 4 Vendored at 10). Linen has since gone to 500, so letting them
+    # go today would bring 2884.30, but they tie up the 604. 15% of 41s fits 604, not 2884.
     written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
     later = T0 + 3 * DAY
     result = run(
@@ -1344,13 +1482,13 @@ def test_units_held_since_a_prediction_was_written_tie_up_their_written_day_cost
     )
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.HOLD, 10, cost=6 * 95 + 4 * 10, prediction="Linen spike")
+        Row(LINEN_KEY, Action.HOLD, 10, cost=604, prediction="Linen spike")
     ]
 
 
 def test_held_units_over_the_cap_go_to_their_best_action_cheapest_exit_held_first(db):
     # 15% of 16s is 2s 40c. The 4 unbound units a vendor would take (10 each) fit first,
-    # then 2 of the 6 that would Sell (95 each): 2s 30c. Bound units can't be sold after
+    # then 2 of the 6 that would Sell (94.05 each): 2s 28c. Bound units can't be sold after
     # the Catalyst either, so they're never Held.
     result = run(
         db,
@@ -1364,9 +1502,23 @@ def test_held_units_over_the_cap_go_to_their_best_action_cheapest_exit_held_firs
     )
 
     assert result[MARKET].holdings == [
-        Row(LINEN_KEY, Action.SELL, 4, price=100, profit=4 * 95, margin=85, sale_events=1),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            4,
+            price=99,
+            profit=pytest.approx(4 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 10),
+            sale_events=1,
+        ),
         Row(LINEN_KEY, Action.VENDOR, 3, price=10, profit=30),
-        Row(LINEN_KEY, Action.HOLD, 6, cost=4 * 10 + 2 * 95, prediction="Linen spike"),
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            6,
+            cost=pytest.approx(4 * 10 + 2 * 94.05),
+            prediction="Linen spike",
+        ),
     ]
 
 
@@ -1574,9 +1726,30 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
         ],
     )
 
-    # As in the Hold test: 6 Sold at 95 after the cut and 4 Vendored at 10.
+    # As in the Hold test: 6 Sold at 94.05 after the cut and 4 Vendored at 10, 604.30.
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
-        Held("Linen spike", LINEN_KEY, units=10, cost=6 * 95 + 4 * 10)
+        Held("Linen spike", LINEN_KEY, units=10, cost=604)
+    ]
+
+
+def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(db):
+    # #64: on the written day the two 700s were a Flip to Sell, so the 6 that Sell are
+    # posted under the 1000s at 999, 949.05 after the cut, not under the 700s. The later
+    # Scans at 500 must not count.
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    later = T0 + 3 * DAY
+    run(
+        db,
+        [
+            *selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+            scan(later, row(quantity=20, unit=500)),
+            scan(later + HOUR, row(quantity=18, unit=500)),
+        ],
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+    )
+
+    assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
+        Held("Linen spike", LINEN_KEY, units=10, cost=5734)  # 6 * 949.05 + 4 * 10
     ]
 
 
@@ -1618,10 +1791,10 @@ def linen_sold(read_at, count, price):
 
 
 def test_a_prediction_is_graded_on_its_sales_and_its_open_units_best_exit_at_the_moment(db):
-    # Written the day after these Scans with 10 Linen held (6 Sold at 95, 4 Vendored at 10:
-    # 610), its Catalyst happens the next day. 2 sell at 300 while it stands. At the grading
-    # moment, 3 hours on, the 8 left are worth what they were then: 6 Sold at 95 and 2
-    # Vendored at 10. The Scans after the grading moment must not count.
+    # Written the day after these Scans with 10 Linen held (6 Sold at 94.05, 4 Vendored at
+    # 10: 604), its Catalyst happens the next day. 2 sell at 300 while it stands. At the
+    # grading moment, 3 hours on, the 8 left are worth what they were then: 6 Sold at 94.05
+    # and 2 Vendored at 10. The Scans after the grading moment must not count.
     named = row(own=True) | {"name": "Linen Cloth"}
     written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
     ended = start_of(written + timedelta(days=1))
@@ -1644,8 +1817,8 @@ def test_a_prediction_is_graded_on_its_sales_and_its_open_units_best_exit_at_the
             "Linen spike",
             graded_at=ended + 3 * HOUR,
             proceeds=2 * 300 * 0.95,
-            open_value=6 * 95 + 2 * 10,
-            cost=6 * 95 + 4 * 10,
+            open_value=pytest.approx(6 * 94.05 + 2 * 10),
+            cost=604,
         )
     ]
 

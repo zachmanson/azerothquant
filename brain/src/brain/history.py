@@ -1010,11 +1010,12 @@ def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]
 
 
 def supply_at(
-    conn: sqlite3.Connection, market: Market, at: int
+    conn: sqlite3.Connection, market: Market, at: int, others_only: bool = False
 ) -> dict[str, list[tuple[int, int]]]:
-    """The Market's Scan requested at `at`, as (unit buyout, quantity) per Item Key.
-    A Listing's quantity is stored as of its last-seen Scan, so the Partial Sales seen
-    after `at` are added back to get what it held then."""
+    """The Market's Scan requested at `at`, as (unit buyout, quantity) per Item Key, or
+    only other players' Listings in it with `others_only`. A Listing's quantity is stored
+    as of its last-seen Scan, so the Partial Sales seen after `at` are added back to get
+    what it held then."""
     rows = conn.execute(
         "SELECT l.item_key, l.unit_buyout, l.quantity + COALESCE(("
         "   SELECT SUM(p.units_sold) FROM partial_sale p JOIN scan ps ON ps.id = p.scan_id"
@@ -1024,7 +1025,8 @@ def supply_at(
         " JOIN scan first ON first.id = l.first_seen_scan_id"
         " JOIN scan last ON last.id = l.last_seen_scan_id"
         f" WHERE {_MARKET_FILTER} AND first.requested_at <= ? AND last.requested_at >= ?"
-        " ORDER BY l.id",
+        + (" AND NOT l.own" if others_only else "")
+        + " ORDER BY l.id",
         (at, *_market_params(market), at, at),
     )
     result: dict[str, list[tuple[int, int]]] = {}

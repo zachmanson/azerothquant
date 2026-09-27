@@ -457,10 +457,9 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert "Classic Beta PvP Alliance (beta)" in text
     # The one Observation Window every Sell Rate here rests on.
     assert "Sell Rate observed for 1.0 h in the last 14 days" in text
-    # Fair Value (700 + 700 + 1000) / 3 = 800, less the 5% cut: 760 each, 750 more than a
-    # vendor pays. The Flip is posted at 999 under the 1000s once the two 700s are bought,
-    # for 949.05 after the cut.
-    assert ["2589", "Sell", "3", "8s 00c", "22s 80c", "7s 50c", "1"] in lines
+    # The Flip buys the two 700s, so it and the 3 held are posted at 999 under the 1000s
+    # (#64), for 949.05 each after the cut, 939.05 more than a vendor pays.
+    assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
     assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
     assert ["2589", "Sell", "2", "7s 00c", "4s 98c", "14s 00c", "1"] in lines
 
@@ -524,9 +523,10 @@ def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
     config = _bolts_and_linen(tmp_path)
     lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
 
-    # The Bolt Sells for 9s 50c after the cut; the 2 Linen would have brought 1s 90c.
-    assert ["2996", "Craft", "1", "7s 60c", "on Kash-Patel: uses 2 of 2589"] in lines
-    assert ["2996", "Sell", "1", "10s 00c", "9s 50c", "1", "incl. 1 crafted"] in lines
+    # Posted at 9s 99c, the Bolt Sells for 949.05 after the cut; the 2 Linen, posted at 99,
+    # would have brought 188.10.
+    assert ["2996", "Craft", "1", "7s 61c", "on Kash-Patel: uses 2 of 2589"] in lines
+    assert ["2996", "Sell", "1", "9s 99c", "9s 49c", "1", "incl. 1 crafted"] in lines
 
 
 def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
