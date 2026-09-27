@@ -126,12 +126,10 @@ def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_pat
     # The fixture holds two Alliance Scans on "Classic Beta PvP"; the later one is 1790001200.
     # Its two Mailbox Reads are Kash-Patel's; the later one is 1790001800.
     # So are its two Character Reads; the later one is 1790002000.
-    assert read_recommendations(install) == {
-        "lastImported": {"Classic Beta PvP": {"Alliance": 1790001200}},
-        "lastMailboxRead": {"Classic Beta PvP": {"Kash-Patel": 1790001800}},
-        "lastCharacterRead": {"Classic Beta PvP": {"Kash-Patel": 1790002000}},
-        "recommendations": [],
-    }
+    written = read_recommendations(install)
+    assert written["lastImported"] == {"Classic Beta PvP": {"Alliance": 1790001200}}
+    assert written["lastMailboxRead"] == {"Classic Beta PvP": {"Kash-Patel": 1790001800}}
+    assert written["lastCharacterRead"] == {"Classic Beta PvP": {"Kash-Patel": 1790002000}}
 
 
 def test_each_install_only_hears_about_its_own_era(tmp_path):
@@ -153,6 +151,43 @@ def test_each_install_only_hears_about_its_own_era(tmp_path):
     }
     assert read_recommendations(live)["lastMailboxRead"] == []
     assert read_recommendations(live)["lastCharacterRead"] == []
+
+
+def test_import_hands_the_addon_each_markets_recommendations_for_its_own_era(tmp_path):
+    beta = tmp_path / "_classic_beta_"
+    live = tmp_path / "_classic_"
+    file = install_with_savedvariables(beta)
+    install_addon(beta)
+    install_addon(live)
+    config = config_for(tmp_path, Install(beta, Era.BETA), Install(live, Era.LIVE))
+
+    run_import(config, [file])
+
+    # Valued at the later Scan, with the gold of Kash-Patel's latest Character Read.
+    market = read_recommendations(beta)["recommendations"]["Classic Beta PvP"]["Alliance"]
+    assert market["asOf"] == 1790001200
+    assert market["gold"] == 1200000
+    assert "2589" in [row["itemKey"] for row in market["holdings"]]
+    assert read_recommendations(live)["recommendations"] == []
+
+
+def test_a_broken_predictions_file_still_tells_the_addon_what_was_imported(tmp_path, caplog):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    install_addon(install)
+    predictions = tmp_path / "predictions.toml"
+    predictions.write_text("[[predictions]", encoding="utf-8")
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(install, Era.BETA)), predictions_path=predictions
+    )
+
+    run_import(config, [file])
+
+    # Pruning SavedVariables mustn't wait on a typo in the Predictions (#10).
+    written = read_recommendations(install)
+    assert written["lastImported"] == {"Classic Beta PvP": {"Alliance": 1790001200}}
+    assert written["recommendations"] == []
+    assert "predictions.toml" in caplog.text
 
 
 def test_an_install_without_the_addon_gets_no_file(tmp_path):

@@ -4,7 +4,7 @@ The Brain writes it into the Addon's folder in each install, never into
 SavedVariables, since the client overwrites SavedVariables on every logout
 (ADR-0001). The client reads it on login or `/reload`.
 
-For now it only holds, per Market, when the latest imported Scan was requested.
+It holds, per Market, when the latest imported Scan was requested.
 The Addon then deletes every stored Scan in that Market requested at or before
 that time: each one is either imported already or older than an imported one,
 which the Brain rejects, so none of them can be of any more use.
@@ -12,11 +12,16 @@ which the Brain rejects, so none of them can be of any more use.
 Likewise, per Character, when the latest imported Mailbox Read and Character Read were
 taken. Reads are imported whatever their order, so every stored Read up to then is
 already archived.
+
+And, per Market of the install's Era, its Recommendations as raw data (copper, Item
+Keys, Action names) for the Recommendation Table. The Addon formats them itself, since
+only it can look up item names.
 """
 
 import os
 import sqlite3
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from brain.config import Install
@@ -27,6 +32,7 @@ from brain.history import (
     latest_scan_times,
 )
 from brain.lua_literal import assignment
+from brain.recommend import Action, MarketRecommendations, Row
 
 FILE_NAME = "Recommendations.lua"
 GLOBAL_NAME = "AzerothQuantRecommendations"
@@ -49,6 +55,7 @@ def render(
     last_imported: dict[Market, int],
     last_mailbox_read: dict[tuple[str, str], int] | None = None,
     last_character_read: dict[tuple[str, str], int] | None = None,
+    markets: Sequence[MarketRecommendations] = (),
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
@@ -59,9 +66,52 @@ def render(
             "lastImported": by_realm,
             "lastMailboxRead": _by_realm(last_mailbox_read or {}),
             "lastCharacterRead": _by_realm(last_character_read or {}),
-            "recommendations": [],
+            "recommendations": _recommendations(markets),
         },
     )
+
+
+def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict[str, dict]]:
+    by_realm: dict[str, dict[str, dict]] = {}
+    for m in markets:
+        by_realm.setdefault(m.market.realm, {})[m.market.faction] = {
+            "asOf": m.as_of,
+            "gold": m.gold,
+            "windowHours": m.window_hours,
+            "shoppingCost": m.shopping_cost,
+            "predictionCost": m.prediction_cost,
+            "holdings": [_row(r) for r in m.holdings],
+            "shoppingList": [_row(r) for r in m.shopping_list],
+            "predictionBuys": [_row(r) for r in m.prediction_buys],
+        }
+    return by_realm
+
+
+# Row field -> the key the Addon reads. None and "" are left out: a Lua table can't hold
+# nil, and an absent key reads as nil in the Addon either way.
+_ROW_KEYS = {
+    "item_key": "itemKey",
+    "action": "action",
+    "quantity": "quantity",
+    "price": "price",
+    "profit": "profit",
+    "margin": "margin",
+    "sale_events": "saleEvents",
+    "note": "note",
+    "cost": "cost",
+    "prediction": "prediction",
+    "max_loss": "maxLoss",
+}
+
+
+def _row(row: Row) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for field, key in _ROW_KEYS.items():
+        value = getattr(row, field)
+        if value is None or value == "":
+            continue
+        out[key] = str(value) if isinstance(value, Action) else value
+    return out
 
 
 def _by_realm(read_times: dict[tuple[str, str], int]) -> dict[str, dict[str, int]]:
@@ -71,9 +121,13 @@ def _by_realm(read_times: dict[tuple[str, str], int]) -> dict[str, dict[str, int
     return by_realm
 
 
-def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | None:
-    """Write the install's Recommendations.lua from the history; None if the Addon isn't
-    installed there."""
+def write_recommendations(
+    conn: sqlite3.Connection,
+    install: Install,
+    markets: Sequence[MarketRecommendations] = (),
+) -> Path | None:
+    """Write the install's Recommendations.lua from the history and the Recommendations of
+    its Era's Markets; None if the Addon isn't installed there."""
     folder = addon_folder(install)
     if not folder.is_dir():
         return None
@@ -82,6 +136,7 @@ def write_recommendations(conn: sqlite3.Connection, install: Install) -> Path | 
         latest_scan_times(conn, install.era),
         latest_mailbox_read_times(conn, install.era),
         latest_character_read_times(conn, install.era),
+        [m for m in markets if m.market.era is install.era],
     )
     # Write a temp file and swap it in, so the client never reads a half-written file. The
     # temp name is unique so a `brain import` running beside `brain watch` can't clash.

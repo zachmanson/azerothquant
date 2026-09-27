@@ -3,6 +3,7 @@ from pathlib import Path
 
 from brain.config import Era
 from brain.history import Market
+from brain.recommend import Action, MarketRecommendations, Row
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
@@ -51,3 +52,140 @@ def test_a_real_lua_reads_the_last_imported_times(tmp_path, lua):
         "table\tQuel'Thalas/Horde=1790000000;Quel'Thalas/Neutral=1790000100;"
         'Say "hi"/Alliance=1790000200'
     )
+
+
+def _run_in_lua(lua: str, file: Path, body: str) -> str:
+    """Load the file the way the client does, then run `body` with it as `r`."""
+    script = f"dofile([==[{file}]==]) local r = {GLOBAL_NAME} {body}"
+    return subprocess.run(
+        [lua, "-e", script], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+MARKET = Market("Quel'Thalas", "Horde", Era.BETA)
+
+
+def test_a_real_lua_reads_a_markets_recommendations(tmp_path, lua):
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render(
+            {},
+            markets=[
+                MarketRecommendations(
+                    market=MARKET,
+                    as_of=1790000000,
+                    gold=123456,
+                    window_hours=2.5,
+                    holdings=[
+                        Row(
+                            item_key="4359",
+                            action=Action.SELL,
+                            quantity=32,
+                            price=169.0,
+                            profit=5139.0,
+                            margin=149.0,
+                            sale_events=41,
+                        )
+                    ],
+                    shopping_cost=0,
+                    prediction_cost=0,
+                )
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local m = r.recommendations["Quel\'Thalas"].Horde '
+        "local h = m.holdings[1] "
+        "print(m.asOf, m.gold, m.windowHours, m.shoppingCost, m.predictionCost, #m.holdings) "
+        "print(h.itemKey, h.action, h.quantity, h.price, h.profit, h.margin, h.saleEvents)",
+    )
+
+    assert out.splitlines() == [
+        "1790000000	123456	2.5	0	0	1",
+        "4359	Sell	32	169	5139	149	41",
+    ]
+
+
+def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render(
+            {},
+            markets=[
+                MarketRecommendations(
+                    market=MARKET,
+                    as_of=1790000000,
+                    gold=500000,
+                    holdings=[
+                        Row(item_key="1179", action=None, quantity=4, note="no data"),
+                        Row(
+                            item_key="2996",
+                            action=Action.CRAFT,
+                            quantity=3,
+                            profit=42.0,
+                            note="on Kash-Patel: uses 6 of 2589",
+                        ),
+                        Row(
+                            item_key="12360",
+                            action=Action.HOLD,
+                            quantity=5,
+                            cost=90000.0,
+                            prediction="BWL opens",
+                        ),
+                    ],
+                    shopping_list=[
+                        Row(
+                            item_key="2589",
+                            action=Action.SELL,
+                            quantity=20,
+                            price=15.0,
+                            profit=300.0,
+                            cost=300.0,
+                            sale_events=12,
+                        )
+                    ],
+                    shopping_cost=300,
+                    prediction_buys=[
+                        Row(
+                            item_key="12359",
+                            action=Action.HOLD,
+                            quantity=10,
+                            price=800.0,
+                            cost=8000.0,
+                            prediction="BWL opens",
+                            max_loss=1500.0,
+                        )
+                    ],
+                    prediction_cost=8000,
+                )
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    fields = "itemKey action quantity price profit margin saleEvents note cost prediction maxLoss"
+    out = _run_in_lua(
+        lua,
+        file,
+        'local m = r.recommendations["Quel\'Thalas"].Horde '
+        "local function show(row) "
+        "  local out = {} "
+        f"  for field in ('{fields}'):gmatch('%S+') do out[#out + 1] = tostring(row[field]) end "
+        "  print(table.concat(out, '|')) "
+        "end "
+        "for _, list in ipairs({m.holdings, m.shoppingList, m.predictionBuys}) do "
+        "  for _, row in ipairs(list) do show(row) end "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "1179|nil|4|nil|nil|nil|nil|no data|nil|nil|nil",
+        "2996|Craft|3|nil|42|nil|nil|on Kash-Patel: uses 6 of 2589|nil|nil|nil",
+        "12360|Hold|5|nil|nil|nil|nil|nil|90000|BWL opens|nil",
+        "2589|Sell|20|15|300|nil|12|nil|300|nil|nil",
+        "12359|Hold|10|800|nil|nil|nil|nil|8000|BWL opens|1500",
+    ]

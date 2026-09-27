@@ -161,9 +161,20 @@ def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
     Every install, not only those just imported: it is cheap, and it also fixes a file
     a previous write couldn't replace (say the client had it open).
     """
+    # Recommendations failing (a typo in the Predictions, or a Decision Engine bug) must
+    # not stop the file being written: the import times in it are what let the Addon prune
+    # SavedVariables.
+    try:
+        markets = recommend(conn, config, load_predictions(config.predictions_path))
+    except PredictionsError as e:
+        log.error("No Recommendations written: %s", e)
+        markets = []
+    except Exception:
+        log.exception("No Recommendations written: the Decision Engine failed")
+        markets = []
     for install in config.installs:
         try:
-            path = write_recommendations(conn, install)
+            path = write_recommendations(conn, install, markets)
         except (OSError, sqlite3.Error) as e:
             log.error("Couldn't write Recommendations for %s: %s", install.path, e)
             continue
