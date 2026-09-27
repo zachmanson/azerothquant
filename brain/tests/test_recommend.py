@@ -176,6 +176,20 @@ def test_units_that_sell_within_the_horizon_are_sold_and_the_rest_vendored(db):
     ]
 
 
+def test_held_units_are_never_sold_above_what_a_merchant_charges(db):
+    # #63: Fair Value is 100, but a merchant sells Linen for 80.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10}, merchant_costs={2589: 80})],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.SELL, 6, price=80, profit=6 * 76, margin=66, sale_events=1),
+        Row(LINEN_KEY, Action.VENDOR, 4, price=10, profit=40),
+    ]
+
+
 def test_everything_is_vendored_when_a_vendor_pays_more_than_a_sale_brings_in(db):
     # Fair Value 100 less the 5% cut is 95.
     result = run(
@@ -435,6 +449,31 @@ def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
             cost=1400,
         )
     ]
+
+
+def test_a_flip_to_sell_is_never_posted_above_what_a_merchant_charges(db):
+    # #63: the 1g 95s wall would be undercut to 1g 94s 99c, but a merchant sells Linen for
+    # 1g 50s, so no one pays more on the Auction House.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500),
+        [character_read(money=GOLD, merchant_costs={2589: 15000})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.price, flip.post_at) == (3, 10000, 15000)
+    assert flip.profit == pytest.approx(3 * (15000 * 0.95 - 10000))
+
+
+def test_a_flip_to_sell_still_undercuts_a_listing_under_the_merchant_cost(db):
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500),
+        [character_read(money=GOLD, merchant_costs={2589: 25000})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert flip.post_at == 19499
 
 
 def test_own_listings_are_never_bought(db):
@@ -1008,6 +1047,19 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
     assert result[MARKET].shopping_cost == 1100
 
 
+def test_a_flip_to_crafts_output_is_never_resold_above_what_a_merchant_charges(db):
+    # #63: as above, but a merchant sells Bolts for 500, so they resell for 475.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(), money=GOLD, recipes=[recipe()], merchant_costs={2996: 500})],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.action, craft.quantity) == (Action.CRAFT, 6)
+    assert craft.profit == pytest.approx((475 - 95 - 100) + 5 * (475 - 200))
+
+
 def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
     # A Linen at 60 and one at 80 go into the first Bolt; every later one pays 100 a Linen.
     # Neither is a plain Flip: posted under the next Listing up, neither clears 1 silver.
@@ -1367,6 +1419,21 @@ def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
     ]
 
 
+def test_a_buys_exit_is_never_a_resale_above_what_a_merchant_charges(db):
+    # #63: as above, but a merchant sells Linen for 800, so a resale brings in 760. The
+    # 700s gain 60 each; a 1000 would lose 240, more than 10% of it.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+        [character_read(money=GOLD, merchant_costs={2589: 800})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert (buy.quantity, buy.cost) == (2, 1400)
+    assert buy.max_loss == pytest.approx(2 * -60)
+
+
 def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
     # 6 sell within the horizon, and the 4 held would go first if the Prediction is wrong,
     # so only 2 of the 100s could be resold, posted at 99 under the rest for 94.05.
@@ -1510,6 +1577,20 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
     # As in the Hold test: 6 Sold at 95 after the cut and 4 Vendored at 10.
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
         Held("Linen spike", LINEN_KEY, units=10, cost=6 * 95 + 4 * 10)
+    ]
+
+
+def test_a_best_exit_is_never_a_sale_above_what_a_merchant_charges(db):
+    # #63: Fair Value is 100, but a merchant sells Linen for 80, so 6 Sell at 76.
+    run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10}, merchant_costs={2589: 80})],
+    )
+
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
+        Held("Linen spike", LINEN_KEY, units=10, cost=6 * 76 + 4 * 10)
     ]
 
 

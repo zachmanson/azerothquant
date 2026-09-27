@@ -171,12 +171,12 @@ def recommend(
         rates = sell_rates(conn, market, config, now)
         vendor = vendor_prices(conn, market.era)
         cut = _cut(market, config)
-        valuer = _Valuer(supply, rates, vendor, cut, config)
+        merchant = _merchant(conn, market)
+        valuer = _Valuer(supply, rates, vendor, merchant, cut, config)
         today = date.fromtimestamp(now)
         active = [p for p in predictions if p.active_on(today)]
         under = {k: p.name for p in active for k in p.item_keys}
         plans = _plans(known_recipes(conn, market), now)
-        merchant = {str(item_id): cost for item_id, cost in merchant_costs(conn, market).items()}
         crafting = _crafts(
             _market_holdings(conn, market, characters), plans, merchant, valuer, set(under), config
         )
@@ -212,6 +212,7 @@ def recommend(
                 supply[item_key],
                 rates.get(item_key),
                 vendor.get(_item_id(item_key)),
+                merchant.get(item_key),
                 held[item_key].bags + held[item_key].bank if item_key in held else 0,
                 cut,
                 config,
@@ -227,6 +228,7 @@ def recommend(
                 supply[item_key],
                 rates.get(item_key),
                 vendor.get(_item_id(item_key)),
+                merchant.get(item_key),
                 cut,
                 config,
             )
@@ -238,6 +240,7 @@ def recommend(
                 for_sale.get(plan.output, []),
                 rates.get(plan.output),
                 vendor.get(_item_id(plan.output)),
+                merchant.get(plan.output),
                 _unbound(held.get(plan.output, Holding())),
                 [(b.unit_buyout, b.quantity) for b in buys if b.item_key == plan.output],
                 cut,
@@ -360,13 +363,13 @@ def _exit_value(
 ) -> float:
     """What `units` of an Item Key would have brought by their best Action, as of the
     latest Scan up to `at`. Vendor Prices are the latest seen, since a vendor's price
-    doesn't move. Units without enough data to choose an exit count at the Vendor Price,
-    as when Holding them (_hold)."""
+    doesn't move, and so are Merchant Costs. Units without enough data to choose an exit
+    count at the Vendor Price, as when Holding them (_hold)."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     supply = supply_at(conn, market, scanned[-1]) if scanned else {}
     rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
     vendor = vendor_prices(conn, market.era)
-    valuer = _Valuer(supply, rates, vendor, _cut(market, config), config)
+    valuer = _Valuer(supply, rates, vendor, _merchant(conn, market), _cut(market, config), config)
     return valuer.worth(item_key, Holding(bags=units))
 
 
@@ -378,10 +381,12 @@ class _Valuer:
         supply: dict[str, Supply],
         rates: dict[str, SellRate],
         vendor: dict[int, int],
+        merchant: dict[str, float],
         cut: float,
         config: Config,
     ):
         self._supply, self._rates, self._vendor = supply, rates, vendor
+        self._merchant = merchant
         self._cut, self._config = cut, config
 
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
@@ -391,6 +396,7 @@ class _Valuer:
             fair_value(self._supply.get(item_key, []), self._config),
             self._rates.get(item_key),
             self._vendor.get(_item_id(item_key)),
+            self._merchant.get(item_key),
             self._cut,
             self._config,
         )
@@ -409,6 +415,11 @@ class _Valuer:
             r.profit if r.profit is not None else r.quantity * vendor
             for r in self.rows(item_key, holding)
         )
+
+
+def _merchant(conn: sqlite3.Connection, market: Market) -> dict[str, float]:
+    """The Market's Merchant Costs by Item Key."""
+    return {str(item_id): cost for item_id, cost in merchant_costs(conn, market).items()}
 
 
 def _cut(market: Market, config: Config) -> float:
@@ -439,9 +450,12 @@ def _holding_rows(
     value: float | None,
     rate: SellRate | None,
     vendor_price: int | None,
+    merchant_cost: float | None,
     cut: float,
     config: Config,
 ) -> list[Row]:
+    """How held units split between Sell, at their Fair Value but never above what a
+    merchant charges (#63), and Vendor."""
     rows = []
     vendoring = holding.bags_bound + holding.bank_bound  # bound can't go on the AH
     unbound = holding.bags + holding.bank
@@ -449,6 +463,7 @@ def _holding_rows(
         # No sale seen yet mostly means not watched long enough, not unsellable.
         rows.append(Row(item_key, None, unbound, note="no data"))
     elif unbound:
+        value = _ceiling(value, merchant_cost)
         sell_price = value * (1 - cut)
         selling = min(
             unbound,
@@ -701,6 +716,7 @@ def _outlet(
     others: Supply,
     rate: SellRate | None,
     vendor_price: int | None,
+    merchant_cost: float | None,
     held: int,
     flipped: Supply,
     cut: float,
@@ -708,12 +724,13 @@ def _outlet(
 ) -> _Outlet:
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
     within the Sale Horizon under the Flip priors, less the `held` units and the ones
-    `flipped` to Sell. It resells like them, posted under what's left once they're bought.
-    `others` is other players' asks."""
+    `flipped` to Sell. It resells like them, posted under what's left once they're bought
+    and never above what a merchant charges (#63). `others` is other players' asks."""
     room, resale = _flip_room(rate, config), None
     if room:
         room = max(0, room - held - sum(n for _, n in flipped))
-        resale = _resale(supply, others, flipped, cut, config, rate.max_sale_price)
+        cap = _ceiling(rate.max_sale_price, merchant_cost)
+        resale = _resale(supply, others, flipped, cut, config, cap)
     return _Outlet(room, resale, vendor_price or 0, bound)
 
 
@@ -993,6 +1010,7 @@ def _flips(
     supply: Supply,
     rate: SellRate | None,
     vendor_price: int | None,
+    merchant_cost: float | None,
     cut: float,
     config: Config,
 ) -> list[_Buy]:
@@ -1005,22 +1023,23 @@ def _flips(
     so every run of the cheapest offers is tried, and the one with the most profit whose
     every unit clears the Flip margin is bought (#62). The resale is never above the
     dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
-    taken at its word (#41). Nothing is bought to Sell unless the Sell Rate rests on the
-    minimum of Sale Events for a Flip (#57). Anything else under the Vendor Price is
-    bought to Vendor.
+    taken at its word (#41), nor above what a merchant charges for it (#63). Nothing is
+    bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
+    (#57). Anything else under the Vendor Price is bought to Vendor.
     """
     offers = sorted(offers)
     to_sell: Supply = []
     best_profit = 0.0
     prefix: Supply = []
     room = _flip_room(rate, config)
+    cap = _ceiling(rate.max_sale_price if rate else None, merchant_cost)
     for unit, quantity in offers:
         take = min(quantity, room)
         if not take:
             break
         prefix = [*prefix, (unit, take)]
         room -= take
-        resale = _resale(supply, offers, prefix, cut, config, rate.max_sale_price)
+        resale = _resale(supply, offers, prefix, cut, config, cap)
         # Offers are cheapest first, so if the dearest unit clears the margin, all do.
         if resale is None or resale - unit < max(
             unit * config.flip_min_margin_share, config.flip_min_margin_copper
@@ -1033,7 +1052,7 @@ def _flips(
             to_sell, best_profit = prefix, profit
     buys = []
     if to_sell:
-        post_at = _post_at(supply, offers, to_sell, config, rate.max_sale_price)
+        post_at = _post_at(supply, offers, to_sell, config, cap)
         resale = post_at * (1 - cut)
         buys = [
             _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events, post_at)
@@ -1055,6 +1074,7 @@ def _hold_buys(
     supply: Supply,
     rate: SellRate | None,
     vendor_price: int | None,
+    merchant_cost: float | None,
     held: int,
     cut: float,
     config: Config,
@@ -1065,15 +1085,20 @@ def _hold_buys(
 
     A unit's Max Loss is its buyout less its exit without the Prediction. That's Sell, at
     the resale a Flip would get, for the units that would sell within the Sale Horizon if
-    the Prediction were wrong, after the `held` ones, judged as strictly as a Flip. The
-    rest can only be Vendored, or are worth nothing without a Vendor Price.
+    the Prediction were wrong, after the `held` ones, judged as strictly as a Flip and
+    never above what a merchant charges (#63). The rest can only be Vendored, or are worth
+    nothing without a Vendor Price.
     """
     room = max(0, _flip_room(rate, config) - held)
     bought: Supply = []
     buys = []
     for unit, quantity in sorted(offers):
         take = min(quantity, room)
-        resale = _resale(supply, offers, [*bought, (unit, take)], cut, config) if take else None
+        resale = (
+            _resale(supply, offers, [*bought, (unit, take)], cut, config, merchant_cost)
+            if take
+            else None
+        )
         parts = [(take, max(resale or 0, vendor_price or 0)), (quantity - take, vendor_price or 0)]
         for n, exit_value in parts:
             if not n:
@@ -1159,7 +1184,7 @@ def _resale(
     bought: Supply,
     cut: float,
     config: Config,
-    cap: int | None = None,
+    cap: float | None = None,
 ) -> float | None:
     """What one unit brings in after the cut, posted at `_post_at`."""
     value = _post_at(supply, others, bought, config, cap)
@@ -1167,7 +1192,7 @@ def _resale(
 
 
 def _post_at(
-    supply: Supply, others: Supply, bought: Supply, config: Config, cap: int | None = None
+    supply: Supply, others: Supply, bought: Supply, config: Config, cap: float | None = None
 ) -> float | None:
     """The price to post one unit at once `bought` is gone from other players' `others`
     (#62): just under the cheapest of them left, so it sells first, or `cap` if that's
@@ -1181,6 +1206,12 @@ def _post_at(
         return None
     value = min(prices)
     return value if cap is None else min(value, cap)
+
+
+def _ceiling(*caps: float | None) -> float | None:
+    """The lowest of the caps on a Sell price that apply, or None if none do."""
+    known = [c for c in caps if c is not None]
+    return min(known) if known else None
 
 
 def _without(supply: Supply, bought: Supply) -> Supply:
