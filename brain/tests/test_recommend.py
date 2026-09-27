@@ -1,10 +1,12 @@
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from brain.config import Config, Era, Install
 from brain.history import Market, import_character_reads, import_scans, open_history
+from brain.predictions import Prediction
 from brain.recommend import Action, Row, recommend, sellable_units
 from brain.sell_rate import SellRate
 
@@ -85,10 +87,10 @@ def db():
     conn.close()
 
 
-def run(db, scans=(), reads=(), config=CONFIG):
+def run(db, scans=(), reads=(), config=CONFIG, predictions=()):
     import_scans(db, list(scans), Era.BETA, config)
     import_character_reads(db, list(reads), Era.BETA, config)
-    return {r.market: r for r in recommend(db, config)}
+    return {r.market: r for r in recommend(db, config, list(predictions))}
 
 
 def selling_two_linen_an_hour(*latest_rows, unit=100):
@@ -472,3 +474,203 @@ def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
     assert (vendor.action, vendor.quantity) == (Action.VENDOR, 34)
     [flip] = result[MARKET].shopping_list
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 30, 500)
+
+
+# --- Predictions (#26) ---
+
+TODAY = date.fromtimestamp(T0)
+
+
+def prediction(*item_keys, name="Linen spike", written=TODAY, lapse=None, happened=None):
+    return Prediction(
+        name=name,
+        reason="Tailoring quests",
+        item_keys=item_keys,
+        catalyst="Phase 2",
+        written=written,
+        lapse=lapse or written + timedelta(weeks=8),
+        happened=happened,
+    )
+
+
+def test_held_units_of_a_predictions_item_keys_are_held_under_it(db):
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), money=GOLD, vendor_prices={2589: 10})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    # The gold they tie up is what letting them go would bring today: 6 Sold at 95 after
+    # the cut and 4 Vendored at 10.
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.HOLD, 10, cost=6 * 95 + 4 * 10, prediction="Linen spike")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("ended", "prediction_"),
+    [
+        (False, prediction(LINEN_KEY, lapse=TODAY)),  # its last day
+        (True, prediction(LINEN_KEY, written=TODAY - timedelta(weeks=9))),  # Lapsed
+        (True, prediction(LINEN_KEY, happened=TODAY)),
+        (False, prediction(LINEN_KEY, happened=TODAY + timedelta(days=1))),
+    ],
+    ids=["lapses today", "lapsed", "catalyst happened", "catalyst still to come"],
+)
+def test_a_prediction_ends_when_its_catalyst_happens_or_it_lapses(db, ended, prediction_):
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), money=GOLD, vendor_prices={2589: 10})],
+        predictions=[prediction_],
+    )
+
+    # Once it ends, the units go to their best Action without it.
+    actions = [r.action for r in result[MARKET].holdings]
+    assert actions == ([Action.SELL, Action.VENDOR] if ended else [Action.HOLD])
+
+
+def test_held_units_over_the_cap_go_to_their_best_action_cheapest_exit_held_first(db):
+    # 15% of 16s is 2s 40c. The 4 unbound units a vendor would take (10 each) fit first,
+    # then 2 of the 6 that would Sell (95 each): 2s 30c. Bound units can't be sold after
+    # the Catalyst either, so they're never Held.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [
+            character_read(
+                item(count=10), item(count=3, bound=True), money=1600, vendor_prices={2589: 10}
+            )
+        ],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.SELL, 4, price=100, profit=4 * 95, margin=85, sale_events=1),
+        Row(LINEN_KEY, Action.VENDOR, 3, price=10, profit=30),
+        Row(LINEN_KEY, Action.HOLD, 6, cost=4 * 10 + 2 * 95, prediction="Linen spike"),
+    ]
+
+
+def test_a_prediction_buys_only_units_whose_max_loss_is_at_most_10_percent_of_cost(db):
+    # No Sell Rate, so a unit's exit without the Prediction is the 95 a vendor pays. At 100
+    # it could lose 5 and at 105, 10, both within 10%; at 120 it could lose 25.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=100), row(quantity=5, unit=105), row(quantity=5, unit=120))],
+        [character_read(money=GOLD, vendor_prices={2589: 95})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].prediction_buys == [
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            10,
+            price=105,
+            cost=5 * 100 + 5 * 105,
+            max_loss=5 * 5 + 5 * 10,
+            prediction="Linen spike",
+        )
+    ]
+    assert result[MARKET].prediction_cost == 1025
+
+
+def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
+    # 6 sell within the horizon. Without the Prediction the two 700s are a Flip reselling
+    # at 950 (the Max Loss is negative), and 4 of the 1000s would resell at 950, losing 50
+    # each. Beyond the horizon there's no exit, so nothing more is bought.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+        [character_read(money=GOLD)],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].shopping_list == []
+    assert result[MARKET].prediction_buys == [
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            6,
+            price=1000,
+            cost=2 * 700 + 4 * 1000,
+            max_loss=2 * -250 + 4 * 50,
+            prediction="Linen spike",
+        )
+    ]
+
+
+def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
+    # 6 sell within the horizon, and the 4 held would go first if the Prediction is wrong,
+    # so only 2 of the 100s could be resold at 95.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=4), money=GOLD)],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert (buy.quantity, buy.max_loss) == (2, 2 * 5)
+
+
+def test_held_units_count_toward_a_predictions_cap_before_it_buys(db):
+    # 15% of 1g is 15s. The 3 Ore held would Vendor for 1s each today, so 12s is left for
+    # Linen at 1s, which can lose 5c each against the 95c a vendor pays.
+    ore = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=100))],
+        [character_read(item(ore, count=3), money=10000, vendor_prices={2589: 95, 2770: 100})],
+        predictions=[prediction(LINEN_KEY, ORE_KEY)],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(ORE_KEY, Action.HOLD, 3, cost=300, prediction="Linen spike")
+    ]
+    assert result[MARKET].prediction_buys == [
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            12,
+            price=100,
+            cost=1200,
+            max_loss=12 * 5,
+            prediction="Linen spike",
+        )
+    ]
+
+
+def test_prediction_buys_go_lowest_max_loss_first_within_the_total_cap(db):
+    # A total cap of 20% of 1g: 20s across both Predictions, each capped at 15s. Ore can
+    # lose 2% of its cost and Linen 5%, so Ore fills its 15s first and Linen gets the 5s
+    # left.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=100), row(ORE, quantity=20, unit=100))],
+        [character_read(money=10000, vendor_prices={2589: 95, 2770: 98})],
+        config=replace(CONFIG, predictions_cap_share=0.2),
+        predictions=[prediction(LINEN_KEY), prediction(ORE_KEY, name="Ore spike")],
+    )
+
+    assert result[MARKET].prediction_buys == [
+        Row(ORE_KEY, Action.HOLD, 15, price=100, cost=1500, max_loss=30, prediction="Ore spike"),
+        Row(LINEN_KEY, Action.HOLD, 5, price=100, cost=500, max_loss=25, prediction="Linen spike"),
+    ]
+
+
+def test_flips_are_bought_first_and_predictions_get_the_gold_left(db):
+    # Of 10s, the Ore Flip to Vendor takes 9s. The Prediction's cap is 1s 50c, but only 1s
+    # is left: 5 Linen at 20c.
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=9, unit=100), row(quantity=20, unit=20))],
+        [character_read(money=1000, vendor_prices={2589: 19, 2770: 200})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].shopping_cost == 900
+    [buy] = result[MARKET].prediction_buys
+    assert (buy.quantity, buy.cost) == (5, 100)

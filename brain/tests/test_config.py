@@ -317,3 +317,45 @@ def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):
 
     with pytest.raises(ConfigError, match=key):
         load_config(path)
+
+
+def test_predictions_are_read_from_next_to_the_config(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.predictions_path == tmp_path / "predictions.toml"
+
+
+def test_prediction_guards_default_to_the_designed_values(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.prediction_max_loss_share == 0.10
+    assert config.prediction_cap_share == 0.15
+    assert config.predictions_cap_share == 0.40
+
+
+def test_prediction_guards_can_be_set(tmp_path):
+    text = "prediction_max_loss_share = 0\nprediction_cap_share = 0.5\npredictions_cap_share = 1\n"
+    config = load_config(write_config(tmp_path, text + INSTALL))
+
+    assert config.prediction_max_loss_share == 0
+    assert config.prediction_cap_share == 0.5
+    assert config.predictions_cap_share == 1
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("prediction_max_loss_share", "-0.1"),
+        ("prediction_max_loss_share", "1.5"),  # more than the whole cost can't be lost
+        ("prediction_max_loss_share", '"0.1"'),
+        ("prediction_cap_share", "-0.15"),
+        ("prediction_cap_share", "1.5"),
+        ("predictions_cap_share", "true"),
+        ("predictions_cap_share", "2"),
+    ],
+)
+def test_rejects_bad_prediction_guards(tmp_path, key, value):
+    path = write_config(tmp_path, f"{key} = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)

@@ -70,10 +70,17 @@ DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS = 24
 # strict for the same reasons as the Sell Rate Prior.
 DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS = 1
 DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS = 5
+# Predictions (ADR-0006): a unit is only bought under one while its Max Loss is at most
+# this share of its cost, and the gold under Predictions is capped at these shares of the
+# Market's pooled gold, per Prediction and in total.
+DEFAULT_PREDICTION_MAX_LOSS_SHARE = 0.10
+DEFAULT_PREDICTION_CAP_SHARE = 0.15
+DEFAULT_PREDICTIONS_CAP_SHARE = 0.40
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
 DEFAULT_ARCHIVE_DIR = "archive"
+PREDICTIONS_FILE = "predictions.toml"
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,13 @@ class Config:
     # their average size, for Holdings and for Flips.
     sale_size_prior_events_holdings: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS
     sale_size_prior_events_flips: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS
+    # The player's Predictions, always next to the config file (ADR-0006).
+    predictions_path: Path = Path(PREDICTIONS_FILE)
+    # The most a unit bought under a Prediction may lose, as a share of its cost.
+    prediction_max_loss_share: float = DEFAULT_PREDICTION_MAX_LOSS_SHARE
+    # The most gold under one Prediction, and under all of them, as a share of pooled gold.
+    prediction_cap_share: float = DEFAULT_PREDICTION_CAP_SHARE
+    predictions_cap_share: float = DEFAULT_PREDICTIONS_CAP_SHARE
 
 
 def load_config(path: Path) -> Config:
@@ -231,6 +245,14 @@ def load_config(path: Path) -> Config:
             ("sale_size_prior_events_flips", DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS),
         )
     )
+    max_loss_share, cap_share, total_cap_share = (
+        _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
+        for key, default in (
+            ("prediction_max_loss_share", DEFAULT_PREDICTION_MAX_LOSS_SHARE),
+            ("prediction_cap_share", DEFAULT_PREDICTION_CAP_SHARE),
+            ("predictions_cap_share", DEFAULT_PREDICTIONS_CAP_SHARE),
+        )
+    )
 
     return Config(
         installs=installs,
@@ -251,6 +273,10 @@ def load_config(path: Path) -> Config:
         sell_rate_prior_hours_flips=prior_flips,
         sale_size_prior_events_holdings=size_prior_holdings,
         sale_size_prior_events_flips=size_prior_flips,
+        predictions_path=path.parent / PREDICTIONS_FILE,
+        prediction_max_loss_share=max_loss_share,
+        prediction_cap_share=cap_share,
+        predictions_cap_share=total_cap_share,
     )
 
 

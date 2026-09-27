@@ -1,0 +1,32 @@
+# Your Predictions (see ADR-0006). Copy this to brain/predictions.toml, next to
+# config.toml, and write your own. `brain recommend` reads it every time it runs.
+#
+# A Prediction is a call from game knowledge that some Item Keys will be worth much more
+# after a Catalyst. It names no target price: the Brain never guesses the upside. It only
+# lets you buy and Hold those Item Keys while little can be lost if you're wrong (Max
+# Loss), within caps on the gold under Predictions (see config.example.toml).
+#
+# Each [[predictions]] entry needs:
+#   name       what `brain recommend` labels its rows with; each name once
+#   reason     why you think so
+#   item_keys  the Item Keys, in quotes, as `brain recommend` shows them; an Item Key can
+#              only be in one Prediction
+#   catalyst   the game event it waits for
+#   written    the day you wrote it
+# and optionally:
+#   lapse      the last day it stands if the Catalyst hasn't happened; 8 weeks after
+#              written unless you know a real date
+#   happened   the day the Catalyst happened. Set it and the Prediction ends: its units go
+#              back to their best Action without it. The Brain never guesses this from
+#              prices.
+#
+# The Brain can't rebuild this file from the Archive, so keep a copy somewhere safe.
+
+[[predictions]]
+name = "BWL mats"
+reason = "Fire resistance gear for Blackwing Lair needs them"
+item_keys = ["7068", "7077"]
+catalyst = "Blackwing Lair opens"
+written = 2026-09-26
+# lapse = 2026-11-21
+# happened = 2026-10-14

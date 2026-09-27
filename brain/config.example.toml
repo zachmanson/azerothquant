@@ -63,6 +63,17 @@
 # sale_size_prior_events_holdings = 1
 # sale_size_prior_events_flips = 5
 
+# Optional: the guards on Predictions (see predictions.example.toml and ADR-0006). A unit
+# is only bought under a Prediction while its Max Loss, what it cost less what it would
+# bring today if the Prediction is wrong, is at most prediction_max_loss_share of its cost.
+# The gold under one Prediction, counting units you already hold at what they'd bring
+# today, is capped at prediction_cap_share of the Market's pooled gold, and under all of
+# them at predictions_cap_share. Default to 0.10, 0.15 and 0.40. Must come before the
+# first [[installs]].
+# prediction_max_loss_share = 0.10
+# prediction_cap_share = 0.15
+# predictions_cap_share = 0.40
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

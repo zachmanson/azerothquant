@@ -32,7 +32,8 @@ from brain.history import (
     import_scans,
     open_history,
 )
-from brain.recommend import MarketRecommendations, Row, recommend
+from brain.predictions import PredictionsError, load_predictions
+from brain.recommend import Action, MarketRecommendations, Row, recommend
 from brain.recommendations import write_recommendations
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
@@ -214,6 +215,9 @@ def _recommend(config: Config) -> int:
     except sqlite3.Error as e:
         log.error("Couldn't read the history: %s", e)
         return 1
+    except PredictionsError as e:
+        log.error("Can't load the Predictions: %s", e)
+        return 1
     print(text, end="")
     return 0
 
@@ -241,8 +245,9 @@ def _rebuild(config: Config) -> int:
 
 def run_recommend(config: Config) -> str:
     """The Recommendations for every Market the player has Characters in, as text."""
+    predictions = load_predictions(config.predictions_path)
     with closing(open_history(config.history_path)) as conn:
-        markets = recommend(conn, config)
+        markets = recommend(conn, config, predictions)
     if not markets:
         return "No Character has a Market with a Scan yet.\n"
     range_days = config.sell_rate_range_seconds // 86400
@@ -259,10 +264,10 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
                 _action(r),
                 str(r.quantity),
                 _money(r.price),
-                _money(r.profit),
+                "unknown" if r.action is Action.HOLD else _money(r.profit),
                 _money(r.margin),
                 _count(r.sale_events),
-                r.note,
+                f"under {r.prediction}" if r.prediction else r.note,
             ]
             for r in m.holdings
         ],
@@ -282,13 +287,29 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
             for r in m.shopping_list
         ],
     )
+    prediction_buys = _table(
+        ["Item", "Prediction", "Qty", "Max price", "Max Loss", "Cost"],
+        [
+            [
+                r.item_key,
+                r.prediction,
+                str(r.quantity),
+                _money(r.price),
+                _money(r.max_loss),
+                _money(r.cost),
+            ]
+            for r in m.prediction_buys
+        ],
+    )
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     return (
         f"{market}, as of the Scan at {as_of}\n"
         f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n\n"
         f"Holdings\n{holdings}\n"
         f"Shopping List: {_money(m.gold)} to spend, {_money(m.shopping_cost)} in total\n"
-        f"{shopping}"
+        f"{shopping}\n"
+        f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
+        f"{prediction_buys}"
     )
 
 

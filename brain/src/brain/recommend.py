@@ -1,4 +1,5 @@
-"""The first Decision Engine slice (#23): Vendor vs Sell for Holdings, and Flips.
+"""The Decision Engine: Vendor vs Sell for Holdings, and Flips (#23), and Hold under a
+Prediction, both for Holdings and for buying (#26, ADR-0006).
 
 Each Market the player has Characters in is valued as of its latest Scan: Fair Value
 from that Scan, and Sell Rate from the Observation Windows before it. All amounts are
@@ -8,7 +9,9 @@ copper.
 import math
 import sqlite3
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date
 from enum import StrEnum
 
 from brain.config import Config
@@ -24,12 +27,14 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
+from brain.predictions import Prediction
 from brain.sell_rate import SellRate, observation_window_hours, sell_rates
 
 
 class Action(StrEnum):
     VENDOR = "Vendor"
     SELL = "Sell"
+    HOLD = "Hold"  # only ever under a Prediction (ADR-0006)
 
 
 @dataclass(frozen=True)
@@ -46,11 +51,17 @@ class Row:
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
     note: str = ""
-    cost: int | None = None  # the Shopping List's gold to spend on it
+    # The Shopping List's gold to spend on it, or for a Hold the gold it ties up: what
+    # letting the units go would bring today.
+    cost: float | None = None
+    prediction: str = ""  # the Prediction the Action depends on, if any
+    # A Prediction buy's Max Loss for the whole quantity: what's lost if the Prediction is
+    # wrong and the units are let go at today's prices.
+    max_loss: float | None = None
 
 
 @dataclass(frozen=True)
-class _Lot:
+class _Buy:
     """Units of one Listing worth buying, and the Action to take them out by."""
 
     item_key: str
@@ -59,6 +70,17 @@ class _Lot:
     quantity: int
     unit_profit: float
     sale_events: int | None = None
+
+
+@dataclass(frozen=True)
+class _HoldBuy:
+    """Units of one Listing worth buying to Hold under a Prediction."""
+
+    item_key: str
+    prediction: str
+    unit_buyout: int
+    quantity: int
+    unit_max_loss: float
 
 
 @dataclass(frozen=True)
@@ -72,9 +94,15 @@ class MarketRecommendations:
     holdings: list[Row] = field(default_factory=list)
     shopping_list: list[Row] = field(default_factory=list)
     shopping_cost: int = 0
+    # The Shopping List's own section for buying to Hold under a Prediction, whose upside
+    # is unknown (ADR-0006).
+    prediction_buys: list[Row] = field(default_factory=list)
+    prediction_cost: int = 0
 
 
-def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommendations]:
+def recommend(
+    conn: sqlite3.Connection, config: Config, predictions: Sequence[Prediction] = ()
+) -> list[MarketRecommendations]:
     """Recommendations for every Market the player has Characters in."""
     result = []
     for market, characters in character_markets(conn).items():
@@ -100,6 +128,12 @@ def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommenda
                 config,
             )
         ]
+        gold = pooled_gold(conn, market.era, market.realm, market.faction)
+        today = date.fromtimestamp(now)
+        active = [p for p in predictions if p.active_on(today)]
+        caps = _Caps(gold, config)
+        bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
+        rows = _hold(rows, active, bound, vendor, caps)
         # Most expected profit first; rows without a number to rank by go last.
         rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
         for_sale: dict[str, list[tuple[int, int]]] = {}
@@ -108,10 +142,28 @@ def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommenda
                 for_sale.setdefault(listing.item_key, []).append(
                     (listing.unit_buyout, listing.quantity)
                 )
-        lots = [
-            lot
+        under = {k: p.name for p in active for k in p.item_keys}
+        hold_buys = [
+            buy
             for item_key, offers in sorted(for_sale.items())
-            for lot in _flips(
+            if item_key in under
+            for buy in _hold_buys(
+                item_key,
+                under[item_key],
+                offers,
+                supply[item_key],
+                rates.get(item_key),
+                vendor.get(_item_id(item_key)),
+                held[item_key].bags + held[item_key].bank if item_key in held else 0,
+                cut,
+                config,
+            )
+        ]
+        buys = [
+            buy
+            for item_key, offers in sorted(for_sale.items())
+            if item_key not in under
+            for buy in _flips(
                 item_key,
                 offers,
                 supply[item_key],
@@ -121,8 +173,9 @@ def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommenda
                 config,
             )
         ]
-        gold = pooled_gold(conn, market.era, market.realm, market.faction)
-        shopping = _shopping_list(lots, gold)
+        shopping = _shopping_list(buys, gold)
+        shopping_cost = sum(r.cost for r in shopping)
+        prediction_buys = _spend_on_predictions(hold_buys, gold - shopping_cost, caps)
         result.append(
             MarketRecommendations(
                 market,
@@ -131,7 +184,9 @@ def recommend(conn: sqlite3.Connection, config: Config) -> list[MarketRecommenda
                 window_hours=observation_window_hours(conn, market, config, now),
                 holdings=rows,
                 shopping_list=shopping,
-                shopping_cost=sum(r.cost for r in shopping),
+                shopping_cost=shopping_cost,
+                prediction_buys=prediction_buys,
+                prediction_cost=sum(r.cost for r in prediction_buys),
             )
         )
     return result
@@ -212,6 +267,73 @@ def _holding_rows(
     return rows
 
 
+class _Caps:
+    """The gold still allowed under each Prediction and under all of them together, as
+    shares of the Market's pooled gold (ADR-0006)."""
+
+    def __init__(self, gold: int, config: Config):
+        self._each = gold * config.prediction_cap_share
+        self._total_left = gold * config.predictions_cap_share
+        self._used: Counter[str] = Counter()
+
+    def room(self, prediction: str) -> float:
+        return min(self._each - self._used[prediction], self._total_left)
+
+    def spend(self, prediction: str, gold: float) -> None:
+        self._used[prediction] += gold
+        self._total_left -= gold
+
+
+def _hold(
+    rows: list[Row],
+    predictions: list[Prediction],
+    bound: dict[str, int],
+    vendor: dict[int, int],
+    caps: _Caps,
+) -> list[Row]:
+    """`rows` with the units of each Prediction's Item Keys switched to Hold under it, as
+    many as its caps allow.
+
+    Held units tie up what letting them go would bring today, so the ones with the
+    cheapest exit are Held first. Units without enough data to choose an exit count at
+    the Vendor Price, the least they'd bring, or nothing without one. Bound units can't be
+    sold after the Catalyst either, and are never Held.
+    """
+    taken: Counter[int] = Counter()  # units Held, by index into rows
+    holds = []
+    for p in predictions:
+        units = []  # (gold per unit, index into rows, units that could be Held)
+        for i, r in enumerate(rows):
+            if r.item_key in p.item_keys:
+                n = r.quantity - (bound.get(r.item_key, 0) if r.action is Action.VENDOR else 0)
+                if r.profit is not None:
+                    value = r.profit / r.quantity
+                else:
+                    value = vendor.get(_item_id(r.item_key), 0)
+                units.append((value, i, n))
+        held: dict[str, Row] = {}
+        for value, i, n in sorted(units):
+            if value:
+                n = min(n, max(0, math.floor(caps.room(p.name) / value)))
+            if not n:
+                continue
+            caps.spend(p.name, n * value)
+            taken[i] += n
+            key = rows[i].item_key
+            h = held.get(key, Row(key, Action.HOLD, 0, cost=0, prediction=p.name))
+            held[key] = replace(h, quantity=h.quantity + n, cost=h.cost + n * value)
+        holds += held.values()
+    rest = [_fewer(r, r.quantity - taken[i]) for i, r in enumerate(rows) if r.quantity > taken[i]]
+    return rest + holds
+
+
+def _fewer(row: Row, quantity: int) -> Row:
+    if quantity == row.quantity:
+        return row
+    profit = None if row.profit is None else row.profit / row.quantity * quantity
+    return replace(row, quantity=quantity, profit=profit)
+
+
 def _flips(
     item_key: str,
     offers: list[tuple[int, int]],
@@ -220,7 +342,7 @@ def _flips(
     vendor_price: int | None,
     cut: float,
     config: Config,
-) -> list[_Lot]:
+) -> list[_Buy]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
 
@@ -251,20 +373,92 @@ def _flips(
             break  # a vendor pays more, so it's a Flip to Vendor
         to_sell.append((unit, take))
         room -= take
-    lots = []
+    buys = []
     if to_sell:
         resale = _resale(supply, to_sell, cut, config)
-        lots = [
-            _Lot(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events)
+        buys = [
+            _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events)
             for unit, quantity in to_sell
         ]
     if vendor_price is not None:
-        lots += [
-            _Lot(item_key, Action.VENDOR, unit, quantity, vendor_price - unit)
+        buys += [
+            _Buy(item_key, Action.VENDOR, unit, quantity, vendor_price - unit)
             for unit, quantity in _without(offers, to_sell)
             if unit < vendor_price
         ]
-    return lots
+    return buys
+
+
+def _hold_buys(
+    item_key: str,
+    prediction: str,
+    offers: list[tuple[int, int]],
+    supply: Supply,
+    rate: SellRate | None,
+    vendor_price: int | None,
+    held: int,
+    cut: float,
+    config: Config,
+) -> list[_HoldBuy]:
+    """What's worth buying of an Item Key to Hold under a Prediction, from other players'
+    (unit buyout, quantity) offers, cheapest first: the units whose Max Loss is small
+    enough. `supply` is every unit on sale, and `held` the units the player could sell.
+
+    A unit's Max Loss is its buyout less its exit without the Prediction. That's Sell, at
+    the resale a Flip would get, for the units that would sell within the Sale Horizon if
+    the Prediction were wrong, after the `held` ones, judged as strictly as a Flip. The
+    rest can only be Vendored, or are worth nothing without a Vendor Price.
+    """
+    room = max(
+        0,
+        sellable_units(
+            rate,
+            config.sell_rate_prior_hours_flips,
+            config.sale_size_prior_events_flips,
+            config.sale_horizon_seconds,
+        )
+        - held,
+    )
+    bought: Supply = []
+    buys = []
+    for unit, quantity in sorted(offers):
+        take = min(quantity, room)
+        resale = _resale(supply, [*bought, (unit, take)], cut, config) if take else None
+        parts = [(take, max(resale or 0, vendor_price or 0)), (quantity - take, vendor_price or 0)]
+        for n, exit_value in parts:
+            if not n:
+                continue
+            max_loss = unit - exit_value
+            if max_loss > unit * config.prediction_max_loss_share:
+                return buys
+            buys.append(_HoldBuy(item_key, prediction, unit, n, max_loss))
+        bought.append((unit, take))
+        room -= take
+    return buys
+
+
+def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[Row]:
+    """The Prediction buys that fit in `gold` and the caps, lowest Max Loss for the gold
+    spent first, as one row per Item Key in that order."""
+    rows: dict[str, Row] = {}
+    for buy in sorted(buys, key=lambda buy: buy.unit_max_loss / buy.unit_buyout):
+        room = min(gold, caps.room(buy.prediction))
+        quantity = min(buy.quantity, max(0, math.floor(room / buy.unit_buyout)))
+        if not quantity:
+            continue
+        cost = quantity * buy.unit_buyout
+        gold -= cost
+        caps.spend(buy.prediction, cost)
+        empty = Row(buy.item_key, Action.HOLD, 0, price=0, cost=0, max_loss=0)
+        r = rows.get(buy.item_key, replace(empty, prediction=buy.prediction))
+        rows[buy.item_key] = replace(
+            r,
+            quantity=r.quantity + quantity,
+            price=max(r.price, buy.unit_buyout),
+            cost=r.cost + cost,
+            max_loss=r.max_loss + quantity * buy.unit_max_loss,
+        )
+    return list(rows.values())
 
 
 def sellable_units(
@@ -311,39 +505,39 @@ def _without(supply: Supply, bought: Supply) -> Supply:
     return [(unit, quantity) for unit, quantity in sorted(left.items()) if quantity > 0]
 
 
-def _shopping_list(lots: list[_Lot], gold: int) -> list[Row]:
-    """The lots that fit in `gold`, most profit per gold spent first, as one row per Item
+def _shopping_list(buys: list[_Buy], gold: int) -> list[Row]:
+    """The buys that fit in `gold`, most profit per gold spent first, as one row per Item
     Key and Action in that order.
 
     A Flip to Sell cut short by gold keeps the resale worked out for all of it, which is
     a little high: some of the cheap units it expected gone are still on sale.
     """
     rows: dict[tuple[str, Action], Row] = {}
-    for lot in sorted(lots, key=lambda lot: -lot.unit_profit / lot.unit_buyout):
-        quantity = min(lot.quantity, gold // lot.unit_buyout)
+    for buy in sorted(buys, key=lambda buy: -buy.unit_profit / buy.unit_buyout):
+        quantity = min(buy.quantity, gold // buy.unit_buyout)
         if not quantity:
             continue
-        gold -= quantity * lot.unit_buyout
-        lot = replace(lot, quantity=quantity)
-        cost = lot.unit_buyout * lot.quantity
-        profit = lot.unit_profit * lot.quantity
-        key = (lot.item_key, lot.action)
+        gold -= quantity * buy.unit_buyout
+        buy = replace(buy, quantity=quantity)
+        cost = buy.unit_buyout * buy.quantity
+        profit = buy.unit_profit * buy.quantity
+        key = (buy.item_key, buy.action)
         if key not in rows:
             rows[key] = Row(
-                lot.item_key,
-                lot.action,
-                lot.quantity,
-                lot.unit_buyout,
+                buy.item_key,
+                buy.action,
+                buy.quantity,
+                buy.unit_buyout,
                 profit,
-                sale_events=lot.sale_events,
+                sale_events=buy.sale_events,
                 cost=cost,
             )
         else:
             r = rows[key]
             rows[key] = replace(
                 r,
-                quantity=r.quantity + lot.quantity,
-                price=max(r.price, lot.unit_buyout),
+                quantity=r.quantity + buy.quantity,
+                price=max(r.price, buy.unit_buyout),
                 profit=r.profit + profit,
                 cost=r.cost + cost,
             )

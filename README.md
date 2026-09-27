@@ -34,6 +34,8 @@ The Brain reads `brain/config.toml`, which maps each WoW install folder to its E
 Copy-Item brain\config.example.toml brain\config.toml
 ```
 
+Predictions, your game-knowledge calls that some items will be worth much more after a raid or phase release, go in `brain/predictions.toml` next to it (see `brain/predictions.example.toml` and ADR-0006). It's optional, not committed, and can't be rebuilt from the Archive, so keep a copy of it.
+
 ### Running the Brain
 
 Installing the Brain (above) adds a `brain` command. Run it from `brain/` (or pass `--config <path>`):
@@ -43,7 +45,7 @@ cd brain
 ..\.venv\Scripts\brain import   # import every SavedVariables file once
 ..\.venv\Scripts\brain watch    # keep running; import whenever the game rewrites the file
 ..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
-..\.venv\Scripts\brain recommend  # print Vendor vs Sell for Holdings, and the Shopping List
+..\.venv\Scripts\brain recommend  # print Vendor, Sell or Hold for Holdings, and the Shopping List
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.

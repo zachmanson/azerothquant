@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import re
 import shutil
@@ -349,3 +350,63 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Sell", "3", "8s 00c", "22s 80c", "7s 50c", "1"] in lines
     assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
     assert ["2589", "Sell", "2", "7s 00c", "5s 00c", "14s 00c", "1"] in lines
+
+
+def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
+        predictions_path=tmp_path / "predictions.toml",
+    )
+    config.predictions_path.write_text(
+        """
+[[predictions]]
+name = "Linen spike"
+reason = "Tailoring quests"
+item_keys = ["2589"]
+catalyst = "Phase 2"
+written = 2026-09-01
+lapse = 2027-01-01
+""",
+        encoding="utf-8",
+    )
+    linen = {
+        "itemString": "item:2589::::::::20:1490",
+        "quantity": 20,
+        "buyout": 2000,
+        "timeLeft": 4,
+    }
+    scan = {
+        "requestedAt": 1_790_000_000,  # 2026-09-21
+        "realm": MARKET.realm,
+        "faction": "Alliance",
+        "character": "Kash-Patel",
+        "listings": [linen],
+    }
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 10000,
+        "vendorPrices": {2589: 95},
+        "bags": [
+            {
+                "bag": 0,
+                "slot": 1,
+                "count": 3,
+                "isBound": False,
+                "link": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+            }
+        ],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, [scan], Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    text = run_recommend(config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert ["2589", "Hold", "3", "unknown", "under Linen spike"] in lines
+    # The 3 held tie up 95c each of the 15s cap; 12 Linen at 1s can each lose 5c.
+    assert "Buy to Hold under a Prediction, upside unknown: 12s 00c in total" in text
+    assert ["2589", "Linen spike", "12", "1s 00c", "60c", "12s 00c"] in lines

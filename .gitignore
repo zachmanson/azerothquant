@@ -16,3 +16,6 @@ brain/history.sqlite
 
 # The Scan Archive (default location)
 brain/archive/
+
+# The player's Predictions (copy from brain/predictions.example.toml)
+brain/predictions.toml
