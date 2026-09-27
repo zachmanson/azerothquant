@@ -5,7 +5,7 @@ A personal Auction House trading system for World of Warcraft: Forever. An in-ga
 ## Components
 
 **Addon**:
-The in-game half. It records market and personal data and shows the Recommendation table. It never acts on the player's behalf.
+The in-game half. It records market and personal data and shows the Recommendation Table. It never acts on the player's behalf.
 _Avoid_: bot, automation
 
 **Brain**:
@@ -171,6 +171,10 @@ _Avoid_: value, worth
 **Recommendation**:
 The best Action for one Candidate Item, with quantity, price ceiling, the full Action path, expected profit and return per day.
 _Avoid_: signal, tip
+
+**Recommendation Table**:
+The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, Prediction buys) as of the Scan the Brain last valued. It shows them and never acts on them (ADR-0003). It shows the Market of the Character's own faction, the only one the Brain recommends for.
+_Avoid_: UI, window, panel
 
 **Sale Horizon**:
 How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it.
