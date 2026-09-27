@@ -140,9 +140,21 @@ _Avoid_: post, list, flip (a Flip is a buy)
 Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action.
 _Avoid_: snipe, arbitrage
 
-**Thesis**:
-A prediction the player writes down from game knowledge: an Item Key, an expected price move, a date and a reason. The Decision Engine prices it as a Hold, and it gets graded afterward.
-_Avoid_: tip, hunch, bet
+**Prediction**:
+A call the player writes down from game knowledge that a group of Item Keys will be worth much more after a Catalyst, with the reason. It names no target price: the Decision Engine never estimates the upside, it only allows buying and Holding those Item Keys while the Max Loss stays small. Units of those Item Keys the player already holds are Held under it too, costed at their Best Exit Value on the day it was written, since that is the gold given up by not letting them go. It ends when the player marks its Catalyst as happened, or when it Lapses. It is graded by the realized return on the gold it tied up, from Outcomes, never by the player's own judgment.
+_Avoid_: thesis, tip, hunch, bet
+
+**Catalyst**:
+The game event a Prediction waits for, such as a raid release or a new phase. The player marks it as happened; the Brain never guesses it from prices.
+_Avoid_: trigger, event (too generic)
+
+**Lapse**:
+A Prediction ending because its Catalyst wasn't marked as happened by its lapse date. Its units go back to their best Action without the Prediction. Without it, a wrong Prediction would hold gold forever and never be graded as wrong.
+_Avoid_: expiry (that's what happens to a Listing), invalidation
+
+**Max Loss**:
+For a unit bought or held under a Prediction, what it cost minus its Best Exit Value without the Prediction: what is lost if the Prediction turns out wrong and the unit is let go at today's prices.
+_Avoid_: risk, downside
 
 **Lot**:
 A quantity of one Item Key acquired together at one cost, tracked until it is sold, vendored, disenchanted or crafted away. Realized profit is measured per Lot.
