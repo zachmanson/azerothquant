@@ -83,7 +83,7 @@ The time between two consecutive Scans of a Market, when it is short enough that
 _Avoid_: gap (when you mean one that counts), interval
 
 **Fair Value**:
-The price an Item Key can realistically be sold at in its Market, based on the cheapest part of the supply in the latest Scan rather than the single lowest Listing. Units priced far below the rest of that cheap part are left out: they are Flips, not the price.
+The price an Item Key can realistically be sold at in its Market, based on the cheapest part of the supply in the latest Scan rather than the single lowest Listing. Units priced far below the rest of that cheap part are left out: they are Flips, not the price. It judges whether a Disappearance was a Probable Sale; it is not what anything is posted or valued at, since every Sell prices through the same undercut (see Sell).
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
@@ -133,7 +133,7 @@ One way out of a Candidate Item the player holds: Vendor, Sell, Craft, Disenchan
 _Avoid_: strategy, play
 
 **Sell**:
-The Action of posting an item on the Auction House for other players to buy.
+The Action of posting an item on the Auction House for other players to buy. Held units and Flips alike are posted just under the cheapest other player's Listing left once the Flips of that Item Key are bought (matching an own Listing that's cheaper), never above the highest price among its Sale Events or its Merchant Cost. With no Listing left there is no Sell price, and held units go to Vendor. Best Exit Value values Sell the same way.
 _Avoid_: post, list, flip (a Flip is a buy)
 
 **Craft**:
