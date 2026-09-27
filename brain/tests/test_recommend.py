@@ -12,8 +12,9 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.lots import Held
 from brain.predictions import Prediction
-from brain.recommend import Action, Row, recommend, sellable_units
+from brain.recommend import Action, Row, held_at_writing, recommend, sellable_units
 from brain.sell_rate import SellRate
 
 T0 = 1_790_000_000
@@ -711,3 +712,29 @@ def test_the_market_counts_sold_outcomes_that_cant_be_linked_to_an_item_key(db):
     }
     markets = run(db, [scan(T0, named)], [character_read()], mailbox_reads=[mailbox_read])
     assert markets[MARKET].unlinked_sales == 1
+
+
+# --- Prediction-held Lots (#27) ---
+
+
+def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_exit(db):
+    # Written the day after these Scans and Read; later ones must not count.
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    later = T0 + 3 * DAY
+    run(
+        db,
+        [
+            *selling_two_linen_an_hour(),
+            scan(later, row(quantity=20, unit=500)),
+            scan(later + HOUR, row(quantity=18, unit=500)),
+        ],
+        [
+            character_read(item(count=10), vendor_prices={2589: 10}),
+            character_read(item(count=30), at=later),
+        ],
+    )
+
+    # As in the Hold test: 6 Sold at 95 after the cut and 4 Vendored at 10.
+    assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
+        Held("Linen spike", LINEN_KEY, units=10, cost=6 * 95 + 4 * 10)
+    ]

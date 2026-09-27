@@ -1,10 +1,12 @@
 from dataclasses import replace
+from datetime import date, datetime
 
 import pytest
 
 from brain.history import Listing, Outcome, Purchase
-from brain.lots import Lot, LotSale, link_sales, lots
+from brain.lots import Held, Lot, LotSale, link_sales, lots
 from brain.mailbox import MailKind
+from brain.predictions import Prediction
 
 LINEN = "2589:0"
 WOOL = "2592:0"
@@ -132,3 +134,67 @@ def test_a_sold_outcome_is_linked_by_mail_that_carried_an_item_with_its_name(out
 def test_a_sold_outcome_whose_name_matches_no_item_key_or_several_stays_unlinked(listings):
     [linked] = link_sales([_linen_sold()], listings, [])
     assert linked.item_key is None
+
+
+# A Prediction written on Oct 1, with its day boundaries in local time.
+OCT_1 = int(datetime(2026, 10, 1).timestamp())
+OCT_2 = int(datetime(2026, 10, 2).timestamp())
+HOUR = 3600
+
+
+def _prediction(
+    item_keys=(LINEN,), written=date(2026, 10, 1), lapse=date(2026, 11, 26), happened=None
+):
+    return Prediction("Tailoring", "reason", item_keys, "Phase 2", written, lapse, happened)
+
+
+def test_units_held_when_a_prediction_is_written_start_a_lot_at_the_start_of_that_day():
+    [lot] = lots([], [], [_prediction()], [Held("Tailoring", LINEN, units=20, cost=1200)])
+    assert lot == Lot(
+        LINEN, acquired_at=OCT_1, units=20, cost=1200, sales=(), prediction="Tailoring"
+    )
+
+
+def test_writing_a_prediction_folds_earlier_open_lots_of_its_item_keys_into_its_held_lot():
+    bought, held = lots(
+        [_purchase(LINEN, 20, 1000, arrived_at=OCT_1 - 10 * HOUR)],
+        [_sold(LINEN, 5, 400, arrived_at=OCT_1 - 5 * HOUR), _sold(LINEN, 5, 500, arrived_at=OCT_2)],
+        [_prediction()],
+        [Held("Tailoring", LINEN, units=15, cost=900)],
+    )
+    assert (bought.sales, bought.folded_at, bought.open_units) == (
+        (LotSale(5, 80, OCT_1 - 5 * HOUR),),
+        OCT_1,
+        0,
+    )
+    assert held.sales == (LotSale(5, 100, OCT_2),)
+
+
+OCT_10 = int(datetime(2026, 10, 10).timestamp())
+OCT_11 = int(datetime(2026, 10, 11).timestamp())
+
+
+@pytest.mark.parametrize(
+    ("prediction", "end"),
+    [
+        (_prediction(happened=date(2026, 10, 10)), OCT_10),
+        (_prediction(lapse=date(2026, 10, 10)), OCT_11),
+        (_prediction(lapse=date(2026, 10, 10), happened=date(2026, 10, 20)), OCT_11),
+    ],
+    ids=["happened", "lapsed", "happened after it lapsed"],
+)
+def test_purchases_of_its_item_keys_from_its_written_day_until_it_ends_belong_to_a_prediction(
+    prediction, end
+):
+    result = lots(
+        [
+            _purchase(LINEN, 1, 100, arrived_at=OCT_1 - 1),
+            _purchase(LINEN, 1, 100, arrived_at=OCT_1),
+            _purchase(WOOL, 1, 100, arrived_at=OCT_1 + HOUR),
+            _purchase(LINEN, 1, 100, arrived_at=end - 1),
+            _purchase(LINEN, 1, 100, arrived_at=end),
+        ],
+        [],
+        [prediction],
+    )
+    assert [lot.prediction for lot in result] == [None, "Tailoring", None, "Tailoring", None]

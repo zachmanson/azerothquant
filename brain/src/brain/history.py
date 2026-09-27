@@ -947,14 +947,17 @@ def _held_item(entry: object) -> tuple[str, int, bool]:
     return str(key), count, entry.get("isBound") is True
 
 
-def holdings(conn: sqlite3.Connection, era: Era, realm: str, character: str) -> dict[str, Holding]:
+def holdings(
+    conn: sqlite3.Connection, era: Era, realm: str, character: str, as_of: int | None = None
+) -> dict[str, Holding]:
     """What the Character holds, by Item Key: bags as of its latest Character Read, and
-    the bank as of the latest Read that has one (the bank can't change while closed)."""
+    the bank as of the latest Read that has one (the bank can't change while closed).
+    With `as_of`, only Reads taken up to that moment count."""
     latest = (
-        "SELECT id FROM character_read WHERE era = ? AND realm = ? AND character = ? {}"
-        " ORDER BY read_at DESC LIMIT 1"
+        "SELECT id FROM character_read WHERE era = ? AND realm = ? AND character = ?"
+        " AND read_at <= ? {} ORDER BY read_at DESC LIMIT 1"
     )
-    owner = (era.value, realm, character)
+    owner = (era.value, realm, character, as_of if as_of is not None else 2**62)
     rows = conn.execute(
         "SELECT place, item_key, bound, SUM(count) FROM character_item"
         f" WHERE (place = 'bags' AND character_read_id = ({latest.format('')}))"

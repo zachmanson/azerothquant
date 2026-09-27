@@ -29,7 +29,7 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import link_sales
+from brain.lots import Held, link_sales, start_of
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, observation_window_hours, sell_rates
@@ -202,14 +202,55 @@ def recommend(
     return result
 
 
+def held_at_writing(
+    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+) -> list[Held]:
+    """The units of each Prediction's Item Keys the Market's Characters held at the start
+    of its written day, costed at what their best Action would have brought then, as of
+    the latest Scan up to that moment (ADR-0007). Vendor Prices are the latest seen, since
+    a vendor's price doesn't move. Bound units are never Held."""
+    characters = character_markets(conn).get(market, [])
+    times = scan_times(conn, market)
+    vendor = vendor_prices(conn, market.era)
+    cut = config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
+    result = []
+    for p in predictions:
+        at = start_of(p.written)
+        held = _market_holdings(conn, market, characters, as_of=at)
+        scanned = [t for t in times if t <= at]
+        supply = supply_at(conn, market, scanned[-1]) if scanned else {}
+        rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
+        for item_key in p.item_keys:
+            h = held.get(item_key)
+            if h is None or not h.bags + h.bank:
+                continue
+            rows = _holding_rows(
+                item_key,
+                Holding(bags=h.bags, bank=h.bank),
+                fair_value(supply.get(item_key, []), config),
+                rates.get(item_key),
+                vendor.get(_item_id(item_key)),
+                cut,
+                config,
+            )
+            # Units without enough data to choose an exit count at the Vendor Price, as
+            # when Holding them (_hold).
+            cost = sum(
+                r.profit if r.profit is not None else r.quantity * vendor.get(_item_id(item_key), 0)
+                for r in rows
+            )
+            result.append(Held(p.name, item_key, h.bags + h.bank, round(cost)))
+    return result
+
+
 def _market_holdings(
-    conn: sqlite3.Connection, market: Market, characters: list[str]
+    conn: sqlite3.Connection, market: Market, characters: list[str], as_of: int | None = None
 ) -> dict[str, Holding]:
     """What the Market's Characters hold between them, by Item Key. Mail moves items
     between them, so the Sale Horizon applies to the total."""
     total: dict[str, Holding] = {}
     for character in characters:
-        for item_key, h in holdings(conn, market.era, market.realm, character).items():
+        for item_key, h in holdings(conn, market.era, market.realm, character, as_of).items():
             t = total.get(item_key, Holding())
             total[item_key] = Holding(
                 t.bags + h.bags,

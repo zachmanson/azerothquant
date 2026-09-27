@@ -198,6 +198,22 @@ def test_the_bank_comes_from_the_latest_read_that_has_one(db):
     }
 
 
+def test_holdings_as_of_a_moment_come_from_the_reads_up_to_then(db):
+    run(
+        db,
+        character_read(T0, bags=[item(LINEN, count=3)], bank=(T0, [item(LINEN, count=40, bag=-1)])),
+        character_read(T0 + 60, bags=[item(LINEN, count=9)]),
+        character_read(
+            T0 + 120, bags=[item(LINEN, count=1)], bank=(T0 + 120, [item(LINEN, count=2, bag=-1)])
+        ),
+    )
+
+    assert holdings(db, Era.BETA, REALM, "Kash-Patel", as_of=T0 + 60) == {
+        "2589": Holding(bags=9, bank=40)
+    }
+    assert holdings(db, Era.BETA, REALM, "Kash-Patel", as_of=T0 - 1) == {}
+
+
 def test_a_bank_read_empty_is_empty(db):
     run(
         db,
