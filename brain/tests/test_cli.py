@@ -406,7 +406,11 @@ def test_rebuild_tells_the_addon_what_is_in_the_rebuilt_history(tmp_path):
 
 
 def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
-    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    # One Sale Event, so the Flip minimum (#57) is lowered to let the Flip through.
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
+        flip_min_sale_events=1,
+    )
     linen = "item:2589::::::::20:1490"
 
     def scan(at, quantity, *extra):
@@ -655,6 +659,7 @@ def test_recommend_prints_a_flip_to_crafts_reagent_buys(tmp_path):
         _bolts_and_linen(tmp_path, money=100_000),
         sell_rate_prior_hours_flips=0,
         sale_size_prior_events_flips=0,
+        flip_min_sale_events=1,
     )
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]

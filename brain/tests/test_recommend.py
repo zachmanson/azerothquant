@@ -42,7 +42,8 @@ TAILORING = 197
 
 # Default knobs (5% faction cut, 20% and 1 silver Flip margin), except a Sale Horizon of
 # 3 hours, so a Sell Rate from a single short Observation Window is small enough to cap,
-# and no Sell Rate Prior or Sale Size Prior, so these tests take the raw rate at its word.
+# and no Sell Rate Prior, Sale Size Prior or minimum of Sale Events for a Flip, so these
+# tests take the raw rate at its word.
 DEFAULTS = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
 CONFIG = replace(
     DEFAULTS,
@@ -51,6 +52,7 @@ CONFIG = replace(
     sell_rate_prior_hours_flips=0,
     sale_size_prior_events_holdings=0,
     sale_size_prior_events_flips=0,
+    flip_min_sale_events=1,
 )
 
 
@@ -148,13 +150,13 @@ def run(db, scans=(), reads=(), config=CONFIG, predictions=(), mailbox_reads=())
     return {r.market: r for r in recommend(db, config, list(predictions))}
 
 
-def selling_two_linen_an_hour(*latest_rows, unit=100):
-    """Two Scans an hour apart in which 2 Linen sold: 48 a day, so 6 in the 3 h horizon.
-    Fair Value in the latest Scan is `unit`, before any `latest_rows` are added to it."""
+def selling_two_linen_an_hour(*latest_rows, unit=100, sale_events=1):
+    """Scans an hour apart in which 2 Linen sold each hour, as `sale_events` Sale Events:
+    48 a day, so 6 in the 3 h horizon. Fair Value in the latest Scan is `unit`, before
+    any `latest_rows` are added to it."""
     return [
-        scan(T0, row(quantity=20, unit=unit)),
-        scan(T0 + HOUR, row(quantity=18, unit=unit), *latest_rows),
-    ]
+        scan(T0 + n * HOUR, row(quantity=20 - 2 * n, unit=unit)) for n in range(sale_events)
+    ] + [scan(T0 + sale_events * HOUR, row(quantity=20 - 2 * sale_events, unit=unit), *latest_rows)]
 
 
 # --- Holdings: Vendor vs Sell ---
@@ -306,6 +308,21 @@ def test_a_flip_to_sell_must_clear_20_percent_and_1_silver(db, fair, unit, bough
     assert bool(result[MARKET].shopping_list) == bought
 
 
+@pytest.mark.parametrize(("sale_events", "action"), [(2, Action.VENDOR), (3, Action.SELL)])
+def test_a_flip_to_sell_needs_the_minimum_of_sale_events_or_is_vendored(db, sale_events, action):
+    # #57: two Sale Events can be one seller cancelling, so the 500 isn't resold at 950.
+    # A vendor still pays 600 for it.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=500), unit=1000, sale_events=sale_events),
+        [character_read(money=GOLD, vendor_prices={2589: 600})],
+        config=replace(CONFIG, flip_min_sale_events=3),
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.price) == (action, 500)
+
+
 def test_a_flip_to_sell_buys_no_more_than_sells_within_the_horizon(db):
     # A deep Market, so the 4 cheap units left behind don't drag the resale under 1 silver.
     result = run(
@@ -426,7 +443,8 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
 
 def one_sale_in_18_minutes(*latest_rows):
     """One Linen sold in a single 18-minute Observation Window: a raw Sell Rate of 80 a
-    day, from 0.3 h of watching. A deep Market at 1000, so resale stays well clear."""
+    day, from 0.3 h of watching. A deep Market at 1000, so resale stays well clear. One
+    Sale Event is under the Flip minimum (#57), so tests that Flip on it lower that."""
     return [
         scan(T0, row(quantity=200, unit=1000)),
         scan(T0 + 18 * MINUTE, row(quantity=199, unit=1000), *latest_rows),
@@ -436,7 +454,7 @@ def one_sale_in_18_minutes(*latest_rows):
 def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
     # As if 24 more hours had been watched with no sales: 1 / 24.3 h * 24 * 7 days = 6.9,
     # not the raw 80 a day * 7 = 560.
-    config = replace(DEFAULTS, sell_rate_prior_hours_flips=24)
+    config = replace(DEFAULTS, sell_rate_prior_hours_flips=24, flip_min_sale_events=1)
     result = run(
         db,
         one_sale_in_18_minutes(row(quantity=10, unit=500)),
@@ -455,7 +473,7 @@ def test_holdings_are_discounted_less_than_flips(db):
         db,
         one_sale_in_18_minutes(row(quantity=10, unit=500)),
         [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
-        config=DEFAULTS,
+        config=replace(DEFAULTS, flip_min_sale_events=1),
     )
 
     sell, vendor = result[MARKET].holdings
@@ -486,6 +504,7 @@ def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
         sell_rate_prior_hours_flips=0,
         sale_size_prior_events_holdings=0,
         sale_size_prior_events_flips=0,
+        flip_min_sale_events=1,
     )
     result = run(
         db,
@@ -565,12 +584,17 @@ def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
 # --- Craft (#31, ADR-0008) ---
 
 
-def linen_and_bolts_selling(linen=100, bolt=1000):
-    """Linen and Bolts of Linen Cloth each selling 2 an hour: 6 of each sell within the
-    3 h horizon, at Fair Values of `linen` and `bolt`."""
+def linen_and_bolts_selling(linen=100, bolt=1000, sale_events=1):
+    """Linen and Bolts of Linen Cloth each selling 2 an hour, as `sale_events` Sale Events
+    of each an hour apart: 6 of each sell within the 3 h horizon, at Fair Values of `linen`
+    and `bolt`."""
     return [
-        scan(T0, row(quantity=20, unit=linen), row(BOLT, quantity=20, unit=bolt)),
-        scan(T0 + HOUR, row(quantity=18, unit=linen), row(BOLT, quantity=18, unit=bolt)),
+        scan(
+            T0 + n * HOUR,
+            row(quantity=20 - 2 * n, unit=linen),
+            row(BOLT, quantity=20 - 2 * n, unit=bolt),
+        )
+        for n in range(sale_events + 1)
     ]
 
 
@@ -975,6 +999,21 @@ def test_a_flip_to_craft_must_clear_the_flip_margin_on_its_gold(db, bolt, crafts
     assert sum(made) == crafts
 
 
+@pytest.mark.parametrize(("sale_events", "crafts"), [(2, 0), (3, 6)])
+def test_a_flip_to_crafts_output_sells_only_on_the_minimum_of_sale_events(db, sale_events, crafts):
+    # #57: on 2 Sale Events a Bolt has no Sell room, and without a Vendor Price it's worth
+    # nothing, so no Linen is bought for it.
+    result = run(
+        db,
+        linen_and_bolts_selling(sale_events=sale_events),
+        [character_read(money=GOLD, recipes=[recipe()])],
+        config=replace(CONFIG, flip_min_sale_events=3),
+    )
+
+    made = [r.quantity for r in result[MARKET].shopping_list if r.action is Action.CRAFT]
+    assert sum(made) == crafts
+
+
 def test_flips_to_craft_and_plain_flips_share_gold_by_profit_per_gold(db):
     # 15 copper. The Ore Flip to Vendor makes 1 per 5 copper (0.2 per gold); a Bolt from
     # 2 Linen at 5 sells for 950 (94 per gold) and is bought first. The 5 left fit 1 Ore,
@@ -1270,6 +1309,21 @@ def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
 
     [buy] = result[MARKET].prediction_buys
     assert (buy.quantity, buy.max_loss) == (2, 2 * 5)
+
+
+@pytest.mark.parametrize(("sale_events", "bought"), [(2, 0), (3, 6)])
+def test_a_buys_exit_is_sell_only_on_the_minimum_of_sale_events(db, sale_events, bought):
+    # #57: on 3 Sale Events 6 of the 100s could be resold at 95, losing 5 each. On 2 there
+    # is no Sell, and without a Vendor Price each could lose all 100.
+    result = run(
+        db,
+        selling_two_linen_an_hour(sale_events=sale_events),
+        [character_read(money=GOLD)],
+        config=replace(CONFIG, flip_min_sale_events=3),
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert sum(r.quantity for r in result[MARKET].prediction_buys) == bought
 
 
 def test_held_units_count_toward_a_predictions_cap_before_it_buys(db):

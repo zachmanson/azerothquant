@@ -703,14 +703,8 @@ def _outlet(
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
     within the Sale Horizon under the Flip priors, less the `held` units and the ones
     `flipped` to Sell. It resells like them, at the Fair Value left once they're bought."""
-    room, resale = 0, None
-    if rate is not None and rate.sale_events:
-        room = sellable_units(
-            rate,
-            config.sell_rate_prior_hours_flips,
-            config.sale_size_prior_events_flips,
-            config.sale_horizon_seconds,
-        )
+    room, resale = _flip_room(rate, config), None
+    if room:
         room = max(0, room - held - sum(n for _, n in flipped))
         resale = _resale(supply, flipped, cut, config, rate.max_sale_price)
     return _Outlet(room, resale, vendor_price or 0, bound)
@@ -1003,16 +997,12 @@ def _flips(
     the price, and a lone cheap Listing is left out of Fair Value as an outlier, though
     it's the one most worth buying. The resale is never above the dearest Sale Event
     behind the Sell Rate, so a lone ask far above every sale isn't taken at its word
-    (#41). Anything else under the Vendor Price is bought to Vendor.
+    (#41). Nothing is bought to Sell unless the Sell Rate rests on the minimum of Sale
+    Events for a Flip (#57). Anything else under the Vendor Price is bought to Vendor.
     """
     offers = sorted(offers)
     to_sell: Supply = []
-    room = sellable_units(
-        rate,
-        config.sell_rate_prior_hours_flips,
-        config.sale_size_prior_events_flips,
-        config.sale_horizon_seconds,
-    )
+    room = _flip_room(rate, config)
     for unit, quantity in offers:
         take = min(quantity, room)
         if not take:
@@ -1062,16 +1052,7 @@ def _hold_buys(
     the Prediction were wrong, after the `held` ones, judged as strictly as a Flip. The
     rest can only be Vendored, or are worth nothing without a Vendor Price.
     """
-    room = max(
-        0,
-        sellable_units(
-            rate,
-            config.sell_rate_prior_hours_flips,
-            config.sale_size_prior_events_flips,
-            config.sale_horizon_seconds,
-        )
-        - held,
-    )
+    room = max(0, _flip_room(rate, config) - held)
     bought: Supply = []
     buys = []
     for unit, quantity in sorted(offers):
@@ -1112,6 +1093,20 @@ def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[
             max_loss=r.max_loss + quantity * buy.unit_max_loss,
         )
     return list(rows.values())
+
+
+def _flip_room(rate: SellRate | None, config: Config) -> int:
+    """Units bought to resell that should sell within the Sale Horizon, judged under the
+    Flip priors. None unless the Sell Rate rests on the minimum of Sale Events for a
+    Flip: one or two Disappearances can be one seller cancelling (#57)."""
+    if rate is None or rate.sale_events < config.flip_min_sale_events:
+        return 0
+    return sellable_units(
+        rate,
+        config.sell_rate_prior_hours_flips,
+        config.sale_size_prior_events_flips,
+        config.sale_horizon_seconds,
+    )
 
 
 def sellable_units(

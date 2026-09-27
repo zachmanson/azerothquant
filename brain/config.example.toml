@@ -63,6 +63,13 @@
 # sale_size_prior_events_holdings = 1
 # sale_size_prior_events_flips = 5
 
+# Optional: the least evidence `brain recommend` resells a buy on. A Flip to Sell, the Sell
+# room of a Flip to Craft's output and the resale behind a Prediction buy's Max Loss need
+# an Item Key's Sell Rate to rest on at least this many Sale Events: one or two can be a
+# single seller cancelling. Below it the buy can still be Vendored. Holdings you already
+# own aren't affected. Defaults to 3. Must come before the first [[installs]].
+# flip_min_sale_events = 3
+
 # Optional: the guards on Predictions (see predictions.example.toml and ADR-0006). A unit
 # is only bought under a Prediction while its Max Loss, what it cost less what it would
 # bring today if the Prediction is wrong, is at most prediction_max_loss_share of its cost.

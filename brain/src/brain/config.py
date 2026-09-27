@@ -70,6 +70,9 @@ DEFAULT_SELL_RATE_PRIOR_HOURS_FLIPS = 24
 # strict for the same reasons as the Sell Rate Prior.
 DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS = 1
 DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS = 5
+# A buy is only resold on the Auction House when its Item Key's Sell Rate rests on at least
+# this many Sale Events: one or two can be a single seller cancelling (#57).
+DEFAULT_FLIP_MIN_SALE_EVENTS = 3
 # Predictions (ADR-0006): a unit is only bought under one while its Max Loss is at most
 # this share of its cost, and the gold under Predictions is capped at these shares of the
 # Market's pooled gold, per Prediction and in total.
@@ -124,6 +127,9 @@ class Config:
     # their average size, for Holdings and for Flips.
     sale_size_prior_events_holdings: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_HOLDINGS
     sale_size_prior_events_flips: float = DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS
+    # A Flip, a Flip to Craft's output or a Hold buy's Max Loss only counts on Selling
+    # when the Sell Rate rests on at least this many Sale Events.
+    flip_min_sale_events: int = DEFAULT_FLIP_MIN_SALE_EVENTS
     # The player's Predictions, always next to the config file (ADR-0006).
     predictions_path: Path = Path(PREDICTIONS_FILE)
     # The most a unit bought under a Prediction may lose, as a share of its cost.
@@ -250,6 +256,16 @@ def load_config(path: Path) -> Config:
             ("sale_size_prior_events_flips", DEFAULT_SALE_SIZE_PRIOR_EVENTS_FLIPS),
         )
     )
+    min_sale_events = raw.get("flip_min_sale_events", DEFAULT_FLIP_MIN_SALE_EVENTS)
+    if (
+        isinstance(min_sale_events, bool)
+        or not isinstance(min_sale_events, int)
+        or min_sale_events < 1
+    ):
+        raise ConfigError(
+            f"{path}: flip_min_sale_events must be a whole number of Sale Events of at least 1, "
+            f"got {min_sale_events!r}"
+        )
     max_loss_share, cap_share, total_cap_share = (
         _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
         for key, default in (
@@ -285,6 +301,7 @@ def load_config(path: Path) -> Config:
         sell_rate_prior_hours_flips=prior_flips,
         sale_size_prior_events_holdings=size_prior_holdings,
         sale_size_prior_events_flips=size_prior_flips,
+        flip_min_sale_events=min_sale_events,
         predictions_path=path.parent / PREDICTIONS_FILE,
         prediction_max_loss_share=max_loss_share,
         prediction_cap_share=cap_share,
