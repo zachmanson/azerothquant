@@ -137,11 +137,11 @@ The Action of posting an item on the Auction House for other players to buy.
 _Avoid_: post, list, flip (a Flip is a buy)
 
 **Craft**:
-The Action of turning held reagents into a Known Recipe's output. A craft is worth doing when the output Holding's exit value with the crafted units added gains more than the consumed reagents' exit value loses. Missing merchant reagents are bought at their Merchant Cost, reagents Held under a Prediction are never used, and output is counted at the recipe's minimum quantity. The reagents are pooled across a realm and faction, and the Recommendation names the Character that knows the recipe. Enchants that make no item are not Crafts.
+The Action of turning held reagents into a Known Recipe's output. A craft is worth doing when the output Holding's exit value with the crafted units added gains more than the consumed reagents' exit value loses. Missing merchant reagents are bought at their Merchant Cost, reagents Held under a Prediction are never used, and output is counted at the recipe's minimum quantity. The reagents are pooled across a realm and faction, and the Recommendation names the Character that knows the recipe. Enchants that make no item are not Crafts. Buying reagents on the Auction House to craft is a Flip, not this Action.
 _Avoid_: make, produce
 
 **Flip**:
-Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action. A Flip to Sell's resale is never priced above the highest price among the Sale Events behind its Sell Rate.
+Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost), Vendor (buy under Vendor Price) or Craft (buy the reagents a Known Recipe is missing, then Sell or Vendor its output). A Flip is a Shopping List Recommendation, not an Action. A Flip to Craft buys only what held reagents don't cover, and its output is valued with a Flip's priors (ADR-0009). A Flip to Sell's resale is never priced above the highest price among the Sale Events behind its Sell Rate.
 _Avoid_: snipe, arbitrage
 
 **Prediction**:

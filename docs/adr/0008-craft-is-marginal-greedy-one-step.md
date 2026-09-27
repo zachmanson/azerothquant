@@ -27,3 +27,7 @@ Settled while building it:
 - Quest-bound outputs count as bound, like Bind on Pickup.
 - A blocked recipe shows as a Craft row of 0 with the reason, only when one craft's reagents are on hand.
 - The client seems to give no cooldown for a cooldown recipe that's ready (a spike dump shows `GetRecipeCooldown` returning nil), so the once-per-Character limit only applies when some Character's Read caught it cooling down.
+
+## Superseded in part (#32)
+
+ADR-0009 lets reagents be bought on the Auction House to craft, as a Flip to Craft. The Craft Action itself still starts from held reagents.
