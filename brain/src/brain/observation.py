@@ -11,7 +11,6 @@ import sqlite3
 from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from enum import StrEnum
 from itertools import pairwise
 
 from brain.config import Config
@@ -123,21 +122,15 @@ def _pair_reposts(candidates: list[Disappearance], new: list[Listing]) -> _Pairi
     return pairing
 
 
-class SaleKind(StrEnum):
-    PARTIAL_SALE = "partial_sale"
-    # A Disappearance that couldn't have expired, isn't a Repost and was priced near or
-    # below the Fair Value of the Scan it was last seen in.
-    PROBABLE_SALE = "probable_sale"
-
-
 @dataclass(frozen=True, order=True)
 class SaleEvent:
+    """Every unit of one Item Key seen to sell in one Observation Window: its Partial
+    Sales and Probable Sales together (ADR-0012)."""
+
     item_key: str
-    unit_buyout: int
-    own: bool
+    unit_buyout: int  # the dearest unit
     seen_at: int  # requested_at of the Scan that ends the Observation Window
     units: int
-    kind: SaleKind
 
 
 @dataclass(frozen=True)
@@ -179,8 +172,9 @@ def sell_rate_evidence(
     and the sales always cover the same windows."""
     windows = observation_windows_between(conn, market, config, since, until)
     window_ends = {w.end for w in windows}
-    events = [
-        SaleEvent(p.item_key, p.unit_buyout, p.own, p.seen_at, p.units_sold, SaleKind.PARTIAL_SALE)
+    # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
+    sales = [
+        (p.item_key, p.seen_at, p.unit_buyout, p.units_sold)
         for p in partial_sales(conn, market)
         if p.seen_at in window_ends
     ]
@@ -202,21 +196,26 @@ def sell_rate_evidence(
         return d.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
 
     probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]
-    events += [
-        SaleEvent(
-            d.item_key,
-            d.unit_buyout,
-            d.own,
-            d.gone_at,
-            d.quantity,
-            SaleKind.PROBABLE_SALE,
-        )
-        for d in probable_sales
-    ]
-    events.sort(key=lambda e: e.seen_at)
+    sales += [(d.item_key, d.gone_at, d.unit_buyout, d.quantity) for d in probable_sales]
     return SellRateEvidence(
         window_hours=window_hours(windows),
-        sale_events=events,
+        sale_events=_sale_events(sales),
         reposts=pairing.reposts,
         coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],
     )
+
+
+def _sale_events(sales: list[tuple[str, int, int, int]]) -> list[SaleEvent]:
+    """One Sale Event per Item Key per Observation Window, oldest first. A buyer takes
+    units cheapest-first across price points, so one sweep shows up as many sales."""
+    units: Counter[tuple[str, int]] = Counter()
+    dearest: dict[tuple[str, int], int] = {}
+    for item_key, seen_at, unit_buyout, quantity in sales:
+        group = (item_key, seen_at)
+        units[group] += quantity
+        dearest[group] = max(dearest.get(group, 0), unit_buyout)
+    events = [
+        SaleEvent(item_key, dearest[(item_key, seen_at)], seen_at, n)
+        for (item_key, seen_at), n in units.items()
+    ]
+    return sorted(events, key=lambda e: e.seen_at)

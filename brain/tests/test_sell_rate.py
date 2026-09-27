@@ -111,7 +111,7 @@ def test_each_sell_rate_carries_its_evidence(db):
 
     assert rates[LINEN_KEY] == SellRate(
         units_per_day=6 / 0.5 * 24,
-        sale_events=2,
+        sale_events=1,  # both in one Observation Window
         window_hours=0.5,
         reposts=0,
         coincidences=1,
@@ -124,8 +124,8 @@ def test_each_sell_rate_carries_its_evidence(db):
 
 
 def test_the_max_sale_price_is_the_dearest_of_the_sale_events(db):
-    # 2 of the stack sell at 100 and the 110 is a Probable Sale. The 200 is gone too, but
-    # too dear to be a sale, so it doesn't count.
+    # 2 of the stack sell at 100 and the 110 is a Probable Sale, one Sale Event between
+    # them. The 200 is gone too, but too dear to be a sale, so it doesn't count.
     run(
         db,
         scan(T0, row(quantity=10, unit=100), row(unit=110), row(unit=200)),
@@ -134,7 +134,7 @@ def test_the_max_sale_price_is_the_dearest_of_the_sale_events(db):
 
     rates = sell_rates(db, MARKET, CONFIG, now=T0 + 30 * MINUTE)
 
-    assert rates[LINEN_KEY].sale_events == 2
+    assert rates[LINEN_KEY].sale_events == 1
     assert rates[LINEN_KEY].max_sale_price == 110
 
 

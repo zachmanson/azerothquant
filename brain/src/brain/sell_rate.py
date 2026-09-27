@@ -15,7 +15,7 @@ from brain.observation import observation_windows_between, sell_rate_evidence, w
 class SellRate:
     units_per_day: float
     # The evidence behind it, so the Decision Engine can discount thin data (#25).
-    sale_events: int  # Partial Sales and Probable Sales
+    sale_events: int  # Observation Windows it was seen to sell in (ADR-0012)
     window_hours: float  # the Market's, shared by every Item Key in it
     reposts: int
     coincidences: int
