@@ -301,6 +301,25 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
             for r in m.prediction_buys
         ],
     )
+    graded = _table(
+        ["Prediction", "Graded", "Proceeds", "Open value", "Cost", "Return"],
+        [
+            [
+                g.prediction,
+                datetime.fromtimestamp(g.graded_at).strftime("%Y-%m-%d"),
+                _money(g.proceeds),
+                _money(g.open_value),
+                _money(g.cost),
+                _percent(g.return_),
+            ]
+            for g in m.grades
+        ],
+    )
+    if m.pooled_return is None:
+        record = "Graded Predictions: none yet"
+    else:
+        brake = "halved" if m.pooled_return < 0 else "not halved"
+        record = f"Graded Predictions: pooled return {_percent(m.pooled_return)}, caps {brake}"
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     return (
         f"{market}, as of the Scan at {as_of}\n"
@@ -310,7 +329,9 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         f"Shopping List: {_money(m.gold)} to spend, {_money(m.shopping_cost)} in total\n"
         f"{shopping}\n"
         f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
-        f"{prediction_buys}"
+        f"{prediction_buys}\n"
+        f"{record}\n"
+        f"{graded}"
     )
 
 
@@ -332,6 +353,10 @@ def _action(row: Row) -> str:
 
 def _count(n: int | None) -> str:
     return "" if n is None else str(n)
+
+
+def _percent(share: float | None) -> str:
+    return "" if share is None else f"{share:.1%}"
 
 
 def _money(copper: float | None) -> str:

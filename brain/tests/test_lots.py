@@ -4,7 +4,7 @@ from datetime import date, datetime
 import pytest
 
 from brain.history import Listing, Outcome, Purchase
-from brain.lots import Held, Lot, LotSale, link_sales, lots
+from brain.lots import Held, Lot, LotSale, Settlement, link_sales, lots, settle
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 
@@ -198,3 +198,35 @@ def test_purchases_of_its_item_keys_from_its_written_day_until_it_ends_belong_to
         [prediction],
     )
     assert [lot.prediction for lot in result] == [None, "Tailoring", None, "Tailoring", None]
+
+
+# --- Settling a Prediction for its Grade ---
+
+
+def test_a_prediction_settles_its_units_sold_by_the_grading_moment_after_the_cut():
+    # 20 held at 60 each; 5 sold at 100 before the grading moment and 5 at 200 after it.
+    result = lots(
+        [],
+        [_sold(LINEN, 5, 500, arrived_at=OCT_2), _sold(LINEN, 5, 1000, arrived_at=OCT_11)],
+        [_prediction()],
+        [Held("Tailoring", LINEN, units=20, cost=1200)],
+    )
+    assert settle(_prediction(), result, graded_at=OCT_10, cut=0.05) == Settlement(
+        proceeds=5 * 100 * 0.95, cost=1200, open_units={LINEN: 15}
+    )
+
+
+def test_a_prediction_settles_its_held_lot_and_purchases_under_it_and_nothing_else():
+    result = lots(
+        [
+            _purchase(LINEN, 10, 500, arrived_at=OCT_1 - HOUR),  # folded into the held Lot
+            _purchase(LINEN, 4, 400, arrived_at=OCT_2),
+            _purchase(WOOL, 7, 700, arrived_at=OCT_2),
+            _purchase(LINEN, 3, 300, arrived_at=OCT_11),  # after it lapsed
+        ],
+        [],
+        [_prediction(lapse=date(2026, 10, 10))],
+        [Held("Tailoring", LINEN, units=10, cost=600)],
+    )
+    settled = settle(_prediction(lapse=date(2026, 10, 10)), result, graded_at=OCT_11, cut=0.05)
+    assert (settled.cost, settled.open_units) == (600 + 400, {LINEN: 14})

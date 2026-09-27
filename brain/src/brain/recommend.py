@@ -29,7 +29,7 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import Held, link_sales, start_of
+from brain.lots import Held, ended_at, link_sales, lots, settle, start_of
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, observation_window_hours, sell_rates
@@ -88,6 +88,26 @@ class _HoldBuy:
 
 
 @dataclass(frozen=True)
+class Grade:
+    """A Prediction's realized result, fixed at its grading moment (ADR-0006): its sold
+    units after the Auction House cut, plus its open units at their Best Exit Value
+    without it then, against what all of them cost."""
+
+    prediction: str
+    graded_at: int
+    proceeds: float
+    open_value: float
+    cost: int
+
+    @property
+    def return_(self) -> float | None:
+        """Gain over cost, or None if its units cost nothing."""
+        if not self.cost:
+            return None
+        return (self.proceeds + self.open_value - self.cost) / self.cost
+
+
+@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -105,6 +125,10 @@ class MarketRecommendations:
     # Sold Outcomes whose item name gave no single Item Key, so they close no Lot
     # (ADR-0007). If this isn't zero in practice, Character Reads should record names.
     unlinked_sales: int = 0
+    # The graded Predictions' record, shown rather than applied except for the brake: the
+    # caps are halved while their pooled return is negative (ADR-0006).
+    grades: list[Grade] = field(default_factory=list)
+    pooled_return: float | None = None  # None with nothing graded
 
 
 def recommend(
@@ -120,7 +144,7 @@ def recommend(
         supply = supply_at(conn, market, now)
         rates = sell_rates(conn, market, config, now)
         vendor = vendor_prices(conn, market.era)
-        cut = config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
+        cut = _cut(market, config)
         held = _market_holdings(conn, market, characters)
         rows = [
             row
@@ -138,7 +162,9 @@ def recommend(
         gold = pooled_gold(conn, market.era, market.realm, market.faction)
         today = date.fromtimestamp(now)
         active = [p for p in predictions if p.active_on(today)]
-        caps = _Caps(gold, config)
+        graded = grades(conn, config, market, predictions, now)
+        pooled = pooled_return(graded)
+        caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
         bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
         rows = _hold(rows, active, bound, vendor, caps)
         # Most expected profit first; rows without a number to rank by go last.
@@ -197,6 +223,8 @@ def recommend(
                 prediction_buys=prediction_buys,
                 prediction_cost=sum(r.cost for r in prediction_buys),
                 unlinked_sales=sum(o.kind is MailKind.SOLD and o.item_key is None for o in linked),
+                grades=graded,
+                pooled_return=pooled,
             )
         )
     return result
@@ -207,40 +235,84 @@ def held_at_writing(
 ) -> list[Held]:
     """The units of each Prediction's Item Keys the Market's Characters held at the start
     of its written day, costed at what their best Action would have brought then, as of
-    the latest Scan up to that moment (ADR-0007). Vendor Prices are the latest seen, since
-    a vendor's price doesn't move. Bound units are never Held."""
+    the latest Scan up to that moment (ADR-0007). Bound units are never Held."""
     characters = character_markets(conn).get(market, [])
-    times = scan_times(conn, market)
-    vendor = vendor_prices(conn, market.era)
-    cut = config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
     result = []
     for p in predictions:
         at = start_of(p.written)
         held = _market_holdings(conn, market, characters, as_of=at)
-        scanned = [t for t in times if t <= at]
-        supply = supply_at(conn, market, scanned[-1]) if scanned else {}
-        rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
         for item_key in p.item_keys:
             h = held.get(item_key)
             if h is None or not h.bags + h.bank:
                 continue
-            rows = _holding_rows(
-                item_key,
-                Holding(bags=h.bags, bank=h.bank),
-                fair_value(supply.get(item_key, []), config),
-                rates.get(item_key),
-                vendor.get(_item_id(item_key)),
-                cut,
-                config,
-            )
-            # Units without enough data to choose an exit count at the Vendor Price, as
-            # when Holding them (_hold).
-            cost = sum(
-                r.profit if r.profit is not None else r.quantity * vendor.get(_item_id(item_key), 0)
-                for r in rows
-            )
-            result.append(Held(p.name, item_key, h.bags + h.bank, round(cost)))
+            units = h.bags + h.bank
+            cost = _exit_value(conn, config, market, item_key, units, at)
+            result.append(Held(p.name, item_key, units, round(cost)))
     return result
+
+
+def grades(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    now: int,
+) -> list[Grade]:
+    """The Grade of each Prediction a Sale Horizon has passed since it ended, by `now`."""
+    due = [p for p in predictions if ended_at(p) + config.sale_horizon_seconds <= now]
+    if not due:
+        return []
+    market_purchases = purchases(conn, market)
+    linked = link_sales(outcomes(conn, market), listings(conn, market), market_purchases)
+    held = held_at_writing(conn, config, market, predictions)
+    market_lots = lots(market_purchases, linked, predictions, held)
+    result = []
+    for p in due:
+        graded_at = ended_at(p) + config.sale_horizon_seconds
+        settled = settle(p, market_lots, graded_at, _cut(market, config))
+        open_value = sum(
+            _exit_value(conn, config, market, item_key, units, graded_at)
+            for item_key, units in settled.open_units.items()
+            if units
+        )
+        result.append(Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost))
+    return result
+
+
+def pooled_return(graded: Sequence[Grade]) -> float | None:
+    """The realized return on all the gold graded Predictions tied up together, or None
+    with nothing graded."""
+    cost = sum(g.cost for g in graded)
+    if not cost:
+        return None
+    return sum(g.proceeds + g.open_value - g.cost for g in graded) / cost
+
+
+def _exit_value(
+    conn: sqlite3.Connection, config: Config, market: Market, item_key: str, units: int, at: int
+) -> float:
+    """What `units` of an Item Key would have brought by their best Action, as of the
+    latest Scan up to `at`. Vendor Prices are the latest seen, since a vendor's price
+    doesn't move. Units without enough data to choose an exit count at the Vendor Price,
+    as when Holding them (_hold)."""
+    scanned = [t for t in scan_times(conn, market) if t <= at]
+    supply = supply_at(conn, market, scanned[-1]) if scanned else {}
+    rates = sell_rates(conn, market, config, scanned[-1]) if scanned else {}
+    vendor = vendor_prices(conn, market.era).get(_item_id(item_key))
+    rows = _holding_rows(
+        item_key,
+        Holding(bags=units),
+        fair_value(supply.get(item_key, []), config),
+        rates.get(item_key),
+        vendor,
+        _cut(market, config),
+        config,
+    )
+    return sum(r.profit if r.profit is not None else r.quantity * (vendor or 0) for r in rows)
+
+
+def _cut(market: Market, config: Config) -> float:
+    return config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
 
 
 def _market_holdings(
@@ -320,11 +392,12 @@ def _holding_rows(
 
 class _Caps:
     """The gold still allowed under each Prediction and under all of them together, as
-    shares of the Market's pooled gold (ADR-0006)."""
+    shares of the Market's pooled gold (ADR-0006), halved while the brake is on."""
 
-    def __init__(self, gold: int, config: Config):
-        self._each = gold * config.prediction_cap_share
-        self._total_left = gold * config.predictions_cap_share
+    def __init__(self, gold: int, config: Config, brake: bool = False):
+        share = 0.5 if brake else 1.0
+        self._each = gold * config.prediction_cap_share * share
+        self._total_left = gold * config.predictions_cap_share * share
         self._used: Counter[str] = Counter()
 
     def room(self, prediction: str) -> float:

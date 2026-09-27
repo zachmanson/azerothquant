@@ -12,9 +12,17 @@ from brain.history import (
     import_scans,
     open_history,
 )
-from brain.lots import Held
+from brain.lots import Held, start_of
 from brain.predictions import Prediction
-from brain.recommend import Action, Row, held_at_writing, recommend, sellable_units
+from brain.recommend import (
+    Action,
+    Grade,
+    Row,
+    grades,
+    held_at_writing,
+    recommend,
+    sellable_units,
+)
 from brain.sell_rate import SellRate
 
 T0 = 1_790_000_000
@@ -738,3 +746,142 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
         Held("Linen spike", LINEN_KEY, units=10, cost=6 * 95 + 4 * 10)
     ]
+
+
+# --- Grading (#27) ---
+
+
+def mailbox_read(read_at, mail):
+    return {
+        "readAt": read_at,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "shownCount": 1,
+        "totalCount": 1,
+        "skippedMails": 0,
+        "mails": [mail],
+    }
+
+
+def linen_sold(read_at, count, price):
+    """A Mailbox Read with one Sold Outcome of Linen that arrived 12 hours before it. Its
+    money is the price after the cut plus a refunded deposit, which grading must not use."""
+    invoice = {"invoiceType": "seller", "itemName": "Linen Cloth", "bid": price, "count": count}
+    mail = sold_mail("Linen Cloth", round(price * 0.95) + 60) | {"invoice": invoice}
+    return mailbox_read(read_at, mail)
+
+
+def test_a_prediction_is_graded_on_its_sales_and_its_open_units_best_exit_at_the_moment(db):
+    # Written the day after these Scans with 10 Linen held (6 Sold at 95, 4 Vendored at 10:
+    # 610), its Catalyst happens the next day. 2 sell at 300 while it stands. At the grading
+    # moment, 3 hours on, the 8 left are worth what they were then: 6 Sold at 95 and 2
+    # Vendored at 10. The Scans after the grading moment must not count.
+    named = row(own=True) | {"name": "Linen Cloth"}
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    ended = start_of(written + timedelta(days=1))
+    later = ended + DAY
+    run(
+        db,
+        [
+            scan(T0, row(quantity=20), named),
+            scan(T0 + HOUR, row(quantity=18), named),
+            scan(later, row(quantity=20, unit=500)),
+            scan(later + HOUR, row(quantity=18, unit=500)),
+        ],
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        mailbox_reads=[linen_sold(start_of(written) + 18 * HOUR, count=2, price=600)],
+    )
+    p = prediction(LINEN_KEY, written=written, happened=written + timedelta(days=1))
+
+    assert grades(db, CONFIG, MARKET, [p], now=later + HOUR) == [
+        Grade(
+            "Linen spike",
+            graded_at=ended + 3 * HOUR,
+            proceeds=2 * 300 * 0.95,
+            open_value=6 * 95 + 2 * 10,
+            cost=6 * 95 + 4 * 10,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("prediction_", "graded"),
+    [
+        (prediction(LINEN_KEY, happened=TODAY + timedelta(days=1)), True),
+        (prediction(LINEN_KEY, lapse=TODAY), True),  # it lasts through its lapse day
+        (prediction(LINEN_KEY), False),
+    ],
+    ids=["catalyst happened", "lapsed", "still standing"],
+)
+def test_a_prediction_is_graded_once_a_sale_horizon_has_passed_since_it_ended(
+    db, prediction_, graded
+):
+    run(db, selling_two_linen_an_hour(), [character_read()])
+    tomorrow = start_of(TODAY + timedelta(days=1))
+
+    assert grades(db, CONFIG, MARKET, [prediction_], now=tomorrow + 3 * HOUR - 1) == []
+    result = grades(db, CONFIG, MARKET, [prediction_], now=tomorrow + 3 * HOUR)
+    assert [g.graded_at for g in result] == ([tomorrow + 3 * HOUR] if graded else [])
+
+
+ORE_LINK = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+
+
+def ore_won(read_at, count, price):
+    """A Mailbox Read with one Purchase of Ore that arrived 12 hours before it."""
+    mail = {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": "Auction won: Copper Ore",
+        "money": 0,
+        "daysLeft": 29.5,
+        "firstItemQuantity": count,
+        "firstItemLink": ORE_LINK,
+        "invoice": {"invoiceType": "buyer", "itemName": "Copper Ore", "bid": price, "count": count},
+    }
+    return mailbox_read(read_at, mail)
+
+
+def graded_ore_prediction(price):
+    """Ended five days ago, after 10 Ore were bought under it for `price` in all, which a
+    vendor now takes for 10c each."""
+    written = TODAY - timedelta(days=10)
+    return prediction(
+        ORE_KEY, name="Ore spike", written=written, happened=TODAY - timedelta(days=5)
+    ), ore_won(start_of(written) + 18 * HOUR, count=10, price=price)
+
+
+def test_caps_are_halved_while_the_pooled_return_of_graded_predictions_is_negative(db):
+    # As in the cap test, but 7.5% of 16s is 1s 20c: only the 4 units a vendor would take.
+    ore, bought = graded_ore_prediction(price=1000)  # -90%
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), money=1600, vendor_prices={2589: 10, 2770: 10})],
+        predictions=[prediction(LINEN_KEY), ore],
+        mailbox_reads=[bought],
+    )
+
+    assert result[MARKET].pooled_return == pytest.approx(-0.9)
+    [hold] = [r for r in result[MARKET].holdings if r.action is Action.HOLD]
+    assert (hold.quantity, hold.cost) == (4, 40)
+
+
+def test_there_is_no_brake_unless_the_pooled_return_is_below_zero(db):
+    ore, bought = graded_ore_prediction(price=100)  # broke even
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), money=1600, vendor_prices={2589: 10, 2770: 10})],
+        predictions=[prediction(LINEN_KEY), ore],
+        mailbox_reads=[bought],
+    )
+
+    assert result[MARKET].pooled_return == 0
+    [hold] = [r for r in result[MARKET].holdings if r.action is Action.HOLD]
+    assert hold.quantity == 6
+
+
+def test_with_nothing_graded_there_is_no_pooled_return(db):
+    result = run(db, selling_two_linen_an_hour(), [character_read()], predictions=[prediction()])
+    assert (result[MARKET].grades, result[MARKET].pooled_return) == ([], None)

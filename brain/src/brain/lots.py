@@ -88,12 +88,12 @@ def _bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str 
     when it was bought, from the start of its written day until it ended."""
     bought_at = _when(purchase)
     for p in predictions:
-        if purchase.item_key in p.item_keys and start_of(p.written) <= bought_at < _end(p):
+        if purchase.item_key in p.item_keys and start_of(p.written) <= bought_at < ended_at(p):
             return p.name
     return None
 
 
-def _end(prediction: Prediction) -> int:
+def ended_at(prediction: Prediction) -> int:
     """When a Prediction ends: the start of the day its Catalyst happened, or the end of
     its lapse day (it lasts through that day), whichever comes first."""
     lapsed = start_of(prediction.lapse + timedelta(days=1))
@@ -126,6 +126,33 @@ def _close(result: list[Lot], outcome: Outcome, sold_at: int) -> None:
         sale = LotSale(units, unit_price, sold_at)
         result[i] = replace(lot, sales=(*lot.sales, sale))
         remaining -= units
+
+
+@dataclass(frozen=True)
+class Settlement:
+    """Where a Prediction's units stand at its grading moment: what its sold units brought
+    in, what all of them cost, and the units still open, which the caller values."""
+
+    proceeds: float  # copper after the Auction House cut
+    cost: int
+    open_units: dict[str, int]  # by Item Key
+
+
+def settle(prediction: Prediction, result: list[Lot], graded_at: int, cut: float) -> Settlement:
+    """Settle a Prediction's Lots at `graded_at`: units sold after it are still open."""
+    proceeds = 0.0
+    cost = 0
+    open_units: dict[str, int] = {}
+    for lot in result:
+        if lot.prediction != prediction.name:
+            continue
+        cost += lot.cost
+        sold = [s for s in lot.sales if s.sold_at <= graded_at]
+        proceeds += sum(s.units * s.unit_price for s in sold) * (1 - cut)
+        open_units[lot.item_key] = (
+            open_units.get(lot.item_key, 0) + lot.units - sum(s.units for s in sold)
+        )
+    return Settlement(proceeds, cost, open_units)
 
 
 def link_sales(
