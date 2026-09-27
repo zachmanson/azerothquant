@@ -229,6 +229,22 @@ function RecommendationTable.openingTab(saved, byAuctionHouse)
   return saved
 end
 
+-- The header note for Scans the table doesn't reflect yet, or nil when there are none.
+-- unsaved: taken since the last reload, so still only in memory. unimported: saved at the
+-- last reload, waiting on the Brain. Unsaved ones need a reload first, whatever the rest.
+function RecommendationTable.waitingNote(unsaved, unimported)
+  local n = unsaved + unimported
+  if n == 0 then
+    return nil
+  end
+  local scans = n == 1 and "1 Scan" or n .. " Scans"
+  local them = n == 1 and "it" or "them"
+  local step = unsaved > 0 and "Reload to send " .. them .. " to the Brain"
+    or "Reload once the Brain has " .. them
+  -- Short: it sits right of the header lines, left of the Reload button.
+  return scans .. " waiting: " .. step
+end
+
 function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
   local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
   if not entry then

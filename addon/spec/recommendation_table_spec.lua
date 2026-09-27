@@ -372,3 +372,24 @@ describe("RecommendationTable.nextSort", function()
     assert.are.same({ column = 6, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 6))
   end)
 end)
+
+describe("RecommendationTable.waitingNote", function()
+  it("says nothing when every Scan is in the table", function()
+    assert.is_nil(RecommendationTable.waitingNote(0, 0))
+  end)
+
+  it("asks for a Reload to hand a Scan taken since the last one to the Brain", function()
+    assert.are.equal("1 Scan waiting: Reload to send it to the Brain",
+      RecommendationTable.waitingNote(1, 0))
+  end)
+
+  it("asks for a Reload once the Brain has imported Scans that were already saved", function()
+    assert.are.equal("2 Scans waiting: Reload once the Brain has them",
+      RecommendationTable.waitingNote(0, 2))
+  end)
+
+  it("asks to send them first when some Scans aren't even saved yet", function()
+    assert.are.equal("3 Scans waiting: Reload to send them to the Brain",
+      RecommendationTable.waitingNote(1, 2))
+  end)
+end)

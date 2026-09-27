@@ -30,6 +30,7 @@ local reading = false
 local debounceTimer, noResponseTimer
 local button, ticker
 local checkedAt -- last Nudge check while the AH is open
+local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 
 local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
@@ -193,6 +194,12 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       if pruned > 0 then
         say(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))
       end
+      -- What's left is newer than the Brain's last import, so it isn't in the table yet.
+      savedAtLoad = #db.scans
+      if savedAtLoad > 0 then
+        say(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
+          .. " (scripts\\play.bat), Reload again in a few seconds.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
+      end
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
@@ -230,5 +237,10 @@ end)
 ns.Scanner = {
   busy = function()
     return pending ~= nil
+  end,
+  -- Scans the Recommendation Table doesn't reflect yet: those taken since the last reload
+  -- (unsaved), and those saved then that the Brain hadn't imported (unimported).
+  waiting = function()
+    return (db and #db.scans or 0) - savedAtLoad, savedAtLoad
   end,
 }
