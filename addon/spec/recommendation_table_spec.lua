@@ -30,6 +30,22 @@ local function entry(fields)
   return { [REALM] = { [FACTION] = e } }
 end
 
+-- A Flip to Craft as the Brain writes it (brain/tests/test_recommendations.py).
+local function flipToCraft()
+  return {
+    itemKey = "2996",
+    action = "Craft",
+    quantity = 6,
+    profit = 4500.0,
+    cost = 1250.0,
+    note = "on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
+    buys = {
+      { itemKey = "2589", quantity = 12, maxUnitPrice = 120 },
+      { itemKey = "2320", quantity = 5, maxUnitPrice = 10.0, merchant = true },
+    },
+  }
+end
+
 describe("RecommendationTable.build", function()
   it("heads the table in two lines: the Scan's age and window hours, then gold and totals", function()
     local view = build(entry(), AS_OF + 12 * 60 + 30)
@@ -165,22 +181,6 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "Sales 4" }, shopping.rows[1].tooltip)
   end)
 
-  -- A Flip to Craft as the Brain writes it (brain/tests/test_recommendations.py).
-  local function flipToCraft()
-    return {
-      itemKey = "2996",
-      action = "Craft",
-      quantity = 6,
-      profit = 4500.0,
-      cost = 1250.0,
-      note = "on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
-      buys = {
-        { itemKey = "2589", quantity = 12, maxUnitPrice = 120 },
-        { itemKey = "2320", quantity = 5, maxUnitPrice = 10.0, merchant = true },
-      },
-    }
-  end
-
   it("lists a Flip to Craft's reagent buys by name in its tooltip, in place of the ID note", function()
     local names = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread" }
     local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, function(itemString)
@@ -266,5 +266,109 @@ describe("RecommendationTable.openingTab", function()
   it("opens the Shopping List when no tab was saved, or the saved one no longer exists", function()
     assert.are.equal("Shopping List", RecommendationTable.openingTab(nil, false))
     assert.are.equal("Shopping List", RecommendationTable.openingTab("Crafts", false))
+  end)
+end)
+
+describe("sorting the Recommendation Table", function()
+  local function itemStrings(section)
+    local out = {}
+    for i, row in ipairs(section.rows) do
+      out[i] = row.itemString
+    end
+    return out
+  end
+
+  it("shows the Shopping List largest Profit first by default", function()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "1", action = "Sell", quantity = 1, price = 100, profit = 500, cost = 100 },
+        { itemKey = "2", action = "Sell", quantity = 1, price = 100, profit = 90000, cost = 100 },
+        { itemKey = "3", action = "Sell", quantity = 1, price = 100, profit = 7000, cost = 100 },
+      },
+    }))
+
+    local shopping = view.sections[2]
+    assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(shopping))
+    assert.are.same({ column = 5, descending = true }, shopping.sort)
+  end)
+
+  it("shows Holdings largest Profit first, with Holds last, largest Price x Qty first among them", function()
+    local view = build(entry({
+      holdings = {
+        { itemKey = "1", action = "Hold", quantity = 2, price = 100, prediction = "Phase 2" },
+        { itemKey = "2", action = "Sell", quantity = 1, price = 100, profit = 95 },
+        { itemKey = "3", action = "Hold", quantity = 5, price = 100, prediction = "Phase 2" },
+        { itemKey = "4", action = "Sell", quantity = 1, price = 900, profit = 855 },
+      },
+    }))
+
+    local holdings = view.sections[1]
+    assert.are.same({ "item:4", "item:2", "item:3", "item:1" }, itemStrings(holdings))
+    assert.are.same({ column = 5, descending = true }, holdings.sort)
+  end)
+
+  it("shows Prediction buys smallest Max Loss first", function()
+    local function buy(itemKey, maxLoss)
+      return { itemKey = itemKey, action = "Hold", quantity = 1, price = 100, prediction = "Phase 2", maxLoss = maxLoss }
+    end
+    local view = build(entry({ predictionBuys = { buy("1", 5000), buy("2", 40), buy("3", 900) } }))
+
+    local buys = view.sections[3]
+    assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
+    assert.are.same({ column = 5, descending = false }, buys.sort)
+  end)
+
+  it("re-sorts by a money column's value, not its text, keeping rows with no value last", function()
+    -- As text "1g" sorts before "9s"; a Flip to Craft has no Max price of its own.
+    local craft = flipToCraft()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "1", action = "Sell", quantity = 1, price = 10000, profit = 500, cost = 10000 },
+        craft,
+        { itemKey = "3", action = "Sell", quantity = 1, price = 900, profit = 500, cost = 900 },
+      },
+    }))
+    local shopping = view.sections[2]
+
+    RecommendationTable.sort(shopping, { column = 4, descending = false })
+    assert.are.same({ "item:3", "item:1", "item:2996" }, itemStrings(shopping))
+
+    RecommendationTable.sort(shopping, { column = 4, descending = true })
+    assert.are.same({ "item:1", "item:3", "item:2996" }, itemStrings(shopping))
+  end)
+
+  it("sorts the Item column by the item's name, ignoring case", function()
+    local names = { ["item:1"] = "linen Cloth", ["item:2"] = "Copper Ore", ["item:3"] = "Wool Cloth" }
+    local function sell(itemKey)
+      return { itemKey = itemKey, action = "Sell", quantity = 1, price = 100, profit = 95 }
+    end
+    local holdings = build(entry({ holdings = { sell("1"), sell("2"), sell("3") } }), AS_OF, function(itemString)
+      return names[itemString]
+    end).sections[1]
+
+    RecommendationTable.sort(holdings, { column = 1, descending = false })
+    assert.are.same({ "item:2", "item:1", "item:3" }, itemStrings(holdings))
+  end)
+end)
+
+describe("RecommendationTable.nextSort", function()
+  local holdings = build(entry()).sections[1] -- Item, Action, Qty, Price, Profit, Note
+
+  it("sorts a number column largest first on its first click, and flips it on the next", function()
+    local state = RecommendationTable.nextSort(holdings, holdings.sort, 3)
+    assert.are.same({ column = 3, descending = true }, state)
+    assert.are.same({ column = 3, descending = false }, RecommendationTable.nextSort(holdings, state, 3))
+  end)
+
+  it("flips the default column on its first click", function()
+    assert.are.same(
+      { column = 5, descending = false },
+      RecommendationTable.nextSort(holdings, { column = 5, descending = true }, 5)
+    )
+  end)
+
+  it("sorts a text column A to Z on its first click", function()
+    assert.are.same({ column = 1, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 1))
+    assert.are.same({ column = 6, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 6))
   end)
 end)

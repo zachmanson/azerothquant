@@ -41,6 +41,8 @@ local lines = {} -- pooled line buttons, reused on every redraw
 local headers = {} -- pooled column header buttons
 local tabs = {}
 local selected -- the title of the section on show
+local shown -- the section on show, as built, so a header click knows its columns
+local sorts = {} -- per section title, the sort picked by header clicks; empty on each open
 local openedByAuctionHouse = false
 local redrawQueued = false
 
@@ -177,7 +179,14 @@ local function drawLine(i, texts, widths, font, item, justify)
   line:Show()
 end
 
--- Gold column headers over the rows. Not clickable yet: sorting is #52.
+local redraw
+
+-- The sort the section on show is in: the last header click, or its default.
+local function activeSort(section)
+  return sorts[section.title] or section.sort
+end
+
+-- Gold column headers over the rows. A click sorts by that column (see nextSort).
 local function getHeader(c)
   local header = headers[c]
   if header then
@@ -186,13 +195,24 @@ local function getHeader(c)
   header = CreateFrame("Button", nil, frame.Inset, "ColumnDisplayButtonTemplate")
   header:SetHeight(HEADER_HEIGHT)
   header:SetNormalFontObject("GameFontNormal")
-  header:EnableMouse(false)
+  header.arrow = header:CreateTexture(nil, "OVERLAY")
+  header.arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
+  header.arrow:SetSize(9, 8)
+  header:SetScript("OnClick", function()
+    if not shown then
+      return
+    end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    sorts[shown.title] = RecommendationTable.nextSort(shown, activeSort(shown), c)
+    redraw()
+  end)
   headers[c] = header
   return header
 end
 
--- The Item header also spans the icon, so headers line up with the cells below them.
-local function drawHeaders(columns, widths)
+-- The Item header also spans the icon, so headers line up with the cells below them. The
+-- sorted column's header gets an arrow: down for largest (or Z) first, up for smallest.
+local function drawHeaders(columns, widths, sort)
   local x = SCROLL_LEFT
   for c = 1, MAX_COLUMNS do
     if columns and columns[c] then
@@ -202,6 +222,18 @@ local function drawHeaders(columns, widths)
       header:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", x, -4)
       header:SetWidth(width)
       header:SetText(columns[c])
+      if sort and sort.column == c then
+        header.arrow:ClearAllPoints()
+        header.arrow:SetPoint("LEFT", header:GetFontString(), "RIGHT", 3, -2)
+        if sort.descending then
+          header.arrow:SetTexCoord(0, 0.5625, 0, 1)
+        else
+          header.arrow:SetTexCoord(0, 0.5625, 1, 0)
+        end
+        header.arrow:Show()
+      else
+        header.arrow:Hide()
+      end
       header:Show()
       x = x + width
     elseif headers[c] then
@@ -226,7 +258,7 @@ local function drawTabs(view)
   end
 end
 
-local function redraw()
+function redraw()
   if not frame or not frame:IsShown() then
     return
   end
@@ -244,6 +276,7 @@ local function redraw()
   end
 
   drawTabs(view)
+  shown = nil
   if view.empty then
     frame:SetTitle("Recommendations")
     frame.header1:SetText("")
@@ -256,8 +289,11 @@ local function redraw()
     frame.header2:SetText(view.header[2])
     for _, section in ipairs(view.sections) do
       if section.title == selected then
+        shown = section
         local widths = widthsFor(section.title)
-        drawHeaders(section.columns, widths)
+        local sort = activeSort(section)
+        RecommendationTable.sort(section, sort)
+        drawHeaders(section.columns, widths, sort)
         if section.empty then
           add({ section.empty }, nil, "GameFontDisable", nil, "CENTER")
         end
@@ -389,6 +425,7 @@ local function show(byAuctionHouse)
   end
   restorePosition()
   scroll:SetVerticalScroll(0)
+  sorts = {} -- each open starts on the default sorts
   frame:Show()
 end
 

@@ -129,8 +129,23 @@ local function shoppingCells(r, name)
   return { name, action, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost), note }
 end
 
+-- Raw sort keys, column for column with the cells, so money never sorts as text. A nil key
+-- (not known) sorts last whichever way the column goes.
+local function holdingKeys(r, name, cells)
+  local profit = r.action ~= "Hold" and r.profit or nil
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, profit, cells[6]:lower() }
+end
+
+local function shoppingKeys(r, name, cells)
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.profit, r.cost, cells[7]:lower() }
+end
+
 local function predictionBuyCells(r, name)
   return { name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss) }
+end
+
+local function predictionBuyKeys(r, name, cells)
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss }
 end
 
 -- What an empty tab says, in place of its rows.
@@ -140,18 +155,61 @@ local NOTHING = {
   ["Prediction buys"] = "No Prediction buys right now",
 }
 
-local function section(title, columns, rows, cells, nameOf)
-  local out = { title = title, columns = columns, rows = {} }
+-- Orders a section's rows by state.column, largest first when state.descending. Rows
+-- without a key for that column go last. Ties go largest Price x Qty first (so Holds,
+-- whose Profit is unknown, line up by the gold they tie up), then in the Brain's order.
+function RecommendationTable.sort(section, state)
+  local c = state.column
+  table.sort(section.rows, function(a, b)
+    local ka, kb = a.keys[c], b.keys[c]
+    if ka ~= kb then
+      if ka == nil or kb == nil then
+        return kb == nil
+      end
+      if state.descending then
+        return ka > kb
+      end
+      return ka < kb
+    end
+    if a.worth ~= b.worth then
+      return a.worth > b.worth
+    end
+    return a.order < b.order
+  end)
+end
+
+-- Columns sorted by their text. A first click sorts these A to Z and the rest largest first.
+local TEXT_COLUMNS = { Item = true, Action = true, Note = true, Prediction = true }
+
+-- The sort after a click on a column header: the clicked column's first direction, or the
+-- other direction if it's the column already sorted by.
+function RecommendationTable.nextSort(section, state, column)
+  if state.column == column then
+    return { column = column, descending = not state.descending }
+  end
+  return { column = column, descending = not TEXT_COLUMNS[section.columns[column]] }
+end
+
+local function section(title, columns, rows, cells, keys, default, nameOf)
+  local out = { title = title, columns = columns, rows = {}, sort = default }
   local folded = 0
   for _, r in ipairs(rows) do
     if RecommendationTable.lowValue(r) then
       folded = folded + 1
     else
       local name = nameFor(r.itemKey, nameOf)
-      out.rows[#out.rows + 1] =
-        { itemString = itemString(r.itemKey), cells = cells(r, name), tooltip = tooltip(r, nameOf) }
+      local rowCells = cells(r, name)
+      out.rows[#out.rows + 1] = {
+        itemString = itemString(r.itemKey),
+        cells = rowCells,
+        keys = keys(r, name, rowCells),
+        worth = (r.price or 0) * (r.quantity or 0),
+        order = #out.rows + 1,
+        tooltip = tooltip(r, nameOf),
+      }
     end
   end
+  RecommendationTable.sort(out, default)
   out.tab = title .. " (" .. #out.rows .. ")"
   if #out.rows == 0 then
     out.empty = NOTHING[title]
@@ -185,6 +243,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         { "Item", "Action", "Qty", "Price", "Profit", "Note" },
         entry.holdings,
         holdingCells,
+        holdingKeys,
+        { column = 5, descending = true },
         nameOf
       ),
       section(
@@ -192,6 +252,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         { "Item", "Action", "Qty", "Max price", "Profit", "Cost", "Note" },
         entry.shoppingList,
         shoppingCells,
+        shoppingKeys,
+        { column = 5, descending = true },
         nameOf
       ),
       section(
@@ -199,6 +261,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         { "Item", "Prediction", "Qty", "Max price", "Max Loss" },
         entry.predictionBuys,
         predictionBuyCells,
+        predictionBuyKeys,
+        { column = 5, descending = false },
         nameOf
       ),
     },
