@@ -64,7 +64,7 @@ The share of real sales that Repost pairing wrongly calls Reposts, because an un
 _Avoid_: error rate, false-positive rate (too generic to say which mistake)
 
 **Probable Sale**:
-A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below the Fair Value of the Scan it was last seen in. Cancellations without a Repost still can't be told apart.
+A Disappearance treated as a sale because it could not have expired (the time between the two Scans was shorter than the least time its time-left bucket allows), it is not a Repost, and it was priced near or below the Fair Value of both Scans: the one it was last seen in and the one it went missing in (or only the first, if it sold the Item Key out). Cancellations without a Repost still can't be told apart.
 
 **Sale Event**:
 Every unit of one Item Key seen to sell in one Observation Window: all its Partial Sales and Probable Sales between those two Scans, whatever their prices. On Forever a buyer takes units cheapest-first across Listings and price points, and units that don't stack are one Listing each, so one buyer's sweep shows up as many drops; counted apart, they'd make one buyer look like many. A Sale Event is usually one buyer but can be several, and Scans can't tell which (ADR-0012). Its size is the units that went, and its price is the dearest of them.

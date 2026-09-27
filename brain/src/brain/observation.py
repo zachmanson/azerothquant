@@ -185,14 +185,16 @@ def sell_rate_evidence(
     ]
     new = [n for n in listings(conn, market) if n.first_seen in window_ends]
     pairing = _pair_reposts(candidates, new)
-    # Priced by the Scan it was last seen in, not today's: a sale is judged against the
-    # market it sold into.
-    fair_value_in = {
-        at: fair_values(conn, market, config, at=at) for at in {d.last_seen for d in pairing.sales}
-    }
+    # Priced by the Scans either side of the sale, not today's: a sale is judged against
+    # the market it sold into. The lower Fair Value wins, since a buyer paying well over
+    # what was up when it went missing is the unlikely story (#74). If it sold the Item
+    # Key out, only the Scan it was last seen in has a Fair Value.
+    scans_either_side = {at for d in pairing.sales for at in (d.last_seen, d.gone_at)}
+    fair_value_in = {at: fair_values(conn, market, config, at=at) for at in scans_either_side}
 
     def priced_like_a_sale(d: Disappearance) -> bool:
-        fair_value = fair_value_in[d.last_seen][d.item_key]
+        last_seen = fair_value_in[d.last_seen][d.item_key]
+        fair_value = min(last_seen, fair_value_in[d.gone_at].get(d.item_key, last_seen))
         return d.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
 
     probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]

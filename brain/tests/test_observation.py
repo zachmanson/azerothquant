@@ -279,7 +279,7 @@ def test_a_disappearance_reposted_cheaper_is_not_a_probable_sale(db):
 
 def test_a_new_listing_explains_only_one_disappearance_and_the_cheapest_stays_a_sale(db):
     # The 60 is the Repost; buyers clear the cheapest first, so the 50 is the sale.
-    run(db, scan(T0, row(unit=50), row(unit=60)), scan(T0 + 20 * MINUTE, row(unit=40)))
+    run(db, scan(T0, row(unit=50), row(unit=60)), scan(T0 + 20 * MINUTE, row(unit=45)))
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
@@ -425,6 +425,37 @@ def test_the_price_check_uses_fair_value_from_the_scan_the_listing_was_last_seen
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert sales(evidence) == [(LINEN_KEY, 115, 1)]
+
+
+def test_a_probable_sale_is_also_priced_against_fair_value_in_the_scan_it_went_missing_in(db):
+    # Fair Value was 100 when the 115 was last seen, but by the Scan it went missing in
+    # 10 units at 50 were up (Fair Value 50). A buyer paying 115 while 50s were up is the
+    # unlikely story, so it isn't a sale (#74).
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=115)),
+        scan(T0 + 20 * MINUTE, row(quantity=10, unit=100), row(quantity=10, unit=50)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert sales(evidence) == []
+
+
+def test_a_probable_sale_that_sold_out_its_item_key_is_priced_by_the_scan_it_was_last_seen_in(
+    db,
+):
+    # Nothing of the Item Key is up in the Scan it went missing in, so only the Fair
+    # Value it was last seen at (100) can judge it.
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), row(unit=115)),
+        scan(T0 + 20 * MINUTE),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert sales(evidence) == [(LINEN_KEY, 115, 11)]
 
 
 def test_fair_value_counts_units_as_they_stood_in_that_scan(db):

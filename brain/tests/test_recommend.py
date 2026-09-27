@@ -571,12 +571,15 @@ def test_a_flip_to_sell_is_never_resold_above_the_dearest_sale(db):
 
 
 def test_a_flip_to_sell_keeps_its_resale_when_a_sale_was_dearer(db):
-    # A sale at 1100, above the 999 they're posted at once the 700s are bought.
+    # A sale at 1100, above the 999 they're posted at once the 700s are bought. The 700s
+    # come up after a gap too long to be an Observation Window, so they don't make the
+    # 1100 too dear to be a sale (#74).
     result = run(
         db,
         [
             scan(T0, row(quantity=20, unit=1000), row(unit=1100)),
-            scan(T0 + HOUR, row(quantity=20, unit=1000), row(quantity=2, unit=700)),
+            scan(T0 + HOUR, row(quantity=20, unit=1000)),
+            scan(T0 + 3 * HOUR, row(quantity=20, unit=1000), row(quantity=2, unit=700)),
         ],
         [character_read(money=GOLD)],
     )
@@ -806,11 +809,13 @@ def test_the_sale_size_prior_fades_as_sale_events_build_up():
 def one_buyer_takes_a_20_stack(*latest_rows):
     """A buyer takes a whole 20-stack of Linen in one 30-minute Observation Window: raw,
     960 a day, 120 in the 3 h horizon. Linen is usually listed 2 at a time, so the typical
-    Sale Event is 2 units. A deep Market at 1000."""
+    Sale Event is 2 units. A deep Market at 1000. `latest_rows` come up after a gap too
+    long to be an Observation Window, so they don't price the 20-stack out (#74)."""
     stacks_of_2 = [row(quantity=2, unit=1000) for _ in range(50)]
     return [
         scan(T0, row(quantity=20, unit=1000), *stacks_of_2),
-        scan(T0 + 30 * MINUTE, *stacks_of_2, *latest_rows),
+        scan(T0 + 30 * MINUTE, *stacks_of_2),
+        scan(T0 + 3 * HOUR, *stacks_of_2, *latest_rows),
     ]
 
 
