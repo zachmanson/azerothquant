@@ -14,11 +14,15 @@ from brain.cli import RebuildError, run_import, run_rebuild, run_recommend, save
 from brain.config import Config, Era, Install
 from brain.history import (
     Holding,
+    KnownRecipe,
     Market,
+    Reagent,
     holdings,
     import_character_reads,
     import_scans,
+    known_recipes,
     listings,
+    merchant_costs,
     open_history,
     outcomes,
     pooled_gold,
@@ -283,6 +287,44 @@ def test_vendor_prices_come_back_the_same_from_the_archive(tmp_path):
 
     with closing(open_history(config.history_path)) as conn:
         assert vendor_prices(conn, Era.BETA) == expected
+
+
+def test_known_recipes_and_merchant_costs_come_back_the_same_from_the_archive(tmp_path):
+    # JSON turns the professionID and itemID keys into strings; that mustn't matter.
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+
+    def tailoring(recipe_id, output, bind_type, *reagents):
+        return KnownRecipe(
+            character="Kash-Patel",
+            profession_id=197,
+            recipe_id=recipe_id,
+            output_item_id=output,
+            quantity_min=1,
+            quantity_max=1,
+            bind_type=bind_type,
+            cooldown=None,
+            read_at=1790000800,
+            reagents=tuple(Reagent(*r) for r in reagents),
+        )
+
+    expected_recipes = [
+        tailoring(2963, 2996, 0, (2589, 2)),
+        # Its output's bind type wasn't cached; the Optional reagent slot isn't kept.
+        tailoring(3915, 4344, None, (2996, 1), (2320, 1)),
+    ]
+    expected_costs = {2320: 10, 2604: 10 / 3}
+    run_import(config, [file])
+    with closing(open_history(config.history_path)) as conn:
+        assert known_recipes(conn, MARKET) == expected_recipes
+        assert merchant_costs(conn, MARKET) == expected_costs
+
+    run_rebuild(config)
+
+    with closing(open_history(config.history_path)) as conn:
+        assert known_recipes(conn, MARKET) == expected_recipes
+        assert merchant_costs(conn, MARKET) == expected_costs
 
 
 def test_rebuild_replaces_a_history_that_has_drifted_from_the_archive(tmp_path):

@@ -12,6 +12,7 @@ mail stays in the inbox until taken, so each Read is matched against the one bef
 """
 
 import logging
+import math
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -123,8 +124,17 @@ CREATE TABLE IF NOT EXISTS character_read (
     money INTEGER,             -- copper
     has_bank INTEGER NOT NULL, -- 0 or 1: the bank was opened that session
     bank_read_at INTEGER,      -- when the bank was last read while open
+    has_profession_list INTEGER NOT NULL DEFAULT 0, -- 0 or 1: the client said which
     UNIQUE (era, realm, character, read_at)
 );
+
+-- The professions a Character has, as of one Character Read that could say.
+CREATE TABLE IF NOT EXISTS character_profession (
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    profession_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS character_profession_by_read
+    ON character_profession (character_read_id);
 
 -- The items in one Character Read, one row per filled slot.
 CREATE TABLE IF NOT EXISTS character_item (
@@ -145,7 +155,49 @@ CREATE TABLE IF NOT EXISTS vendor_price (
     seen_at INTEGER NOT NULL,  -- requestedAt or readAt of the Scan or Read it came from
     PRIMARY KEY (era, item_id)
 );
+
+-- One row per profession window read carried on a Character Read (its professions map).
+CREATE TABLE IF NOT EXISTS known_profession (
+    id INTEGER PRIMARY KEY,
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    profession_id INTEGER NOT NULL,
+    read_at INTEGER NOT NULL   -- when the window was read; cooldowns are as of then
+);
+CREATE INDEX IF NOT EXISTS known_profession_by_read ON known_profession (character_read_id);
+
+-- The Known Recipes in one profession window read that make an item.
+CREATE TABLE IF NOT EXISTS known_recipe (
+    id INTEGER PRIMARY KEY,
+    known_profession_id INTEGER NOT NULL REFERENCES known_profession (id),
+    recipe_id INTEGER NOT NULL,
+    output_item_id INTEGER NOT NULL,
+    quantity_min INTEGER NOT NULL,
+    quantity_max INTEGER NOT NULL,
+    bind_type INTEGER,         -- the output's; NULL when the client hadn't cached it
+    cooldown REAL              -- seconds left as of known_profession.read_at; NULL if none
+);
+CREATE INDEX IF NOT EXISTS known_recipe_by_profession ON known_recipe (known_profession_id);
+
+-- A Known Recipe's Basic reagent slots. Optional ones aren't kept.
+CREATE TABLE IF NOT EXISTS known_recipe_reagent (
+    known_recipe_id INTEGER NOT NULL REFERENCES known_recipe (id),
+    item_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS known_recipe_reagent_by_recipe
+    ON known_recipe_reagent (known_recipe_id);
+
+-- What a merchant charged one Character for one unit, from one Character Read.
+CREATE TABLE IF NOT EXISTS merchant_cost (
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    item_id INTEGER NOT NULL,
+    cost REAL NOT NULL         -- copper per unit; fractional when sold in stacks
+);
+CREATE INDEX IF NOT EXISTS merchant_cost_by_read ON merchant_cost (character_read_id);
 """
+
+# Enum.CraftingReagentType.Basic: the reagents a craft always uses up.
+_BASIC_REAGENT = 1
 
 
 @dataclass(frozen=True)
@@ -153,6 +205,29 @@ class Market:
     realm: str
     faction: str
     era: Era
+
+
+@dataclass(frozen=True)
+class Reagent:
+    item_id: int
+    quantity: int
+
+
+@dataclass(frozen=True)
+class KnownRecipe:
+    """A recipe a Character knows that makes an item, as of the latest read of its
+    profession window."""
+
+    character: str
+    profession_id: int
+    recipe_id: int
+    output_item_id: int
+    quantity_min: int
+    quantity_max: int
+    bind_type: int | None  # None when the client hadn't cached the output
+    cooldown: float | None  # seconds left as of read_at; None if it has none
+    read_at: int  # when the profession window was read
+    reagents: tuple[Reagent, ...]  # Basic slots only
 
 
 @dataclass(frozen=True, order=True)
@@ -259,20 +334,21 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
-    _add_listing_item_name(conn)
+    _add_column(conn, "listing", "item_name", "TEXT")  # #17
+    _add_column(conn, "character_read", "has_profession_list", "INTEGER NOT NULL DEFAULT 0")
     return conn
 
 
-def _add_listing_item_name(conn: sqlite3.Connection) -> None:
-    """Add listing.item_name (#17) to a history made before it existed.
+def _add_column(conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+    """Add a column to a history made before it existed.
 
     CREATE TABLE IF NOT EXISTS leaves an existing table as it was. `brain rebuild` would
     fix that too, but a stale history shouldn't break `brain watch` in the meantime.
     """
-    columns = {name for _, name, *_ in conn.execute("PRAGMA table_info(listing)")}
-    if "item_name" not in columns:
+    columns = {name for _, name, *_ in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
         with conn:
-            conn.execute("ALTER TABLE listing ADD COLUMN item_name TEXT")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
 def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportReport:
@@ -629,13 +705,14 @@ def _import_character_read(
 ) -> None:
     bank = raw.get("bank")
     has_bank = isinstance(bank, list)
+    profession_ids = _profession_ids(raw.get("professionList"))
     faction, money = raw.get("faction"), raw.get("money")
     if not isinstance(faction, str) or not isinstance(money, int) or isinstance(money, bool):
         # Kept, with its items, but its gold can't be pooled.
         faction = money = None
     cursor = conn.execute(
         "INSERT OR IGNORE INTO character_read (era, realm, character, read_at, faction,"
-        " money, has_bank, bank_read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        " money, has_bank, bank_read_at, has_profession_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             era.value,
             raw["realm"],
@@ -645,6 +722,7 @@ def _import_character_read(
             money,
             has_bank,
             raw.get("bankReadAt") if has_bank else None,
+            profession_ids is not None,
         ),
     )
     if not cursor.rowcount:
@@ -672,6 +750,141 @@ def _import_character_read(
         " VALUES (?, ?, ?, ?, ?)",
         rows,
     )
+    conn.executemany(
+        "INSERT INTO character_profession (character_read_id, profession_id) VALUES (?, ?)",
+        [(read_id, profession_id) for profession_id in profession_ids or ()],
+    )
+    _import_known_recipes(conn, read_id, raw, report)
+    costs, unreadable = _merchant_costs(raw)
+    if unreadable:
+        report.warn(
+            f"Character Read at {raw['readAt']} for {raw['character']}: skipped"
+            f" {unreadable} Merchant Costs the Brain can't read."
+        )
+    conn.executemany(
+        "INSERT INTO merchant_cost (character_read_id, item_id, cost) VALUES (?, ?, ?)",
+        [(read_id, item_id, cost) for item_id, cost in costs.items()],
+    )
+
+
+def _merchant_costs(raw: dict) -> tuple[dict[int, float], int]:
+    """The Addon's itemID -> copper-per-unit map and how many entries couldn't be read.
+    Shaped like vendorPrices (see _vendor_prices), but a cost can be fractional."""
+    entries = raw.get("merchantCosts", {})  # left out when no merchant was visited
+    if isinstance(entries, list):
+        entries = dict(enumerate(entries, start=1))
+    if not isinstance(entries, dict):
+        return {}, 1
+    costs = {}
+    for item_id, cost in entries.items():
+        if isinstance(item_id, str) and item_id.isdigit():
+            item_id = int(item_id)
+        if _whole(item_id) and _number(cost):
+            costs[item_id] = cost
+    return costs, len(entries) - len(costs)
+
+
+def _profession_ids(entries: object) -> list[int] | None:
+    """The professionIDs in a Read's professionList, or None if it has none: the client
+    couldn't say, which isn't the same as having no professions."""
+    if not isinstance(entries, list):
+        return None
+    return [e["professionID"] for e in entries if isinstance(e, dict) and "professionID" in e]
+
+
+def _import_known_recipes(
+    conn: sqlite3.Connection, read_id: int, raw: dict, report: ImportReport
+) -> None:
+    source = f"Character Read at {raw['readAt']} for {raw['character']}"
+    for entry in _entries(raw.get("professions")):
+        profession_id, read_at = entry.get("professionID"), entry.get("readAt")
+        if not _whole(profession_id):
+            report.warn(f"{source}: skipped a profession with no professionID.")
+            continue
+        cursor = conn.execute(
+            "INSERT INTO known_profession (character_read_id, profession_id, read_at)"
+            " VALUES (?, ?, ?)",
+            (read_id, profession_id, read_at if _whole(read_at) else raw["readAt"]),
+        )
+        profession_row = cursor.lastrowid
+        recipes = entry.get("recipes")
+        for recipe in recipes if isinstance(recipes, list) else []:
+            try:
+                parsed = _known_recipe(recipe)
+            except ValueError as e:
+                report.warn(f"{source}: {e}")
+                continue
+            if parsed is None:
+                continue
+            fields, reagents = parsed
+            cursor = conn.execute(
+                "INSERT INTO known_recipe (known_profession_id, recipe_id, output_item_id,"
+                " quantity_min, quantity_max, bind_type, cooldown) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (profession_row, *fields),
+            )
+            conn.executemany(
+                "INSERT INTO known_recipe_reagent (known_recipe_id, item_id, quantity)"
+                " VALUES (?, ?, ?)",
+                [(cursor.lastrowid, item_id, quantity) for item_id, quantity in reagents],
+            )
+
+
+def _known_recipe(recipe: object) -> tuple[tuple, list[tuple[int, int]]] | None:
+    """(recipe_id, output_item_id, quantity_min, quantity_max, bind_type, cooldown) and
+    the Basic reagents of one recipe the Addon kept, None if it makes no item, or
+    ValueError if it can't be read."""
+    if not isinstance(recipe, dict):
+        raise ValueError(f"skipped a recipe that isn't a table: {recipe!r:.200}")
+    if recipe.get("outputItemID") is None:
+        # Makes no item (most enchants), so it can't be a Craft.
+        return None
+    fields = [recipe.get(k) for k in ("recipeID", "outputItemID", "quantityMin", "quantityMax")]
+    bind_type, cooldown, reagents = (
+        recipe.get("bindType"),
+        recipe.get("cooldown"),
+        recipe.get("reagents"),
+    )
+    if (
+        not all(_whole(f) for f in fields)
+        or not (bind_type is None or _whole(bind_type))
+        or not (cooldown is None or _number(cooldown))
+        or not isinstance(reagents, list)
+    ):
+        raise ValueError(f"skipped a recipe the Brain can't read: {recipe!r:.200}")
+    basic = []
+    for reagent in reagents:
+        if not isinstance(reagent, dict):
+            raise ValueError(f"skipped a recipe with a reagent it can't read: {recipe!r:.200}")
+        if reagent.get("reagentType") != _BASIC_REAGENT:
+            continue
+        item_id, quantity = reagent.get("itemID"), reagent.get("quantity")
+        if not _whole(item_id) or not _whole(quantity):
+            raise ValueError(f"skipped a recipe with a reagent it can't read: {recipe!r:.200}")
+        basic.append((item_id, quantity))
+    return (*fields, bind_type, cooldown), basic
+
+
+def _whole(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _number(value: object) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _entries(entries: object) -> list[dict]:
+    """The values of a map the Addon keys by number, however it arrived: a dict with int
+    keys from SavedVariables, string keys from the Archive's JSON, or a list when empty."""
+    if isinstance(entries, dict):
+        entries = list(entries.values())
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict)]
 
 
 def _nameable_read(raw: object) -> bool:
@@ -931,6 +1144,89 @@ def vendor_prices(conn: sqlite3.Connection, era: Era) -> dict[int, int]:
     """Copper a vendor pays for one unit, by itemID, as last seen in the Era."""
     rows = conn.execute("SELECT item_id, price FROM vendor_price WHERE era = ?", (era.value,))
     return dict(rows)
+
+
+def _market_characters(conn: sqlite3.Connection, market: Market) -> set[str]:
+    """The Characters in the Market, by the faction of each one's latest Character Read."""
+    rows = conn.execute(
+        f"SELECT character FROM ({_LATEST_CHARACTER_READS}) WHERE realm = ? AND faction = ?",
+        (market.era.value, market.realm, market.faction),
+    )
+    return {character for (character,) in rows}
+
+
+def merchant_costs(conn: sqlite3.Connection, market: Market) -> dict[int, float]:
+    """Copper per unit by itemID: each Character in the Market's latest-seen Merchant Cost
+    for it, then the lowest of those, since any of them could buy it."""
+    characters = _market_characters(conn, market)
+    latest: dict[tuple[str, int], tuple[int, float]] = {}
+    for character, item_id, read_at, cost in conn.execute(
+        "SELECT r.character, m.item_id, r.read_at, m.cost"
+        " FROM merchant_cost m JOIN character_read r ON m.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.era = ?",
+        (market.realm, market.era.value),
+    ):
+        key = (character, item_id)
+        if character in characters and (key not in latest or read_at > latest[key][0]):
+            latest[key] = (read_at, cost)
+    lowest: dict[int, float] = {}
+    for (_, item_id), (_, cost) in latest.items():
+        lowest[item_id] = min(cost, lowest.get(item_id, cost))
+    return lowest
+
+
+def known_recipes(conn: sqlite3.Connection, market: Market) -> list[KnownRecipe]:
+    """The current Known Recipes of every Character in the Market: for each profession,
+    the ones in the latest Character Read that has that profession's window read. Only
+    the professions the Character has as of its latest Read that could say count, so a
+    dropped profession's recipes don't come back."""
+    characters = _market_characters(conn, market)
+    has: dict[str, set[int]] = {}
+    for character, profession_id in conn.execute(
+        "SELECT r.character, c.profession_id FROM character_read r"
+        " LEFT JOIN character_profession c ON c.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.era = ? AND r.has_profession_list AND r.read_at = ("
+        " SELECT MAX(read_at) FROM character_read WHERE era = r.era AND realm = r.realm"
+        " AND character = r.character AND has_profession_list)",
+        (market.realm, market.era.value),
+    ):
+        has.setdefault(character, set()).add(profession_id)
+    current: dict[tuple[str, int], tuple[int, int, int]] = {}
+    for character, profession_id, row, read_at, character_read_at in conn.execute(
+        "SELECT r.character, p.profession_id, p.id, p.read_at, r.read_at"
+        " FROM known_profession p JOIN character_read r ON p.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.era = ?",
+        (market.realm, market.era.value),
+    ):
+        if character not in characters:
+            continue
+        key = (character, profession_id)
+        if key not in current or character_read_at > current[key][2]:
+            current[key] = (row, read_at, character_read_at)
+    result = []
+    for (character, profession_id), (row, read_at, _) in sorted(current.items()):
+        if profession_id not in has.get(character, ()):
+            continue
+        for recipe_row, *fields in conn.execute(
+            "SELECT id, recipe_id, output_item_id, quantity_min, quantity_max, bind_type,"
+            " cooldown FROM known_recipe WHERE known_profession_id = ? ORDER BY recipe_id",
+            (row,),
+        ):
+            reagents = conn.execute(
+                "SELECT item_id, quantity FROM known_recipe_reagent WHERE known_recipe_id = ?"
+                " ORDER BY rowid",
+                (recipe_row,),
+            )
+            result.append(
+                KnownRecipe(
+                    character,
+                    profession_id,
+                    *fields,
+                    read_at=read_at,
+                    reagents=tuple(Reagent(*r) for r in reagents),
+                )
+            )
+    return result
 
 
 def _held_item(entry: object) -> tuple[str, int, bool]:

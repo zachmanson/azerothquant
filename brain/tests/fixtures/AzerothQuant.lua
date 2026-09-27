@@ -150,6 +150,68 @@ AzerothQuantDB = {
 				[6948] = 0,
 			},
 			["vendorPricesMissing"] = 0,
+			["professions"] = {
+				[197] = {
+					["readAt"] = 1790000800,
+					["professionID"] = 197,
+					["professionName"] = "Tailoring",
+					["skillLevel"] = 75,
+					["maxSkillLevel"] = 150,
+					["recipes"] = {
+						{
+							["recipeID"] = 2963,
+							["name"] = "Bolt of Linen Cloth",
+							["recipeType"] = 1,
+							["outputItemID"] = 2996,
+							["quantityMin"] = 1,
+							["quantityMax"] = 1,
+							["bindType"] = 0,
+							["reagents"] = {
+								{
+									["itemID"] = 2589,
+									["quantity"] = 2,
+									["reagentType"] = 1,
+								}, -- [1]
+							},
+						}, -- [1]
+						{
+							["recipeID"] = 3915,
+							["name"] = "Brown Linen Shirt",
+							["recipeType"] = 1,
+							["outputItemID"] = 4344,
+							["quantityMin"] = 1,
+							["quantityMax"] = 1,
+							["reagents"] = {
+								{
+									["itemID"] = 2996,
+									["quantity"] = 1,
+									["reagentType"] = 1,
+								}, -- [1]
+								{
+									["itemID"] = 2320,
+									["quantity"] = 1,
+									["reagentType"] = 1,
+								}, -- [2]
+								{
+									["itemID"] = 7068,
+									["quantity"] = 1,
+									["reagentType"] = 0,
+								}, -- [3]
+							},
+						}, -- [2]
+					},
+				},
+			},
+			["professionList"] = {
+				{
+					["professionID"] = 197,
+					["professionName"] = "Tailoring",
+				}, -- [1]
+			},
+			["merchantCosts"] = {
+				[2320] = 10,
+				[2604] = 3.3333333333333335,
+			},
 		}, -- [1]
 		{
 			["readAt"] = 1790002000,
