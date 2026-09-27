@@ -27,3 +27,7 @@ The Addon now also records a Character Read on every logout and `/reload`: the C
 ## Amendment: Vendor Prices and JSON keys (#20)
 
 Scans and Character Reads now carry `vendorPrices`, a map from itemID to copper. It is the first map in the Addon's data keyed by numbers, and JSON keys are always strings, so the archived copy reads back as `{"2589": 10}` where SavedVariables had `[2589] = 10`. Nothing is lost, and the Brain reads both shapes (and an empty map, which SavedVariables gives as a list), so an import and a rebuild give the same history. "Verbatim" means as close as JSON allows, not byte-for-byte.
+
+## Amendment: Character Reads also carry Known Recipes (#18)
+
+Known Recipes can only be read while that profession's window is open, so they work like the bank: a `professions` map on the Character Read, keyed by `professionID`, holding the latest read of each profession whose window was opened that session. Every Read also records which professions the Character has, since "the latest Read that has this profession" would otherwise keep a dropped profession's recipes forever. On Forever the window is backed by `C_TradeSkillUI` (the Classic `GetTradeSkill*`/`GetCraft*` calls don't exist), and the Addon keeps learned recipes only, raw: output, quantity range, every reagent slot with its type, and cooldown. The Brain doesn't parse them yet. Nothing uses them until the Craft Action, and because the Archive keeps every Read verbatim, `brain rebuild` can fill whatever table the Craft Action turns out to need, rather than guessing its shape now.

@@ -109,7 +109,7 @@ _Avoid_: vendor price, buy price
 ## Crafting
 
 **Known Recipe**:
-A recipe the player already has, read from the profession window, with its output item, output quantity and reagents. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not.
+A recipe the player already has, read from the profession window, with its output item, output quantity and reagents. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes.
 
 **Learnable Recipe**:
 A recipe the player doesn't have yet but could get, and which costs something to acquire.
@@ -117,7 +117,7 @@ A recipe the player doesn't have yet but could get, and which costs something to
 ## Personal history
 
 **Character Read**:
-One Character's gold, faction and bag contents as they stood at logout or `/reload`, plus its bank if the player opened it that session (the bank can only be read while it's open, and can't change while it's closed). Kept in the Archive like Scans and Mailbox Reads.
+One Character's gold, faction and bag contents as they stood at logout or `/reload`, plus its bank if the player opened it that session (the bank can only be read while it's open, and can't change while it's closed), the Known Recipes of each profession whose window was opened that session (read the same way, only while open), and which professions the Character has, so a dropped profession's old recipes can be told apart. Kept in the Archive like Scans and Mailbox Reads.
 _Avoid_: snapshot, inventory
 
 **Disenchant Result**:
