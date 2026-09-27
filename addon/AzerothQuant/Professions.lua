@@ -29,7 +29,7 @@ end
 local isOpen = false
 local timer
 local latest = {} -- professionID -> KnownRecipes entry, the latest read this session
-local announced = {} -- professionID -> true once its chat line has been printed
+local announced = {} -- professionID -> recipe count in the last chat line printed
 local professionList -- { professionID, professionName } each, nil until read
 
 local function say(msg)
@@ -74,8 +74,10 @@ local function readWindow()
   end
   local entry = KnownRecipes.build(time(), profession, recipes)
   latest[entry.professionID] = entry
-  if not announced[entry.professionID] then
-    announced[entry.professionID] = true
+  -- The first read can come before the client has loaded the list, so say it again
+  -- whenever the count changes rather than only once.
+  if announced[entry.professionID] ~= #entry.recipes then
+    announced[entry.professionID] = #entry.recipes
     say(string.format("Read %d %s recipes.", #entry.recipes, entry.professionName or "?"))
   end
 end
