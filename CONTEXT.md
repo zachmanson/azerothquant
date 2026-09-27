@@ -103,13 +103,13 @@ The fixed gold an NPC merchant pays for one unit of an item. It belongs to the i
 _Avoid_: sell price, vendor value
 
 **Merchant Cost**:
-The gold an NPC merchant charges for one unit of an item it sells, such as thread or vials.
+The gold an NPC merchant charges for one unit of an item it sells, such as thread or vials. It is read from the merchant window while it's open, only for items sold for gold in unlimited stock, and belongs to the Character that saw it, since reputation discounts differ. The Decision Engine uses the lowest latest-seen one across a realm and faction's Characters.
 _Avoid_: vendor price, buy price
 
 ## Crafting
 
 **Known Recipe**:
-A recipe the player already has, read from the profession window, with its output item, output quantity and reagents. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes.
+A recipe the player already has, read from the profession window, with its output item, output quantity, reagents, cooldown and whether its output binds on pickup. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes.
 
 **Learnable Recipe**:
 A recipe the player doesn't have yet but could get, and which costs something to acquire.
@@ -117,7 +117,7 @@ A recipe the player doesn't have yet but could get, and which costs something to
 ## Personal history
 
 **Character Read**:
-One Character's gold, faction and bag contents as they stood at logout or `/reload`, plus its bank if the player opened it that session (the bank can only be read while it's open, and can't change while it's closed), the Known Recipes of each profession whose window was opened that session (read the same way, only while open), and which professions the Character has, so a dropped profession's old recipes can be told apart. Kept in the Archive like Scans and Mailbox Reads.
+One Character's gold, faction and bag contents as they stood at logout or `/reload`, plus its bank if the player opened it that session (the bank can only be read while it's open, and can't change while it's closed), the Merchant Costs of any merchant it visited that session, the Known Recipes of each profession whose window was opened that session (read the same way, only while open), and which professions the Character has, so a dropped profession's old recipes can be told apart. Kept in the Archive like Scans and Mailbox Reads.
 _Avoid_: snapshot, inventory
 
 **Disenchant Result**:
@@ -135,6 +135,10 @@ _Avoid_: strategy, play
 **Sell**:
 The Action of posting an item on the Auction House for other players to buy.
 _Avoid_: post, list, flip (a Flip is a buy)
+
+**Craft**:
+The Action of turning held reagents into a Known Recipe's output. A craft is worth doing when the output Holding's exit value with the crafted units added gains more than the consumed reagents' exit value loses. Missing merchant reagents are bought at their Merchant Cost, reagents Held under a Prediction are never used, and output is counted at the recipe's minimum quantity. The reagents are pooled across a realm and faction, and the Recommendation names the Character that knows the recipe. Enchants that make no item are not Crafts.
+_Avoid_: make, produce
 
 **Flip**:
 Buying on the Auction House because the price is below that Item Key's Best Exit Value after costs, whether the way out is Sell (buy cheap and repost) or Vendor (buy under Vendor Price). A Flip is a Shopping List Recommendation, not an Action.
@@ -161,7 +165,7 @@ A quantity of one Item Key acquired together at one cost, tracked until it is so
 _Avoid_: position, stack (a stack is an in-game bag concept)
 
 **Best Exit Value**:
-The most one unit of an Item Key is worth via its best Action, where Disenchant and Craft value their outputs at those outputs' own Best Exit Value. This is what makes chained Actions work.
+The most one unit of an Item Key is worth via its best Action, where Disenchant and Craft value their outputs at those outputs' own Best Exit Value. This is what makes chained Actions work. Craft doesn't chain yet: its outputs are valued by Sell and Vendor only (ADR-0008).
 _Avoid_: value, worth
 
 **Recommendation**:
