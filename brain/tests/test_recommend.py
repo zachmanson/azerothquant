@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
-from brain.history import Market, import_character_reads, import_scans, open_history
+from brain.history import (
+    Market,
+    import_character_reads,
+    import_mailbox_reads,
+    import_scans,
+    open_history,
+)
 from brain.predictions import Prediction
 from brain.recommend import Action, Row, recommend, sellable_units
 from brain.sell_rate import SellRate
@@ -87,8 +93,9 @@ def db():
     conn.close()
 
 
-def run(db, scans=(), reads=(), config=CONFIG, predictions=()):
+def run(db, scans=(), reads=(), config=CONFIG, predictions=(), mailbox_reads=()):
     import_scans(db, list(scans), Era.BETA, config)
+    import_mailbox_reads(db, list(mailbox_reads), Era.BETA, config)
     import_character_reads(db, list(reads), Era.BETA, config)
     return {r.market: r for r in recommend(db, config, list(predictions))}
 
@@ -674,3 +681,33 @@ def test_flips_are_bought_first_and_predictions_get_the_gold_left(db):
     assert result[MARKET].shopping_cost == 900
     [buy] = result[MARKET].prediction_buys
     assert (buy.quantity, buy.cost) == (5, 100)
+
+
+# --- Unlinked Sold Outcomes (#27) ---
+
+
+def sold_mail(name, price=500):
+    return {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": f"Auction successful: {name}",
+        "money": price,
+        "daysLeft": 29.5,
+        "invoice": {"invoiceType": "seller", "itemName": name, "bid": price, "count": 1},
+    }
+
+
+def test_the_market_counts_sold_outcomes_that_cant_be_linked_to_an_item_key(db):
+    named = row(own=True) | {"name": "Linen Cloth"}
+    mails = [sold_mail("Linen Cloth"), sold_mail("Tigerseye")]
+    mailbox_read = {
+        "readAt": T0 + HOUR,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "shownCount": 2,
+        "totalCount": 2,
+        "skippedMails": 0,
+        "mails": mails,
+    }
+    markets = run(db, [scan(T0, named)], [character_read()], mailbox_reads=[mailbox_read])
+    assert markets[MARKET].unlinked_sales == 1

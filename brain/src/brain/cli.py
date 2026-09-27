@@ -304,7 +304,8 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     return (
         f"{market}, as of the Scan at {as_of}\n"
-        f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n\n"
+        f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n"
+        f"Sold Outcomes not linked to an Item Key by name: {m.unlinked_sales}\n\n"
         f"Holdings\n{holdings}\n"
         f"Shopping List: {_money(m.gold)} to spend, {_money(m.shopping_cost)} in total\n"
         f"{shopping}\n"

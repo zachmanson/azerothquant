@@ -22,11 +22,15 @@ from brain.history import (
     character_markets,
     holdings,
     listings,
+    outcomes,
     pooled_gold,
+    purchases,
     scan_times,
     supply_at,
     vendor_prices,
 )
+from brain.lots import link_sales
+from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, observation_window_hours, sell_rates
 
@@ -98,6 +102,9 @@ class MarketRecommendations:
     # is unknown (ADR-0006).
     prediction_buys: list[Row] = field(default_factory=list)
     prediction_cost: int = 0
+    # Sold Outcomes whose item name gave no single Item Key, so they close no Lot
+    # (ADR-0007). If this isn't zero in practice, Character Reads should record names.
+    unlinked_sales: int = 0
 
 
 def recommend(
@@ -136,8 +143,9 @@ def recommend(
         rows = _hold(rows, active, bound, vendor, caps)
         # Most expected profit first; rows without a number to rank by go last.
         rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
+        market_listings = listings(conn, market)
         for_sale: dict[str, list[tuple[int, int]]] = {}
-        for listing in listings(conn, market):
+        for listing in market_listings:
             if listing.last_seen == now and not listing.own:
                 for_sale.setdefault(listing.item_key, []).append(
                     (listing.unit_buyout, listing.quantity)
@@ -176,6 +184,7 @@ def recommend(
         shopping = _shopping_list(buys, gold)
         shopping_cost = sum(r.cost for r in shopping)
         prediction_buys = _spend_on_predictions(hold_buys, gold - shopping_cost, caps)
+        linked = link_sales(outcomes(conn, market), market_listings, purchases(conn, market))
         result.append(
             MarketRecommendations(
                 market,
@@ -187,6 +196,7 @@ def recommend(
                 shopping_cost=shopping_cost,
                 prediction_buys=prediction_buys,
                 prediction_cost=sum(r.cost for r in prediction_buys),
+                unlinked_sales=sum(o.kind is MailKind.SOLD and o.item_key is None for o in linked),
             )
         )
     return result

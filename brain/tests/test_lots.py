@@ -1,5 +1,9 @@
-from brain.history import Outcome, Purchase
-from brain.lots import Lot, LotSale, lots
+from dataclasses import replace
+
+import pytest
+
+from brain.history import Listing, Outcome, Purchase
+from brain.lots import Lot, LotSale, link_sales, lots
 from brain.mailbox import MailKind
 
 LINEN = "2589:0"
@@ -86,3 +90,45 @@ def test_a_sale_closes_only_lots_of_its_own_item_key():
     )
     assert wool.sales == ()
     assert linen.open_units == 15
+
+
+def _own_listing(item_key, item_name, own=True):
+    return Listing(item_key, 50, own, 5, 4, 100, 100, item_name if own else None)
+
+
+def test_a_sold_outcome_is_linked_to_the_item_key_of_an_own_listing_with_its_name():
+    sold = replace(_sold(None, 5, 400, arrived_at=200), item_name="Linen Cloth")
+    [linked] = link_sales([sold], [_own_listing(LINEN, "Linen Cloth")], [])
+    assert linked.item_key == LINEN
+
+
+def _linen_sold():
+    return replace(_sold(None, 5, 400, arrived_at=200), item_name="Linen Cloth")
+
+
+def _returned(kind, item_key, item_name):
+    return Outcome("Alt", kind, item_name, item_key, 5, None, 0, 150, 150)
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "purchases"),
+    [
+        ([], [replace(_purchase(LINEN, 5, 250, arrived_at=50), item_name="Linen Cloth")]),
+        ([_returned(MailKind.CANCELLED, LINEN, "Linen Cloth")], []),
+        ([_returned(MailKind.EXPIRED, LINEN, "Linen Cloth")], []),
+    ],
+    ids=["won", "cancelled", "expired"],
+)
+def test_a_sold_outcome_is_linked_by_mail_that_carried_an_item_with_its_name(outcomes, purchases):
+    linked = link_sales([_linen_sold(), *outcomes], [], purchases)
+    assert [o.item_key for o in linked] == [LINEN] * len(linked)
+
+
+@pytest.mark.parametrize(
+    "listings",
+    [[], [_own_listing(LINEN, "Linen Cloth"), _own_listing(WOOL, "Linen Cloth")]],
+    ids=["no match", "several"],
+)
+def test_a_sold_outcome_whose_name_matches_no_item_key_or_several_stays_unlinked(listings):
+    [linked] = link_sales([_linen_sold()], listings, [])
+    assert linked.item_key is None

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, replace
 
-from brain.history import Outcome, Purchase
+from brain.history import Listing, Outcome, Purchase
 from brain.mailbox import MailKind
 
 
@@ -53,6 +53,28 @@ def lots(purchases: list[Purchase], outcomes: list[Outcome]) -> list[Lot]:
             result[i] = replace(lot, sales=(*lot.sales, sale))
             remaining -= units
     return result
+
+
+def link_sales(
+    outcomes: list[Outcome], listings: list[Listing], purchases: list[Purchase]
+) -> list[Outcome]:
+    """The Outcomes with each Sold one's Item Key found by its item name (ADR-0007)."""
+    # Only own Listings carry a name.
+    named = [(ls.item_name, ls.item_key) for ls in listings if ls.item_name is not None]
+    named += [(p.item_name, p.item_key) for p in purchases]
+    named += [(o.item_name, o.item_key) for o in outcomes if o.item_key is not None]
+    keys: dict[str, set[str]] = {}
+    for name, item_key in named:
+        keys.setdefault(name, set()).add(item_key)
+    return [
+        replace(o, item_key=_only(keys.get(o.item_name, set()))) if o.kind is MailKind.SOLD else o
+        for o in outcomes
+    ]
+
+
+def _only(item_keys: set[str]) -> str | None:
+    """The one Item Key, or None when there are none or several (Unlinked)."""
+    return next(iter(item_keys)) if len(item_keys) == 1 else None
 
 
 def _when(mail: Purchase | Outcome) -> int:
