@@ -1,6 +1,7 @@
 -- Shapes one Character Read (a Character's gold and bag contents at logout or /reload,
--- plus its bank and Known Recipes if the player opened them that session) into the table stored in
--- SavedVariables. Items are kept raw; the Brain derives Item Keys from the links.
+-- plus its bank, Known Recipes and Merchant Costs if the player opened them that session)
+-- into the table stored in SavedVariables. Items are kept raw; the Brain derives Item
+-- Keys from the links.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
@@ -59,7 +60,9 @@ end
 -- whose window was opened this session. Left out of the Read when there are none.
 -- professionList: the professions the Character has, { professionID, professionName }
 -- each, or nil if the client couldn't say.
-function CharacterRead.build(who, bagSlots, bank, professions, professionList)
+-- merchantCosts: MerchantCosts read from every merchant visited this session. Left out of
+-- the Read when there are none.
+function CharacterRead.build(who, bagSlots, bank, professions, professionList, merchantCosts)
   local prices, missing = vendorPrices({ bagSlots, bank and bank.slots or {} })
   return {
     readAt = who.readAt,
@@ -74,6 +77,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList)
     vendorPricesMissing = missing,
     professions = professions and next(professions) and professions or nil,
     professionList = professionList,
+    merchantCosts = merchantCosts and next(merchantCosts) and merchantCosts or nil,
   }
 end
 

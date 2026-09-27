@@ -12,7 +12,8 @@ local TAILORING = {
 local BOLT_LINK = "|cnIQ1:|Hitem:2996::::::::20:1490:::::::::|h[Bolt of Linen Cloth]|h|r"
 
 -- One recipe as Professions.lua reads it: GetRecipeInfo, GetRecipeSchematic(id, false),
--- GetRecipeItemLink and GetRecipeCooldown for that recipe ID.
+-- GetRecipeItemLink and GetRecipeCooldown for that recipe ID, plus the output item's
+-- bind type (GetItemInfo's 14th return).
 local BOLT_OF_LINEN = {
   info = { recipeID = 2963, name = "Bolt of Linen Cloth", learned = true, categoryID = 1, hyperlink = "..." },
   schematic = {
@@ -26,6 +27,7 @@ local BOLT_OF_LINEN = {
     },
   },
   link = BOLT_LINK,
+  bindType = 0,
 }
 
 describe("KnownRecipes.build", function()
@@ -47,6 +49,7 @@ describe("KnownRecipes.build", function()
           link = BOLT_LINK,
           quantityMin = 1,
           quantityMax = 1,
+          bindType = 0,
           reagents = { { itemID = 2589, quantity = 2, reagentType = 1 } },
         },
       },
@@ -116,5 +119,25 @@ describe("KnownRecipes.build", function()
     local entry = KnownRecipes.build(1790450000, TAILORING, { noSchematic, noInfo })
 
     assert.are.same({ { recipeID = 2963, name = "Bolt of Linen Cloth", link = BOLT_LINK } }, entry.recipes)
+  end)
+
+  it("records the output's bind type, and leaves it unknown when the item wasn't cached", function()
+    local PANTS_LINK = "|cnIQ1:|Hitem:4343::::::::20:1490:::::::::|h[Brown Linen Pants]|h|r"
+    local uncached = {
+      info = { recipeID = 3914, name = "Brown Linen Pants", learned = true },
+      schematic = { recipeType = 1, outputItemID = 4343, quantityMin = 1, quantityMax = 1 },
+      link = PANTS_LINK,
+    }
+    local soulbound = {
+      info = { recipeID = 12000, name = "Some Bind on Pickup Robe", learned = true },
+      schematic = { recipeType = 1, outputItemID = 10000, quantityMin = 1, quantityMax = 1 },
+      bindType = 1,
+    }
+
+    local entry = KnownRecipes.build(1790450000, TAILORING, { BOLT_OF_LINEN, uncached, soulbound })
+
+    assert.are.equal(0, entry.recipes[1].bindType)
+    assert.is_nil(entry.recipes[2].bindType)
+    assert.are.equal(1, entry.recipes[3].bindType)
   end)
 end)

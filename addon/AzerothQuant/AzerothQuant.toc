@@ -14,6 +14,7 @@ Scan.lua
 MailboxRead.lua
 CharacterRead.lua
 KnownRecipes.lua
+MerchantCosts.lua
 Prune.lua
 Nudge.lua
 
@@ -21,6 +22,7 @@ Nudge.lua
 Scanner.lua
 Mailbox.lua
 Professions.lua
+Merchant.lua
 Character.lua
 
 # SPIKE (#15), throwaway: /aq maildump. Delete with the file.

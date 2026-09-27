@@ -1,8 +1,8 @@
 -- WoW glue for Character Reads: on every logout or /reload (PLAYER_LOGOUT fires for
 -- both), records the Character's gold, bags and, if the bank was opened this session,
 -- the bank to AzerothQuantDB.characterReads, along with the Known Recipes and profession
--- list Professions.lua has kept. All shaping happens in CharacterRead.lua;
--- this file only talks to the WoW API. On load it also deletes the Reads the Brain has
+-- list Professions.lua has kept and the Merchant Costs Merchant.lua has. All shaping
+-- happens in CharacterRead.lua; this file only talks to the WoW API. On load it also deletes the Reads the Brain has
 -- imported (Prune.lua).
 --
 -- Gold and bags are read while in the world and kept in memory, like the bank: on a
@@ -15,6 +15,7 @@ local _, ns = ...
 local CharacterRead = ns.CharacterRead
 local Prune = ns.Prune
 local Professions = ns.Professions
+local Merchant = ns.Merchant
 
 -- The bank can only be read while it's open. Bag updates come in bursts (one per bag
 -- touched), so read once they have been quiet this long.
@@ -172,7 +173,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       character = table.concat({ UnitFullName("player") }, "-"),
       faction = UnitFactionGroup("player"),
       money = carried.money,
-    }, carried.slots, bank, Professions.latest(), Professions.list())
+    }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs())
     table.insert(db.characterReads, read)
   end
 end)

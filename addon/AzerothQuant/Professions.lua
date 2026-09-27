@@ -16,6 +16,16 @@ local QUIET_SECONDS = 0.5
 
 local ui = C_TradeSkillUI
 
+-- C_Item on newer clients (the Beta has no global GetItemInfo), the old global otherwise.
+local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+
+-- The output item's bind type (GetItemInfo's 14th return), nil if the recipe makes no
+-- item or the client hasn't cached it yet.
+local function bindType(schematic)
+  local itemID = schematic and schematic.outputItemID
+  return itemID and select(14, getItemInfo(itemID)) or nil
+end
+
 local isOpen = false
 local timer
 local latest = {} -- professionID -> KnownRecipes entry, the latest read this session
@@ -49,11 +59,13 @@ local function readWindow()
   for _, id in ipairs(ui.GetAllRecipeIDs() or {}) do
     local info = ui.GetRecipeInfo(id)
     if info and info.learned then
+      local schematic = ui.GetRecipeSchematic(id, false)
       recipes[#recipes + 1] = {
         info = info,
-        schematic = ui.GetRecipeSchematic(id, false),
+        schematic = schematic,
         link = ui.GetRecipeItemLink(id),
         cooldown = (ui.GetRecipeCooldown(id)),
+        bindType = bindType(schematic),
       }
     else
       -- Unlearned: KnownRecipes leaves it out, so skip the other calls.

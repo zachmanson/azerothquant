@@ -100,4 +100,18 @@ describe("CharacterRead.build", function()
     assert.is_nil(read.professions)
     assert.are.same({}, read.professionList)
   end)
+
+  it("includes the Merchant Costs of every merchant visited this session", function()
+    local costs = { [2320] = 10, [3371] = 4 }
+
+    local read = CharacterRead.build(WHO, {}, nil, {}, {}, costs)
+
+    assert.are.same(costs, read.merchantCosts)
+  end)
+
+  it("leaves Merchant Costs out when no merchant was visited this session", function()
+    local read = CharacterRead.build(WHO, {}, nil, {}, {}, {})
+
+    assert.is_nil(read.merchantCosts)
+  end)
 end)

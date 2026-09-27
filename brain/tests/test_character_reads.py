@@ -65,9 +65,10 @@ def test_every_character_read_is_archived_verbatim_and_imported(db, tmp_path):
     assert archived == [(Era.BETA, first), (Era.BETA, second)]
 
 
-def test_known_recipes_are_archived_but_change_nothing_the_brain_imports(db, tmp_path):
-    # Not parsed until the Craft Action (ADR-0005, #18 amendment); `brain rebuild` reads
-    # them back from the Archive then. Keyed by professionID, so JSON gives string keys.
+def test_known_recipes_and_merchant_costs_are_archived_but_change_nothing_imported(db, tmp_path):
+    # Not parsed until the Craft Action (ADR-0005, #18 amendment, #30); `brain rebuild`
+    # reads them back from the Archive then. Keyed by professionID and itemID, so JSON
+    # gives string keys.
     config = archived_config(tmp_path)
     recipe = {
         "recipeID": 2963,
@@ -76,14 +77,18 @@ def test_known_recipes_are_archived_but_change_nothing_the_brain_imports(db, tmp
         "outputItemID": 2996,
         "quantityMin": 1,
         "quantityMax": 1,
+        "bindType": 0,
         "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
     }
+    # Per unit, so a stack of 3 for 10 copper costs a fraction of a copper each.
+    merchant_costs = {2320: 10, 2604: 10 / 3}
     tailoring = {"readAt": T0 - 30, "professionID": 197, "professionName": "Tailoring"}
     profession_list = [{"professionID": 197, "professionName": "Tailoring"}]
     plain = character_read(T0, money=100, bags=[item(count=3)])
     with_recipes = plain | {
         "professions": {197: tailoring | {"recipes": [recipe]}},
         "professionList": profession_list,
+        "merchantCosts": merchant_costs,
     }
     plain_db = open_history(":memory:")
     import_character_reads(plain_db, [plain], Era.BETA, CONFIG)
@@ -99,6 +104,7 @@ def test_known_recipes_are_archived_but_change_nothing_the_brain_imports(db, tmp
     [(_, archived)] = Archive(config.archive_dir).character_reads()
     assert archived["professions"] == {"197": tailoring | {"recipes": [recipe]}}
     assert archived["professionList"] == profession_list
+    assert archived["merchantCosts"] == {"2320": 10, "2604": 10 / 3}
     plain_db.close()
 
 

@@ -30,10 +30,11 @@ end
 
 -- readAt: when the window was read.
 -- profession: what C_TradeSkillUI.GetBaseProfessionInfo returned.
--- recipes: one per recipe ID, { info, schematic, link, cooldown }, where info is
--- GetRecipeInfo, schematic is GetRecipeSchematic(id, false), link is GetRecipeItemLink
--- and cooldown is GetRecipeCooldown (seconds left, nil if none). Any of them can be
--- nil; with no info there's no telling whether it's learned, so it's left out.
+-- recipes: one per recipe ID, { info, schematic, link, cooldown, bindType }, where info
+-- is GetRecipeInfo, schematic is GetRecipeSchematic(id, false), link is GetRecipeItemLink,
+-- cooldown is GetRecipeCooldown (seconds left, nil if none) and bindType is the output
+-- item's (GetItemInfo's 14th return, nil until the client has cached the item). Any of
+-- them can be nil; with no info there's no telling whether it's learned, so it's left out.
 function KnownRecipes.build(readAt, profession, recipes)
   local kept = {}
   for _, r in ipairs(recipes) do
@@ -48,6 +49,7 @@ function KnownRecipes.build(readAt, profession, recipes)
         quantityMin = schematic.quantityMin,
         quantityMax = schematic.quantityMax,
         cooldown = r.cooldown,
+        bindType = r.bindType,
         reagents = reagents(r.schematic),
       }
     end
