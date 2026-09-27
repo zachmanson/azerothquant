@@ -31,13 +31,13 @@ local function entry(fields)
 end
 
 describe("RecommendationTable.build", function()
-  it("heads the table with the Market, the Scan's age, gold, totals and window hours", function()
+  it("heads the table in two lines: the Scan's age and window hours, then gold and totals", function()
     local view = build(entry(), AS_OF + 12 * 60 + 30)
 
     assert.are.equal("Classic Beta PvP Alliance", view.title)
-    assert.matches("^as of %d%d:%d%d, 12 min ago$", view.header[1])
+    assert.matches("^as of %d%d:%d%d, 12 min ago, Observation Window 0.3 h$", view.header[1])
     assert.are.equal("Gold 17g 54s 71c, Shopping List 12g 67s 93c, Prediction buys 0c", view.header[2])
-    assert.are.equal("Observation Window 0.3 h", view.header[3])
+    assert.are.equal(2, #view.header)
   end)
 
   it("formats the time with WoW's global date, since the client has no os library", function()
@@ -51,8 +51,8 @@ describe("RecommendationTable.build", function()
   end)
 
   it("gives older Scans' age in hours, then days", function()
-    assert.matches(", 5 h ago$", build(entry(), AS_OF + 5 * 3600 + 59 * 60).header[1])
-    assert.matches(", 3 days ago$", build(entry(), AS_OF + 3 * 86400 + 3600).header[1])
+    assert.matches(", 5 h ago, ", build(entry(), AS_OF + 5 * 3600 + 59 * 60).header[1])
+    assert.matches(", 3 days ago, ", build(entry(), AS_OF + 3 * 86400 + 3600).header[1])
   end)
 
   it("shows a Holding's columns with money formatted, and Margin, Sales and note in its tooltip", function()
@@ -121,7 +121,37 @@ describe("RecommendationTable.build", function()
     assert.are.equal("2 more (worth 0c or no data)", holdings.more)
   end)
 
-  it("shows the Shopping List under the Holdings", function()
+  it("labels each section's tab with its count of rows, leaving out the folded ones", function()
+    local view = build(entry({
+      holdings = {
+        { itemKey = "1", action = "Sell", quantity = 2, price = 100, profit = 190 },
+        { itemKey = "2", action = "Vendor", quantity = 1, price = 0, profit = 0 },
+      },
+    }))
+
+    assert.are.same({ "Holdings (1)", "Shopping List (0)", "Prediction buys (0)" }, {
+      view.sections[1].tab,
+      view.sections[2].tab,
+      view.sections[3].tab,
+    })
+  end)
+
+  it("says a section is empty when it has no rows to show, folded ones aside", function()
+    local view = build(entry({
+      holdings = { { itemKey = "2", action = "Vendor", quantity = 1, price = 0, profit = 0 } },
+      shoppingList = { { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, profit = 9450, cost = 3000 } },
+    }))
+
+    assert.are.same({ "Nothing in Holdings right now", "1 more (worth 0c or no data)" }, {
+      view.sections[1].empty,
+      view.sections[1].more,
+    })
+    assert.is_nil(view.sections[2].empty)
+    assert.are.equal("Nothing on the Shopping List right now", build(entry()).sections[2].empty)
+    assert.are.equal("No Prediction buys right now", view.sections[3].empty)
+  end)
+
+  it("shows the Shopping List under the Holdings, with Buy as a Flip to Sell's Action", function()
     local view = build(entry({
       shoppingList = {
         { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, profit = 9450.0, saleEvents = 4, cost = 3000 },
@@ -130,8 +160,8 @@ describe("RecommendationTable.build", function()
 
     local shopping = view.sections[2]
     assert.are.equal("Shopping List", shopping.title)
-    assert.are.same({ "Item", "Qty", "Max price", "Profit", "Cost", "Note" }, shopping.columns)
-    assert.are.same({ "item:9749", "3", "10s", "94s 50c", "30s", "" }, shopping.rows[1].cells)
+    assert.are.same({ "Item", "Action", "Qty", "Max price", "Profit", "Cost", "Note" }, shopping.columns)
+    assert.are.same({ "item:9749", "Buy", "3", "10s", "94s 50c", "30s", "" }, shopping.rows[1].cells)
     assert.are.same({ "Sales 4" }, shopping.rows[1].tooltip)
   end)
 
@@ -163,17 +193,17 @@ describe("RecommendationTable.build", function()
     }, view.sections[2].rows[1].tooltip)
   end)
 
-  it("sums up a Flip to Craft in its note: who crafts it and how many reagents to buy", function()
+  it("shows a Flip to Craft's Action as Craft, and sums up who crafts it and how many reagents in its note", function()
     local oneBuy = flipToCraft()
     oneBuy.buys[2] = nil
     local view = build(entry({ shoppingList = { flipToCraft(), oneBuy } }))
 
     local rows = view.sections[2].rows
     assert.are.same(
-      { "item:2996", "6", "", "45s", "12s 50c", "Craft on Kash-Patel, buy 2 reagents" },
+      { "item:2996", "Craft", "6", "", "45s", "12s 50c", "on Kash-Patel, 2 reagents" },
       rows[1].cells
     )
-    assert.are.equal("Craft on Kash-Patel, buy 1 reagent", rows[2].cells[6])
+    assert.are.equal("on Kash-Patel, 1 reagent", rows[2].cells[7])
   end)
 
   it("names a reagent not cached yet by its Item Key", function()
@@ -221,5 +251,20 @@ describe("RecommendationTable.build", function()
 
     assert.are.equal("No Recommendations yet: Scan, /reload, and let the Brain import.", view.empty)
     assert.is_nil(view.sections)
+  end)
+end)
+
+describe("RecommendationTable.openingTab", function()
+  it("lands on the Shopping List when the Auction House opens the table, whatever was saved", function()
+    assert.are.equal("Shopping List", RecommendationTable.openingTab("Holdings", true))
+  end)
+
+  it("reopens the last tab picked when /aq recs opens the table", function()
+    assert.are.equal("Prediction buys", RecommendationTable.openingTab("Prediction buys", false))
+  end)
+
+  it("opens the Shopping List when no tab was saved, or the saved one no longer exists", function()
+    assert.are.equal("Shopping List", RecommendationTable.openingTab(nil, false))
+    assert.are.equal("Shopping List", RecommendationTable.openingTab("Crafts", false))
   end)
 end)

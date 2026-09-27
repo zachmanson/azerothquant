@@ -33,11 +33,11 @@ end
 
 local function header(entry, now)
   return {
-    "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf),
+    "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf)
+      .. string.format(", Observation Window %.1f h", entry.windowHours),
     "Gold " .. Money.format(entry.gold)
       .. ", Shopping List " .. Money.format(entry.shoppingCost)
       .. ", Prediction buys " .. Money.format(entry.predictionCost),
-    string.format("Observation Window %.1f h", entry.windowHours),
   }
 end
 
@@ -114,22 +114,31 @@ function RecommendationTable.crafter(r)
 end
 
 -- A Flip to Craft's note names reagents by ID, which is no use in game: the summary keeps
--- the Character and leaves the reagents to the tooltip.
+-- the Character and leaves the reagents to the tooltip. The Action column says "Craft".
 local function flipToCraftNote(r)
   local character = RecommendationTable.crafter(r)
   local n = #r.buys
-  return "Craft" .. (character and (" on " .. character) or "") .. ", buy " .. n
+  return (character and ("on " .. character .. ", ") or "") .. n
     .. (n == 1 and " reagent" or " reagents")
 end
 
+-- A Shopping List row is bought to sell as is, or its reagents are bought to craft it.
 local function shoppingCells(r, name)
+  local action = r.buys and "Craft" or "Buy"
   local note = r.buys and flipToCraftNote(r) or r.note or ""
-  return { name, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost), note }
+  return { name, action, tostring(r.quantity), money(r.price), money(r.profit), money(r.cost), note }
 end
 
 local function predictionBuyCells(r, name)
   return { name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss) }
 end
+
+-- What an empty tab says, in place of its rows.
+local NOTHING = {
+  ["Holdings"] = "Nothing in Holdings right now",
+  ["Shopping List"] = "Nothing on the Shopping List right now",
+  ["Prediction buys"] = "No Prediction buys right now",
+}
 
 local function section(title, columns, rows, cells, nameOf)
   local out = { title = title, columns = columns, rows = {} }
@@ -143,10 +152,23 @@ local function section(title, columns, rows, cells, nameOf)
         { itemString = itemString(r.itemKey), cells = cells(r, name), tooltip = tooltip(r, nameOf) }
     end
   end
+  out.tab = title .. " (" .. #out.rows .. ")"
+  if #out.rows == 0 then
+    out.empty = NOTHING[title]
+  end
   if folded > 0 then
     out.more = folded .. " more (worth 0c or no data)"
   end
   return out
+end
+
+-- The tab the table opens on. The AH is where the Shopping List gets bought, so opening
+-- there always lands on it; /aq recs reopens the tab last picked (saved as its title).
+function RecommendationTable.openingTab(saved, byAuctionHouse)
+  if byAuctionHouse or not NOTHING[saved] then
+    return "Shopping List"
+  end
+  return saved
 end
 
 function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
@@ -167,7 +189,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
       ),
       section(
         "Shopping List",
-        { "Item", "Qty", "Max price", "Profit", "Cost", "Note" },
+        { "Item", "Action", "Qty", "Max price", "Profit", "Cost", "Note" },
         entry.shoppingList,
         shoppingCells,
         nameOf
