@@ -86,20 +86,65 @@ class Row:
 
 
 @dataclass(frozen=True)
-class _Buy:
-    """Units of one Listing worth buying, and the Action to take them out by."""
+class _VendorBuy:
+    """Units of one Listing worth buying to Vendor. Each pays on its own."""
 
     item_key: str
-    action: Action
     unit_buyout: int
     quantity: int
     unit_profit: float
-    sale_events: int | None = None
-    post_at: float | None = None  # a Flip to Sell's resale, before the cut
 
     @property
     def per_gold(self) -> float:
         return self.unit_profit / self.unit_buyout
+
+
+@dataclass(frozen=True)
+class _SellRun:
+    """A run of the cheapest Listings of an Item Key bought to Sell, posted at `post_at`
+    once they're gone, whose every unit clears the Flip margin."""
+
+    units: Supply
+    post_at: float
+    profit: float
+
+    @property
+    def cost(self) -> int:
+        return sum(unit * quantity for unit, quantity in self.units)
+
+    @property
+    def quantity(self) -> int:
+        return sum(quantity for _, quantity in self.units)
+
+    @property
+    def dearest(self) -> int:
+        """The highest unit buyout paid, the run's last Listing."""
+        return self.units[-1][0]
+
+
+@dataclass(frozen=True)
+class _FlipToSell:
+    """An Item Key's Flip to Sell: every run of its cheapest Listings that clears the
+    Flip margin, cheapest first. It's bought whole or as the best run that fits, never
+    split into units, since a unit's profit rests on the rest of its run (ADR-0011)."""
+
+    item_key: str
+    runs: tuple[_SellRun, ...]
+    sale_events: int
+
+    @property
+    def whole(self) -> _SellRun:
+        """The run that makes the most profit, the one bought when gold is no object."""
+        return max(self.runs, key=lambda run: run.profit)
+
+    @property
+    def per_gold(self) -> float:
+        return self.whole.profit / self.whole.cost
+
+    def fitting(self, gold: float) -> _SellRun | None:
+        """The run that makes the most profit on no more than `gold`, if any."""
+        runs = [run for run in self.runs if run.cost <= gold]
+        return max(runs, key=lambda run: run.profit) if runs else None
 
 
 @dataclass(frozen=True)
@@ -354,7 +399,7 @@ def _valuer(
     market: Market,
     at: int | None,
     under: set[str] = frozenset(),
-) -> tuple["_Valuer", list[_Buy]]:
+) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, which held units are priced after (#64). Item Keys `under` a
     Prediction aren't Flipped."""
@@ -382,7 +427,8 @@ def _valuer(
     ]
     flipped: dict[str, Supply] = {}
     for b in buys:
-        flipped.setdefault(b.item_key, []).append((b.unit_buyout, b.quantity))
+        units = b.whole.units if isinstance(b, _FlipToSell) else [(b.unit_buyout, b.quantity)]
+        flipped.setdefault(b.item_key, []).extend(units)
     return _Valuer(supply, others, flipped, rates, vendor, merchant, cut, config), buys
 
 
@@ -1055,7 +1101,7 @@ def _flips(
     merchant_cost: float | None,
     cut: float,
     config: Config,
-) -> list[_Buy]:
+) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
 
@@ -1063,15 +1109,15 @@ def _flips(
     the cheapest other player's Listing left once they're bought (`_post_at`), so they
     sell first. A cheap Listing that would undercut the resale is worth buying through,
     so every run of the cheapest offers is tried, and the one with the most profit whose
-    every unit clears the Flip margin is bought (#62). The resale is never above the
+    every unit clears the Flip margin is bought (#62); the shorter runs that clear it are
+    kept for when gold can't buy that one (ADR-0011). The resale is never above the
     dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
     taken at its word (#41), nor above what a merchant charges for it (#63). Nothing is
     bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
     (#57). Anything else under the Vendor Price is bought to Vendor.
     """
     offers = sorted(offers)
-    to_sell: Supply = []
-    best_profit = 0.0
+    runs: list[_SellRun] = []
     prefix: Supply = []
     room = _flip_room(rate, config)
     cap = _ceiling(rate.max_sale_price if rate else None, merchant_cost)
@@ -1081,24 +1127,21 @@ def _flips(
             break
         prefix = [*prefix, (unit, take)]
         room -= take
-        resale = _resale(supply, offers, prefix, cut, config, cap)
+        post_at = _post_at(supply, offers, prefix, config, cap)
+        resale = None if post_at is None else post_at * (1 - cut)
         # Offers are cheapest first, so if the dearest unit clears the margin, all do.
         if not _resells(resale, unit, vendor_price, config):
             continue
-        profit = sum((resale - u) * n for u, n in prefix)
-        if profit > best_profit:
-            to_sell, best_profit = prefix, profit
-    buys = []
-    if to_sell:
-        post_at = _post_at(supply, offers, to_sell, config, cap)
-        resale = post_at * (1 - cut)
-        buys = [
-            _Buy(item_key, Action.SELL, unit, quantity, resale - unit, rate.sale_events, post_at)
-            for unit, quantity in to_sell
-        ]
+        runs.append(_SellRun(prefix, post_at, sum((resale - u) * n for u, n in prefix)))
+    buys: list[_VendorBuy | _FlipToSell] = []
+    to_sell: Supply = []
+    if runs:
+        flip = _FlipToSell(item_key, tuple(runs), rate.sale_events)
+        buys.append(flip)
+        to_sell = flip.whole.units
     if vendor_price is not None:
         buys += [
-            _Buy(item_key, Action.VENDOR, unit, quantity, vendor_price - unit)
+            _VendorBuy(item_key, unit, quantity, vendor_price - unit)
             for unit, quantity in _without(offers, to_sell)
             if unit < vendor_price
         ]
@@ -1262,15 +1305,16 @@ def _without(supply: Supply, bought: Supply) -> Supply:
 
 
 def _shopping_list(
-    buys: list[_Buy], crafts: list[_CraftBuy], gold: float
+    buys: list[_VendorBuy | _FlipToSell], crafts: list[_CraftBuy], gold: float
 ) -> list[tuple[Row, dict[str, Supply]]]:
     """The buys and Flips to Craft that fit in `gold`, most profit per gold spent first,
     as one row per Item Key and Action, or per recipe, in that order, each with the
     Auction House units it buys by Item Key.
 
-    Prices are still the ones worked out as if every Flip were bought; `_buy_what_fits`
-    reprices them. Once a Flip to Craft is left out, so are the later crafts of its
-    recipe, which were costed after it.
+    A Flip to Sell is ranked by its whole run and buys the most profitable run the gold
+    left covers, or nothing (ADR-0011). Prices are still the ones worked out as if every
+    Flip were bought; `_buy_what_fits` reprices them. Once a Flip to Craft is left out,
+    so are the later crafts of its recipe, which were costed after it.
     """
     rows: dict[object, Row] = {}
     taken: dict[object, dict[str, Supply]] = {}
@@ -1296,6 +1340,24 @@ def _shopping_list(
             for key, units in buy.asks.items():
                 taken.setdefault(recipe_id, {}).setdefault(key, []).extend(units)
             continue
+        if isinstance(buy, _FlipToSell):
+            run = buy.fitting(gold)
+            if run is None:
+                continue
+            gold -= run.cost
+            key = (buy.item_key, Action.SELL)
+            taken[key] = {buy.item_key: run.units}
+            rows[key] = Row(
+                buy.item_key,
+                Action.SELL,
+                run.quantity,
+                run.dearest,
+                run.profit,
+                post_at=run.post_at,
+                sale_events=buy.sale_events,
+                cost=run.cost,
+            )
+            continue
         quantity = min(buy.quantity, int(gold // buy.unit_buyout))
         if not quantity:
             continue
@@ -1303,17 +1365,15 @@ def _shopping_list(
         buy = replace(buy, quantity=quantity)
         cost = buy.unit_buyout * buy.quantity
         profit = buy.unit_profit * buy.quantity
-        key = (buy.item_key, buy.action)
+        key = (buy.item_key, Action.VENDOR)
         taken.setdefault(key, {}).setdefault(buy.item_key, []).append((buy.unit_buyout, quantity))
         if key not in rows:
             rows[key] = Row(
                 buy.item_key,
-                buy.action,
+                Action.VENDOR,
                 buy.quantity,
                 buy.unit_buyout,
                 profit,
-                post_at=buy.post_at,
-                sale_events=buy.sale_events,
                 cost=cost,
             )
         else:
@@ -1339,12 +1399,17 @@ def _resells(resale: float | None, unit: float, vendor_price: int | None, config
 
 
 def _buy_what_fits(
-    valuer: _Valuer, buys: list[_Buy], crafts: list[_CraftBuy], gold: float, config: Config
+    valuer: _Valuer,
+    buys: list[_VendorBuy | _FlipToSell],
+    crafts: list[_CraftBuy],
+    gold: float,
+    config: Config,
 ) -> tuple[list[Row], _Valuer]:
     """The Shopping List `gold` buys, and the Valuer priced after only what it buys
     (ADR-0010). `valuer`, and so the Shopping List's choice, assumed every Flip bought.
     In one pass, each Flip to Sell is reposted under what the Shopping List leaves and
-    dropped if it no longer resells; its gold isn't spent on another Flip."""
+    dropped if it no longer resells; its gold isn't spent on another Flip. Since a Flip
+    to Sell is already priced on the run it buys (ADR-0011), that drop is a safety net."""
     chosen = _shopping_list(buys, crafts, gold)
     after = valuer.after(_bought(chosen))
     kept = [

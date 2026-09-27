@@ -19,3 +19,5 @@ At a past Scan (Best Exit Value for Grades and for units held when a Prediction 
 - The Shopping List is not always the best one possible under the real prices: a Flip left out on the optimistic numbers might have beaten one that got in. The error is far smaller than pricing against walls nobody buys.
 - A dropped Flip's gold can end up unspent when no Prediction buy wants it.
 - A Flip cut short by gold now posts under the first Listing it didn't buy, not the one the full Flip would have reached.
+
+Superseded in part by ADR-0011: a Flip to Sell is no longer cut short by gold, since the Shopping List buys it whole or as the best run the gold covers.

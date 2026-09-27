@@ -244,9 +244,10 @@ def test_held_units_undercut_what_is_left_once_the_flips_are_bought(db):
     assert (flip.quantity, flip.post_at) == (2, 999)
 
 
-def test_a_flip_cut_short_by_gold_posts_under_the_first_listing_it_didnt_buy(db):
-    # #68: all 5 would post under the 3g wall, but the gold buys only the 3 at 1g, so the
-    # 1g 50s are still there. The Flip and the held unit post at 1g 49s 99c.
+def test_a_flip_the_gold_cant_buy_whole_buys_the_best_run_that_fits(db):
+    # #68, ADR-0011: all 5 would post under the 3g wall, but the gold buys only the 3 at
+    # 1g, which still clear the margin under the 1g 50s. The Flip and the held unit post
+    # at 1g 49s 99c.
     result = run(
         db,
         selling_two_linen_an_hour(
@@ -262,10 +263,10 @@ def test_a_flip_cut_short_by_gold_posts_under_the_first_listing_it_didnt_buy(db)
     assert (sell.action, sell.price) == (Action.SELL, 14999)
 
 
-def test_a_flip_cut_short_by_gold_under_the_margin_there_is_dropped(db):
-    # #68: all 5 clear the margin under the 3g wall, but the gold buys only the 3 at 1g,
-    # and posted under the 1g 10s they'd make 4s 49c each, short of the 20%. The Flip is
-    # dropped and spends nothing, so the held unit posts under the 1g Listings.
+def test_a_flip_with_no_run_the_gold_covers_that_clears_the_margin_is_skipped(db):
+    # #68, ADR-0011: all 5 clear the margin under the 3g wall, but the gold buys only the
+    # 3 at 1g, and posted under the 1g 10s they'd make 4s 49c each, short of the 20%. The
+    # Flip is skipped and spends nothing, so the held unit posts under the 1g Listings.
     result = run(
         db,
         selling_two_linen_an_hour(
@@ -278,6 +279,36 @@ def test_a_flip_cut_short_by_gold_under_the_margin_there_is_dropped(db):
     assert result[MARKET].shopping_cost == 0
     [sell] = result[MARKET].holdings
     assert (sell.action, sell.price) == (Action.SELL, 9999)
+
+
+def test_a_flip_to_sell_is_ranked_whole_so_one_the_gold_cant_finish_leaves_it_to_others(db):
+    # #70: each 1g Linen makes 1.85 per gold if all 5 are bought and posted under the 3g
+    # wall, but the 3g the player has buys only the 3 at 1g, which clear no margin under
+    # the 1g 10s. Ranked whole, Linen is skipped and the Ore (0.9 per gold) gets the gold.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=30000), row(ORE, quantity=20, unit=1000)),
+            scan(
+                T0 + HOUR,
+                row(quantity=18, unit=30000),
+                row(quantity=3, unit=10000),
+                row(quantity=2, unit=11000),
+                row(ORE, quantity=18, unit=1000),
+                row(ORE, quantity=1, unit=500),
+            ),
+        ],
+        [character_read(money=30000, vendor_prices={2589: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.item_key, flip.action, flip.quantity, flip.post_at) == (
+        ORE_KEY,
+        Action.SELL,
+        1,
+        999,
+    )
+    assert flip.profit == pytest.approx(999 * 0.95 - 500)
 
 
 def test_everything_is_vendored_when_a_vendor_pays_more_than_a_sale_brings_in(db):
