@@ -4,6 +4,7 @@ import re
 import shutil
 import sqlite3
 from contextlib import closing
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,8 @@ from brain.history import (
     pooled_gold,
     vendor_prices,
 )
+from brain.predictions import Prediction
+from brain.recommend import grades
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 
@@ -235,6 +238,34 @@ def test_rebuilding_from_the_archive_gives_the_same_history_as_importing(tmp_pat
         # The fixture's Scans are from before #17: its own Listing has no name.
         assert [entry.item_name for entry in listings(conn, MARKET) if entry.own] == [None]
     assert not list(tmp_path.glob("*.rebuild*"))
+
+
+def test_grades_come_back_the_same_from_the_archive(tmp_path):
+    # Lots aren't stored (ADR-0007), so what a Prediction is graded on must be rebuilt from
+    # the Archive too: here the 52 Linen held when it was written, after the fixture's Reads.
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    linen = Prediction(
+        name="Linen spike",
+        reason="Tailoring quests",
+        item_keys=("2589",),
+        catalyst="Phase 2",
+        written=date(2026, 9, 22),
+        lapse=date(2026, 11, 17),
+        happened=date(2026, 9, 22),
+    )
+    now = 1_800_000_000  # long after it's due
+    run_import(config, [file])
+    with closing(open_history(config.history_path)) as conn:
+        imported = grades(conn, config, MARKET, [linen], now)
+
+    run_rebuild(config)
+
+    with closing(open_history(config.history_path)) as conn:
+        assert grades(conn, config, MARKET, [linen], now) == imported
+    [grade] = imported
+    assert grade.cost > 0
 
 
 def test_vendor_prices_come_back_the_same_from_the_archive(tmp_path):
@@ -473,5 +504,6 @@ happened = 2026-09-22
     text = run_recommend(config)
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
-    assert "Graded Predictions: pooled return 0.0%, caps not halved" in text
+    # Breaking even is not a profit.
+    assert "Graded Predictions: 1 graded, 0 profitable, pooled return 0.0%, caps not halved" in text
     assert ["Linen spike", "2026-09-29", "0c", "2s 85c", "2s 85c", "0.0%"] in lines

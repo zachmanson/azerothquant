@@ -29,7 +29,7 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import Held, ended_at, link_sales, lots, settle, start_of
+from brain.lots import Held, Lot, ended_at, link_sales, lots, settle, start_of
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, observation_window_hours, sell_rates
@@ -55,8 +55,8 @@ class Row:
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
     note: str = ""
-    # The Shopping List's gold to spend on it, or for a Hold the gold it ties up: what
-    # letting the units go would bring today.
+    # The Shopping List's gold to spend on it, or for a Hold the gold it ties up: what its
+    # units cost, by their Lots or else what letting them go would bring today (_hold).
     cost: float | None = None
     prediction: str = ""  # the Prediction the Action depends on, if any
     # A Prediction buy's Max Loss for the whole quantity: what's lost if the Prediction is
@@ -166,7 +166,7 @@ def recommend(
         pooled = pooled_return(graded)
         caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
         bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
-        rows = _hold(rows, active, bound, vendor, caps)
+        rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
         # Most expected profit first; rows without a number to rank by go last.
         rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
         market_listings = listings(conn, market)
@@ -262,10 +262,7 @@ def grades(
     due = [p for p in predictions if ended_at(p) + config.sale_horizon_seconds <= now]
     if not due:
         return []
-    market_purchases = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), listings(conn, market), market_purchases)
-    held = held_at_writing(conn, config, market, predictions)
-    market_lots = lots(market_purchases, linked, predictions, held)
+    market_lots = _market_lots(conn, config, market, predictions)
     result = []
     for p in due:
         graded_at = ended_at(p) + config.sale_horizon_seconds
@@ -276,6 +273,31 @@ def grades(
             if units
         )
         result.append(Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost))
+    return result
+
+
+def _market_lots(
+    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+) -> list[Lot]:
+    market_purchases = purchases(conn, market)
+    linked = link_sales(outcomes(conn, market), listings(conn, market), market_purchases)
+    held = held_at_writing(conn, config, market, predictions)
+    return lots(market_purchases, linked, predictions, held)
+
+
+def _lot_costs(
+    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+) -> dict[tuple[str, str], list[tuple[float, int]]]:
+    """The open units of each Prediction's Lots and what each of them cost, oldest Lot
+    first, by (Prediction, Item Key)."""
+    if not predictions:
+        return {}
+    result: dict[tuple[str, str], list[tuple[float, int]]] = {}
+    for lot in _market_lots(conn, config, market, predictions):
+        if lot.prediction is not None and lot.open_units:
+            result.setdefault((lot.prediction, lot.item_key), []).append(
+                (lot.cost / lot.units, lot.open_units)
+            )
     return result
 
 
@@ -414,27 +436,32 @@ def _hold(
     bound: dict[str, int],
     vendor: dict[int, int],
     caps: _Caps,
+    lot_costs: dict[tuple[str, str], list[tuple[float, int]]],
 ) -> list[Row]:
     """`rows` with the units of each Prediction's Item Keys switched to Hold under it, as
     many as its caps allow.
 
-    Held units tie up what letting them go would bring today, so the ones with the
-    cheapest exit are Held first. Units without enough data to choose an exit count at
-    the Vendor Price, the least they'd bring, or nothing without one. Bound units can't be
+    Held units tie up what they cost: the open units of the Prediction's Lots what their
+    Lot cost (ADR-0007), and any beyond those what letting them go would bring today. The
+    cheapest are Held first. Units without enough data to choose an exit count at the
+    Vendor Price, the least they'd bring, or nothing without one. Bound units can't be
     sold after the Catalyst either, and are never Held.
     """
     taken: Counter[int] = Counter()  # units Held, by index into rows
     holds = []
     for p in predictions:
         units = []  # (gold per unit, index into rows, units that could be Held)
-        for i, r in enumerate(rows):
-            if r.item_key in p.item_keys:
-                n = r.quantity - (bound.get(r.item_key, 0) if r.action is Action.VENDOR else 0)
-                if r.profit is not None:
-                    value = r.profit / r.quantity
-                else:
-                    value = vendor.get(_item_id(r.item_key), 0)
-                units.append((value, i, n))
+        for item_key in p.item_keys:
+            today = []
+            for i, r in enumerate(rows):
+                if r.item_key == item_key:
+                    n = r.quantity - (bound.get(item_key, 0) if r.action is Action.VENDOR else 0)
+                    if r.profit is not None:
+                        value = r.profit / r.quantity
+                    else:
+                        value = vendor.get(_item_id(item_key), 0)
+                    today.append((value, i, n))
+            units += _costed(sorted(today), lot_costs.get((p.name, item_key), []))
         held: dict[str, Row] = {}
         for value, i, n in sorted(units):
             if value:
@@ -449,6 +476,28 @@ def _hold(
         holds += held.values()
     rest = [_fewer(r, r.quantity - taken[i]) for i, r in enumerate(rows) if r.quantity > taken[i]]
     return rest + holds
+
+
+def _costed(
+    today: list[tuple[float, int, int]], lot_costs: list[tuple[float, int]]
+) -> list[tuple[float, int, int]]:
+    """Today's (gold per unit, index into rows, units) with as many units as the open
+    Lots cover costed at their Lot's cost per unit instead, oldest Lot first."""
+    lots_left = list(lot_costs)
+    result = []
+    for value, i, n in today:
+        while n and lots_left:
+            cost, open_units = lots_left[0]
+            covered = min(n, open_units)
+            result.append((cost, i, covered))
+            n -= covered
+            if covered == open_units:
+                lots_left.pop(0)
+            else:
+                lots_left[0] = (cost, open_units - covered)
+        if n:
+            result.append((value, i, n))
+    return result
 
 
 def _fewer(row: Row, quantity: int) -> Row:

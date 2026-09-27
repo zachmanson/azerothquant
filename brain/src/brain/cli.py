@@ -318,8 +318,12 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
     if m.pooled_return is None:
         record = "Graded Predictions: none yet"
     else:
+        profitable = sum(g.proceeds + g.open_value > g.cost for g in m.grades)
         brake = "halved" if m.pooled_return < 0 else "not halved"
-        record = f"Graded Predictions: pooled return {_percent(m.pooled_return)}, caps {brake}"
+        record = (
+            f"Graded Predictions: {len(m.grades)} graded, {profitable} profitable, "
+            f"pooled return {_percent(m.pooled_return)}, caps {brake}"
+        )
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     return (
         f"{market}, as of the Scan at {as_of}\n"

@@ -547,6 +547,28 @@ def test_a_prediction_ends_when_its_catalyst_happens_or_it_lapses(db, ended, pre
     assert actions == ([Action.SELL, Action.VENDOR] if ended else [Action.HOLD])
 
 
+def test_units_held_since_a_prediction_was_written_tie_up_their_written_day_cost(db):
+    # Written the day after the first Scans, when the 10 Linen held would have brought 610
+    # (6 Sold at 95 and 4 Vendored at 10). Linen has since gone to 500, so letting them go
+    # today would bring 2890, but they tie up the 610. 15% of 41s fits 610, not 2890.
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    later = T0 + 3 * DAY
+    result = run(
+        db,
+        [
+            *selling_two_linen_an_hour(),
+            scan(later, row(quantity=20, unit=500)),
+            scan(later + HOUR, row(quantity=18, unit=500)),
+        ],
+        [character_read(item(count=10), money=4100, vendor_prices={2589: 10})],
+        predictions=[prediction(LINEN_KEY, written=written)],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.HOLD, 10, cost=6 * 95 + 4 * 10, prediction="Linen spike")
+    ]
+
+
 def test_held_units_over_the_cap_go_to_their_best_action_cheapest_exit_held_first(db):
     # 15% of 16s is 2s 40c. The 4 unbound units a vendor would take (10 each) fit first,
     # then 2 of the 6 that would Sell (95 each): 2s 30c. Bound units can't be sold after
@@ -880,6 +902,23 @@ def test_there_is_no_brake_unless_the_pooled_return_is_below_zero(db):
     assert result[MARKET].pooled_return == 0
     [hold] = [r for r in result[MARKET].holdings if r.action is Action.HOLD]
     assert hold.quantity == 6
+
+
+def test_units_bought_under_a_prediction_tie_up_their_price_and_the_rest_todays_exit(db):
+    # 10 Ore bought under it for 10s, and 2 more come from elsewhere (looted, say), which
+    # have no Lot: those tie up what a vendor pays today.
+    written = TODAY - timedelta(days=2)
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(ORE_LINK, count=12), money=GOLD, vendor_prices={2770: 10})],
+        predictions=[prediction(ORE_KEY, name="Ore spike", written=written)],
+        mailbox_reads=[ore_won(start_of(written) + 18 * HOUR, count=10, price=1000)],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(ORE_KEY, Action.HOLD, 12, cost=1000 + 2 * 10, prediction="Ore spike")
+    ]
 
 
 def test_with_nothing_graded_there_is_no_pooled_return(db):
