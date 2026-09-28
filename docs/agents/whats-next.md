@@ -1,3 +1,14 @@
+2026-09-28 (later 35): #100 FIXED and closed (97ce455), found with /diagnosing-bugs. Root cause confirmed with an in-game probe: taking a mail restarted the 2 s quiet timer, so the mail was gone before the Read. Now `MailboxVisit.lua` saves a Read on every update that changed the AH mail. Verified in game: a Magefist Gloves won mail taken right away became a Purchase. `brain rebuild` done, and `brain watch` restarted on current main.
+- Found on the client and fixed in the same commit: headers can show `Retrieving data` (no Read is saved then), and a taken mail lingers for a moment with nothing attached, which double-counted a Willow Belt sale (`parse_mail` now returns None for it). Also, a Read with any unreadable mail no longer marks mail taken, and `readAt` is bumped to stay increasing across visits (ADR-0005 amendment, CONTEXT.md "Mailbox Read").
+- Client facts (probe): MAIL_SHOW comes with 0 mails, and the first MAIL_INBOX_UPDATE ~0.3 s later has headers ready. Reading headers causes no update loop. MAIL_CLOSED did NOT show up in the probe log. An empty inbox fires no update. For probes, log to `AzerothQuantDB.<key>` and read SavedVariables after /reload, since chat only shows a few lines.
+- Parked on #85: `/reload` plus a mailbox visit with no Lua errors (the post-review glue change isn't run in game yet), and the #50 Paid tooltip. The data is verified (Magefist Gloves paid=12000, roi=-5%), but the gloves were sold before the tooltip was checked. It needs any held AH buy with a Holdings Sell/Vendor row.
+- Still parked: "show Paid on any held item with a Purchase Lot, whatever its row" (the user's "bought for" idea). File it only if the #50 line isn't enough once seen. Paid stays a hint (ADR-0003, sunk cost).
+- The Hunter's Muzzle Loader `Auction canceled` warning is NOT the mid-take case: it has money 1600 and no item. It's still unexplained, and still unfiled.
+
+Next, in order:
+1. Not at the PC: #76 Disenchant (ready-for-agent, spec on the issue), then #88, #77, #84.
+2. Next PC sitting: the two new #85 checks above, plus the rest of #85.
+
 2026-09-28 (later 34): PC CHECKS DONE for #95, #96 and #98, all closed. `brain watch` restarted (it wasn't running), then stopped for `brain rebuild` (26 Scans, 0 rejected, 2.5 min) and started again on current main.
 - #95: the client prints `Between 2 hrs and 12 hrs` / `Greater than 12 hrs`, so the defaults are now <30m, 30m-2h, 2-12h, 12-24h (740b0fe; bucket 4 capped at 24 h, the longest Forever post).
 - #96: PASS on the Willow Belt of the Sorcerer browse row.
