@@ -1,3 +1,13 @@
+2026-09-28 (later 23): FILED #90 (needs-triage) from user feedback. Beta Prior: for about the first 2 weeks of Live, show a Beta price column next to the live numbers. It's a reference only, "not gospel", and gets dropped once Live history builds up. Beta Prior exists only as a CONTEXT.md term, and no code reads Beta data in Live. The open questions are on the issue: which number, absolute vs Live/Beta-scaled, display-only vs engine nudge, the cutoff rule, and Beta->Live Market mapping. It must land before Live (Nov 4). The user's message was cut off, so ask whether they had more to add.
+
+Next, in order (none need the PC):
+1. /grilling #90 (it has a Nov 4 deadline; the grill is short).
+2. #84 build (/tdd), then /code-review + commit.
+3. #87 build (/tdd), small, then /code-review + commit.
+4. #88 build (/tdd), then /code-review + commit.
+5. #77 build (/tdd), then #76.
+6. The needs-triage queue: #89, #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 22): GRILLED #88, #76 and #87. The specs are comments on the issues, and all three are labelled ready-for-agent. Filed #89 (Flip to Disenchant on the Shopping List, needs-triage, split out of #76).
 - #88 Buy Under:
   - One per Item Key, from its best way out: Vendor, Sell, or a Craft it's a reagent of (any Character's Known Recipes, pooled).
