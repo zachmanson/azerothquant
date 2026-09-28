@@ -436,15 +436,16 @@ def _valuer(
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = _cut(market, config)
-    singles = non_stacking(conn, market)
-    valuer = _Valuer(supply, others, {}, rates, vendor, merchant, cut, singles, config)
+    valuer = _Valuer(
+        supply, others, {}, rates, vendor, merchant, cut, non_stacking(conn, market), config
+    )
     return valuer.flips(under, unbound)
 
 
 class _Valuer:
     """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
     on sale, `others` other players' Listings, and `flipped` the ones the Flips buy.
-    `singles` are the Item Keys that don't stack (#73)."""
+    `non_stacking` are the Item Keys that don't stack (#73)."""
 
     def __init__(
         self,
@@ -455,12 +456,12 @@ class _Valuer:
         vendor: dict[int, int],
         merchant: dict[str, float],
         cut: float,
-        singles: frozenset[str],
+        non_stacking: frozenset[str],
         config: Config,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
-        self.cut, self.singles, self._config = cut, singles, config
+        self.cut, self.non_stacking, self._config = cut, non_stacking, config
 
     def after(self, bought: dict[str, Supply]) -> "_Valuer":
         """This Valuer with `bought` as the units taken off other players' Listings."""
@@ -472,14 +473,14 @@ class _Valuer:
             self.vendor,
             self.merchant,
             self.cut,
-            self.singles,
+            self.non_stacking,
             self._config,
         )
 
     def effort(self, item_key: str) -> int:
         """What a Flip is charged for each unit of an Item Key it buys, and again for each
         it posts: nothing unless it doesn't stack (#73)."""
-        return self._config.non_stacking_effort_copper if item_key in self.singles else 0
+        return self._config.non_stacking_effort_copper if item_key in self.non_stacking else 0
 
     def flips(
         self, under: set[str], unbound: Mapping[str, int]
@@ -859,7 +860,7 @@ class _Outlet:
     resale: float | None
     vendor_price: int
     bound: bool
-    effort: int = 0
+    effort: int
 
     def value(self, units: int) -> tuple[float, int]:
         """What `units` more would bring, and how many of them Sell."""

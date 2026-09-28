@@ -3,11 +3,12 @@ only (ADR-0004)."""
 
 import sqlite3
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 
 from brain.config import Config
-from brain.history import Market, listings
+from brain.history import Listing, Market, listings
 from brain.observation import observation_windows_between, sell_rate_evidence, window_hours
 
 
@@ -38,13 +39,13 @@ def sell_rates(
     if not evidence.window_hours:
         return {}
     seen = listings(conn, market)
+    in_range = [x for x in seen if x.last_seen >= since and x.first_seen < until]
     quantities: dict[str, list[int]] = defaultdict(list)
-    for listing in seen:
-        if listing.last_seen >= since and listing.first_seen < until:
-            quantities[listing.item_key].append(listing.quantity)
+    for listing in in_range:
+        quantities[listing.item_key].append(listing.quantity)
     # Item Keys that stack: gear, only ever listed 1 at a time, would pull the Market's
     # usual Sale Event size down to 1.
-    stacking = {item_key for item_key, q in quantities.items() if max(q) > 1}
+    stacking = _stacking(in_range)
     market_sizes = [e.units for e in evidence.sale_events if e.item_key in stacking]
     market_size = median(market_sizes) if market_sizes else None
     units: Counter[str] = Counter()
@@ -71,12 +72,16 @@ def sell_rates(
 
 
 def non_stacking(conn: sqlite3.Connection, market: Market) -> frozenset[str]:
-    """Item Keys that don't stack: no Listing of them ever seen in the Market had more
-    than one unit (#73). The same test Sell Rate's usual Sale Event size uses."""
-    most: dict[str, int] = {}
-    for listing in listings(conn, market):
-        most[listing.item_key] = max(most.get(listing.item_key, 0), listing.quantity)
-    return frozenset(item_key for item_key, q in most.items() if q == 1)
+    """Item Keys that don't stack (#73): no Listing of them ever seen in the Market had
+    more than one unit. Sell Rate's usual Sale Event size uses the same test over its
+    range only."""
+    seen = listings(conn, market)
+    return frozenset({listing.item_key for listing in seen} - _stacking(seen))
+
+
+def _stacking(seen: Iterable[Listing]) -> set[str]:
+    """The Item Keys some Listing in `seen` had more than one unit of."""
+    return {listing.item_key for listing in seen if listing.quantity > 1}
 
 
 def _typical_sale_size(market_size: float | None, quantities: list[int]) -> float:

@@ -250,12 +250,11 @@ def load_config(path: Path) -> Config:
         lambda x: x >= 0,
         "of at least 0",
     )
-    margin_copper = raw.get("flip_min_margin_copper", DEFAULT_FLIP_MIN_MARGIN_COPPER)
-    if isinstance(margin_copper, bool) or not isinstance(margin_copper, int) or margin_copper < 0:
-        raise ConfigError(
-            f"{path}: flip_min_margin_copper must be a whole number of copper of at least 0, "
-            f"got {margin_copper!r}"
-        )
+    margin_copper = _parse_copper(
+        path,
+        raw.get("flip_min_margin_copper", DEFAULT_FLIP_MIN_MARGIN_COPPER),
+        "flip_min_margin_copper",
+    )
     prior_holdings, prior_flips = (
         _parse_number(path, raw.get(key, default), key, lambda x: x >= 0, "of hours of at least 0")
         for key, default in (
@@ -282,18 +281,14 @@ def load_config(path: Path) -> Config:
             f"{path}: flip_min_sale_events must be a whole number of Sale Events of at least 1, "
             f"got {min_sale_events!r}"
         )
-    undercut = raw.get("post_undercut_copper", DEFAULT_POST_UNDERCUT_COPPER)
-    if isinstance(undercut, bool) or not isinstance(undercut, int) or undercut < 0:
-        raise ConfigError(
-            f"{path}: post_undercut_copper must be a whole number of copper of at least 0, "
-            f"got {undercut!r}"
-        )
-    effort = raw.get("non_stacking_effort_copper", DEFAULT_NON_STACKING_EFFORT_COPPER)
-    if isinstance(effort, bool) or not isinstance(effort, int) or effort < 0:
-        raise ConfigError(
-            f"{path}: non_stacking_effort_copper must be a whole number of copper of at least 0, "
-            f"got {effort!r}"
-        )
+    undercut = _parse_copper(
+        path, raw.get("post_undercut_copper", DEFAULT_POST_UNDERCUT_COPPER), "post_undercut_copper"
+    )
+    effort = _parse_copper(
+        path,
+        raw.get("non_stacking_effort_copper", DEFAULT_NON_STACKING_EFFORT_COPPER),
+        "non_stacking_effort_copper",
+    )
     max_loss_share, cap_share, total_cap_share = (
         _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
         for key, default in (
@@ -349,6 +344,14 @@ def _parse_number(
 ) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float) or not allowed(value):
         raise ConfigError(f"{config_path}: {key} must be a number {wording}, got {value!r}")
+    return value
+
+
+def _parse_copper(config_path: Path, value: object, key: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(
+            f"{config_path}: {key} must be a whole number of copper of at least 0, got {value!r}"
+        )
     return value
 
 
