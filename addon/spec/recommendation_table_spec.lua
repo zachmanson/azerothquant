@@ -123,7 +123,7 @@ describe("RecommendationTable.reagentLines' mail lines", function()
   }
 
   it("mails a held reagent the crafter is short of from the biggest holders first, never bound units", function()
-    local whose = {
+    local holdersOf = {
       -- The crafter's own bound units still count: it can use them.
       ["2589"] = {
         { character = "Alt-One", bags = 12, bank = 0, bound = 2 },
@@ -143,7 +143,24 @@ describe("RecommendationTable.reagentLines' mail lines", function()
       "Use 9 Wool Cloth",
       "Mail 10 Linen Cloth from Alt-One to Kash-Patel",
       "Mail 5 Linen Cloth from Bank-Alt to Kash-Patel",
-    }, RecommendationTable.reagentLines(craft, names, whose))
+    }, RecommendationTable.reagentLines(craft, names, holdersOf))
+  end)
+
+  it("mails nothing when a Sub-craft runs on another Character, since uses can't say whose reagents are whose", function()
+    local chained = {
+      itemKey = "2997",
+      action = "Craft",
+      quantity = 1,
+      character = "Kash-Patel",
+      via = { { itemKey = "2996", crafts = 5, character = "Alt-One" } },
+      uses = { { itemKey = "2589", quantity = 10 } },
+    }
+    local holdersOf = { ["2589"] = { { character = "Alt-One", bags = 10, bank = 0, bound = 0 } } }
+
+    assert.are.same(
+      { "Craft 5 item:2996 on Alt-One", "Use 10 Linen Cloth" },
+      RecommendationTable.reagentLines(chained, names, holdersOf)
+    )
   end)
 
   it("mails nothing without knowing who holds what", function()
