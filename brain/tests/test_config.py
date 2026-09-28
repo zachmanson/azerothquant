@@ -269,6 +269,8 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.craft_min_gain == 0
     assert config.roi_hint == 0.2
     assert config.non_stacking_effort_copper == 500
+    assert config.ah_deposit_share == 0.6
+    assert config.post_duration_hours == 48
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -287,6 +289,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "craft_min_gain = 50\n"
         "roi_hint = 0.5\n"
         "non_stacking_effort_copper = 0\n"
+        "ah_deposit_share = 0.15\n"
+        "post_duration_hours = 12\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -304,6 +308,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.craft_min_gain == 50
     assert config.roi_hint == 0.5
     assert config.non_stacking_effort_copper == 0
+    assert config.ah_deposit_share == 0.15
+    assert config.post_duration_hours == 12
 
 
 @pytest.mark.parametrize(
@@ -337,6 +343,10 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("roi_hint", "true"),
         ("roi_hint", "-0.1"),
         ("non_stacking_effort_copper", "-1"),
+        ("ah_deposit_share", "-0.1"),
+        ("ah_deposit_share", "true"),
+        ("post_duration_hours", "0"),
+        ("post_duration_hours", '"48"'),
         ("non_stacking_effort_copper", "0.5"),  # whole copper
         ("non_stacking_effort_copper", "true"),
     ],

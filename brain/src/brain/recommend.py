@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from itertools import groupby
 from types import MappingProxyType
 
 from brain.config import Config
@@ -34,7 +35,7 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import Held, Lot, ended_at, link_sales, lots, settle, start_of
+from brain.lots import Held, Lot, deposits, ended_at, link_sales, lots, settle, start_of
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
@@ -198,6 +199,27 @@ class _HoldBuy:
 
 
 @dataclass(frozen=True)
+class _Queue:
+    """The order an Item Key's posted units sell in (#78, ADR-0013): unbound held units
+    first, then Flips to Sell, then Flip to Craft outputs. Unit i waits i / units_per_hour
+    and loses a `deposit` for every posting that expires first."""
+
+    units_per_hour: float
+    deposit: float  # per unit per posting
+    post_hours: float
+
+    def lost(self, i: int) -> float:
+        """The deposits unit i of the queue (0-based) is expected to lose."""
+        if not self.deposit or not self.units_per_hour:
+            return 0.0
+        return math.floor(i / self.units_per_hour / self.post_hours) * self.deposit
+
+    def lost_by(self, start: int, units: int) -> float:
+        """The deposits units `start` up to `start + units` are expected to lose in all."""
+        return sum(self.lost(i) for i in range(start, start + units))
+
+
+@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -258,6 +280,7 @@ def recommend(
                 vendor.get(_item_id(item_key)),
                 merchant.get(item_key),
                 _unbound(held.get(item_key, Holding())),
+                valuer.queue(item_key, flips=True),
                 cut,
                 config,
             )
@@ -273,6 +296,7 @@ def recommend(
                 _unbound(held.get(plan.output, Holding())),
                 valuer.flipped.get(plan.output, []),
                 valuer.effort(plan.output),
+                valuer.queue(plan.output, flips=True),
                 cut,
                 config,
             )
@@ -462,8 +486,19 @@ def _valuer(
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = _cut(market, config)
+    # Like Vendor Prices, the latest seen: a deposit rate doesn't move.
+    linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
     valuer = _Valuer(
-        supply, others, {}, rates, vendor, merchant, cut, non_stacking(conn, market), config
+        supply,
+        others,
+        {},
+        rates,
+        vendor,
+        merchant,
+        cut,
+        non_stacking(conn, market),
+        deposits(linked),
+        config,
     )
     return valuer.flips(under, unbound)
 
@@ -483,14 +518,18 @@ class _Valuer:
         merchant: dict[str, float],
         cut: float,
         non_stacking: frozenset[str],
+        deposits: dict[str, float],
         config: Config,
+        held: Mapping[str, int] = MappingProxyType({}),
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
-        self.cut, self.non_stacking, self._config = cut, non_stacking, config
+        self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
+        self._config, self.held = config, held
 
-    def after(self, bought: dict[str, Supply]) -> "_Valuer":
-        """This Valuer with `bought` as the units taken off other players' Listings."""
+    def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
+        """This Valuer with `bought` as the units taken off other players' Listings, and
+        `held` as the unbound held units ahead of the Flips in the queue, if given."""
         return _Valuer(
             self.supply,
             self.others,
@@ -500,8 +539,33 @@ class _Valuer:
             self.merchant,
             self.cut,
             self.non_stacking,
+            self.deposits,
             self._config,
+            self.held if held is None else held,
         )
+
+    def deposit(self, item_key: str) -> float:
+        """What posting one unit of an Item Key costs (#78): as on its latest Sold invoice,
+        else the config share of its Vendor Price, or nothing without one."""
+        if item_key in self.deposits:
+            return self.deposits[item_key]
+        return self._config.ah_deposit_share * self.vendor.get(_item_id(item_key), 0)
+
+    def queue(self, item_key: str, flips: bool) -> _Queue:
+        """The Item Key's sale queue, at its Sell Rate under the Flip or Holdings priors."""
+        c = self._config
+        if flips:
+            priors = (c.sell_rate_prior_hours_flips, c.sale_size_prior_events_flips)
+        else:
+            priors = (c.sell_rate_prior_hours_holdings, c.sale_size_prior_events_holdings)
+        per_day = _units_per_day(self.rates.get(item_key), *priors)
+        return _Queue(per_day / 24, self.deposit(item_key), c.post_duration_hours)
+
+    def flip_lost(self, item_key: str, units: int) -> tuple[float, float]:
+        """The deposits the last of `units` Flipped to Sell is expected to lose, and all of
+        them, queued behind the unbound `held` units (#78)."""
+        queue, held = self.queue(item_key, flips=True), self.held.get(item_key, 0)
+        return queue.lost(held + units - 1), queue.lost_by(held, units)
 
     def effort(self, item_key: str) -> int:
         """What a Flip is charged for each unit of an Item Key it buys, and again for each
@@ -512,8 +576,8 @@ class _Valuer:
         self, under: set[str], unbound: Mapping[str, int]
     ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
         """The Flips in this Scan, from Item Keys not `under` a Prediction, with the
-        `unbound` held units taking the Sale Horizon first (#67), and this Valuer after
-        them."""
+        `unbound` held units taking the Sale Horizon, and the sale queue, first (#67, #78),
+        and this Valuer after them."""
         buys = [
             buy
             for item_key, offers in sorted(self.others.items())
@@ -526,6 +590,7 @@ class _Valuer:
                 self.vendor.get(_item_id(item_key)),
                 self.merchant.get(item_key),
                 unbound.get(item_key, 0),
+                self.queue(item_key, flips=True),
                 self.effort(item_key),
                 self.cut,
                 self._config,
@@ -535,7 +600,7 @@ class _Valuer:
         for b in buys:
             units = b.whole.units if isinstance(b, _FlipToSell) else [(b.unit_buyout, b.quantity)]
             flipped.setdefault(b.item_key, []).extend(units)
-        return self.after(flipped), buys
+        return self.after(flipped, unbound), buys
 
     def post_at(self, item_key: str) -> float | None:
         """The price to post one unit at once `flipped` is bought (`_post_at`)."""
@@ -559,6 +624,7 @@ class _Valuer:
             post_at,
             rate,
             self.vendor.get(_item_id(item_key)),
+            self.queue(item_key, flips=False),
             self.cut,
             self._config,
         )
@@ -613,11 +679,14 @@ def _holding_rows(
     post_at: float | None,
     rate: SellRate | None,
     vendor_price: int | None,
+    queue: _Queue,
     cut: float,
     config: Config,
 ) -> list[Row]:
     """How held units split between Sell, posted at `post_at` like a Flip (#64), and
-    Vendor. With no Listing to price against there's no `post_at`, and they're Vendored."""
+    Vendor. With no Listing to price against there's no `post_at`, and they're Vendored.
+    A held unit Sells only while it beats the Vendor Price less the deposits it's expected
+    to lose waiting its turn in the `queue` (#78), so the tail of a slow seller is Vendored."""
     rows = []
     vendoring = holding.bags_bound + holding.bank_bound  # bound can't go on the AH
     unbound = holding.bags + holding.bank
@@ -626,7 +695,7 @@ def _holding_rows(
         rows.append(Row(item_key, None, unbound, note="no data"))
     elif unbound:
         sell_price = 0.0 if post_at is None else post_at * (1 - cut)
-        selling = min(
+        sellable = min(
             unbound,
             sellable_units(
                 rate,
@@ -635,18 +704,20 @@ def _holding_rows(
                 config.sale_horizon_seconds,
             ),
         )
-        margin = None if vendor_price is None else sell_price - vendor_price
-        if post_at is None or not selling or (margin is not None and margin <= 0):
-            selling = 0
-        else:
+        selling = 0
+        if post_at is not None:
+            while selling < sellable and sell_price - queue.lost(selling) > (vendor_price or 0):
+                selling += 1
+        if selling:
+            profit = selling * sell_price - queue.lost_by(0, selling)
             rows.append(
                 Row(
                     item_key,
                     Action.SELL,
                     selling,
                     price=post_at,
-                    profit=selling * sell_price,
-                    margin=margin,
+                    profit=profit,
+                    margin=None if vendor_price is None else profit / selling - vendor_price,
                     sale_events=rate.sale_events,
                 )
             )
@@ -882,21 +953,33 @@ def _step(
 @dataclass
 class _Outlet:
     """Where a Flip to Craft's output goes: `room` more units Sell for `resale` each
-    after the cut, less the `effort` of posting each (#73), and the rest are Vendored."""
+    after the cut, less the `effort` of posting each (#73) and the deposits each is
+    expected to lose behind the `queued` units ahead of it (#78), while that beats the
+    Vendor Price. The rest are Vendored."""
 
     room: int
     resale: float | None
     vendor_price: int
     bound: bool
     effort: int
+    queue: _Queue
+    queued: int
 
     def value(self, units: int) -> tuple[float, int]:
         """What `units` more would bring, and how many of them Sell."""
-        if self.bound or self.resale is None or self.resale - self.effort <= self.vendor_price:
-            return units * self.vendor_price, 0
-        selling = min(units, self.room)
-        sold = selling * (self.resale - self.effort)
+        sold, selling = 0.0, 0
+        while not self.bound and self.resale is not None and selling < min(units, self.room):
+            net = self.resale - self.effort - self.queue.lost(self.queued + selling)
+            if net <= self.vendor_price:
+                break  # the units after it wait longer
+            sold += net
+            selling += 1
         return sold + (units - selling) * self.vendor_price, selling
+
+    def take(self, selling: int) -> None:
+        """Take `selling` units' room, and their places in the queue."""
+        self.room -= selling
+        self.queued += selling
 
 
 def _outlet(
@@ -909,6 +992,7 @@ def _outlet(
     held: int,
     flipped: Supply,
     effort: int,
+    queue: _Queue,
     cut: float,
     config: Config,
 ) -> _Outlet:
@@ -917,11 +1001,12 @@ def _outlet(
     `flipped` to Sell. It resells like them, posted under what's left once they're bought
     and never above what a merchant charges (#63). `others` is other players' asks."""
     room, resale = _flip_room(rate, config), None
+    queued = held + sum(n for _, n in flipped)
     if room:
-        room = max(0, room - held - sum(n for _, n in flipped))
+        room = max(0, room - queued)
         cap = _ceiling(rate.max_sale_price, merchant_cost)
         resale = _resale(supply, others, flipped, cut, config, cap)
-    return _Outlet(room, resale, vendor_price or 0, bound, effort)
+    return _Outlet(room, resale, vendor_price or 0, bound, effort, queue, queued)
 
 
 @dataclass(frozen=True)
@@ -998,7 +1083,7 @@ def _flips_to_craft(
                 held[key] = _take(held[key], take)
         for key, bought in best.asks.items():
             asks[key] = _without(asks[key], bought)
-        outlets[best.plan.output].room -= best.selling
+        outlets[best.plan.output].take(best.selling)
     return result
 
 
@@ -1247,6 +1332,7 @@ def _flips(
     vendor_price: int | None,
     merchant_cost: float | None,
     held: int,
+    queue: _Queue,
     effort: int,
     cut: float,
     config: Config,
@@ -1266,7 +1352,8 @@ def _flips(
     bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
     (#57). Anything else under the Vendor Price is bought to Vendor. Each unit bought
     costs the `effort` of buying it, and one bought to Sell the effort of posting it too
-    (#73).
+    (#73), and the deposits it's expected to lose waiting its turn in the `queue` after
+    the `held` units (#78).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -1281,10 +1368,12 @@ def _flips(
         room -= take
         post_at = _post_at(supply, offers, prefix, config, cap)
         resale = None if post_at is None else post_at * (1 - cut)
-        # Offers are cheapest first, so if the dearest unit clears the margin, all do.
-        if not _resells(resale, unit, vendor_price, effort, config):
+        # Offers are cheapest first and the last unit waits longest, so if the dearest unit
+        # clears the margin after its deposits, all do.
+        bought = sum(n for _, n in prefix)
+        if not _resells(resale, unit, vendor_price, effort, queue.lost(held + bought - 1), config):
             continue
-        profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
+        profit = sum((resale - 2 * effort - u) * n for u, n in prefix) - queue.lost_by(held, bought)
         runs.append(_SellRun(prefix, post_at, profit))
     buys: list[_VendorBuy | _FlipToSell] = []
     to_sell: Supply = []
@@ -1310,6 +1399,7 @@ def _hold_buys(
     vendor_price: int | None,
     merchant_cost: float | None,
     held: int,
+    queue: _Queue,
     cut: float,
     config: Config,
 ) -> list[_HoldBuy]:
@@ -1320,7 +1410,8 @@ def _hold_buys(
     A unit's Max Loss is its buyout less its exit without the Prediction. That's Sell, at
     the resale a Flip would get, for the units that would sell within the Sale Horizon if
     the Prediction were wrong, after the `held` ones, judged as strictly as a Flip and
-    never above what a merchant charges (#63). The rest can only be Vendored, or are worth
+    never above what a merchant charges (#63), less the deposits each is expected to lose
+    waiting its turn in the `queue` (#78). The rest can only be Vendored, or are worth
     nothing without a Vendor Price.
     """
     room = max(0, _flip_room(rate, config) - held)
@@ -1333,10 +1424,12 @@ def _hold_buys(
             if take
             else None
         )
-        parts = [(take, max(resale or 0, vendor_price or 0)), (quantity - take, vendor_price or 0)]
+        queued = held + sum(n for _, n in bought)
+        exits = [
+            max((resale or 0) - queue.lost(queued + i), vendor_price or 0) for i in range(take)
+        ] + [vendor_price or 0] * (quantity - take)
+        parts = [(len(list(same)), exit_value) for exit_value, same in groupby(exits)]
         for n, exit_value in parts:
-            if not n:
-                continue
             max_loss = unit - exit_value
             if max_loss > unit * config.prediction_max_loss_share:
                 return buys
@@ -1387,7 +1480,12 @@ def _flip_room(rate: SellRate | None, config: Config) -> int:
 def sellable_units(
     rate: SellRate | None, prior_hours: float, prior_events: float, horizon_seconds: int
 ) -> int:
-    """Units that should sell within the Sale Horizon; none without Sell Rate evidence.
+    """Units that should sell within the Sale Horizon; none without Sell Rate evidence."""
+    return math.floor(_units_per_day(rate, prior_hours, prior_events) * horizon_seconds / 86400)
+
+
+def _units_per_day(rate: SellRate | None, prior_hours: float, prior_events: float) -> float:
+    """Units that should sell a day; none without Sell Rate evidence.
 
     Sell Rate is discounted by the Sell Rate Prior, as if `prior_hours` more hours had been
     watched with no sales, so a sale or two in a short Observation Window doesn't read as
@@ -1396,20 +1494,19 @@ def sellable_units(
     doesn't read as an Item Key that sells in bulk (#24). Both fade as evidence builds up.
     """
     if rate is None or not rate.sale_events:
-        return 0
+        return 0.0
     mean_size = rate.sale_units / rate.sale_events
     shrunk_size = (rate.sale_units + prior_events * rate.typical_sale_size) / (
         rate.sale_events + prior_events
     )
     # units / (hours + prior) * 24 * shrunk / mean, written so that no priors leave the
     # rate exactly as is.
-    per_day = (
+    return (
         rate.units_per_day
         * rate.window_hours
         / (rate.window_hours + prior_hours)
         * (shrunk_size / mean_size)
     )
-    return math.floor(per_day * horizon_seconds / 86400)
 
 
 def _resale(
@@ -1542,16 +1639,22 @@ def _shopping_list(
 
 
 def _resells(
-    resale: float | None, unit: float, vendor_price: int | None, effort: int, config: Config
+    resale: float | None,
+    unit: float,
+    vendor_price: int | None,
+    effort: int,
+    lost: float,
+    config: Config,
 ) -> bool:
     """Whether a unit bought at `unit` and resold for `resale` after the cut is a Flip to
-    Sell: less the `effort` of buying and of posting it (#73), it clears the Flip margin,
-    and no vendor pays as much (that's a Flip to Vendor, which isn't posted)."""
-    if resale is None or resale - 2 * effort - unit < max(
+    Sell: less the `effort` of buying and of posting it (#73) and the deposits it's
+    expected to have `lost` (#78), it clears the Flip margin, and no vendor pays as much
+    (that's a Flip to Vendor, which isn't posted)."""
+    if resale is None or resale - 2 * effort - lost - unit < max(
         unit * config.flip_min_margin_share, config.flip_min_margin_copper
     ):
         return False
-    return vendor_price is None or resale - effort > vendor_price
+    return vendor_price is None or resale - effort - lost > vendor_price
 
 
 def _buy_what_fits(
@@ -1577,6 +1680,7 @@ def _buy_what_fits(
             row.price,
             valuer.vendor.get(_item_id(row.item_key)),
             valuer.effort(row.item_key),
+            valuer.flip_lost(row.item_key, row.quantity)[0],
             config,
         )
     ]
@@ -1585,10 +1689,11 @@ def _buy_what_fits(
     for row, _ in kept:
         if row.action is Action.SELL:
             resale = _resale_of(after, row.item_key)
+            _, lost = valuer.flip_lost(row.item_key, row.quantity)
             row = replace(
                 row,
                 post_at=after.post_at(row.item_key),
-                profit=row.quantity * (resale - 2 * valuer.effort(row.item_key)) - row.cost,
+                profit=row.quantity * (resale - 2 * valuer.effort(row.item_key)) - row.cost - lost,
             )
         rows.append(row)
     return rows, after

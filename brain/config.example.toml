@@ -106,6 +106,18 @@
 # it off. Defaults to 500 (5 silver). Must come before the first [[installs]].
 # non_stacking_effort_copper = 500
 
+# Optional: Auction House deposits (#78, ADR-0013). Posting costs a deposit, refunded on
+# a sale and lost each time a posting expires. `brain recommend` charges each unit it
+# would post the deposits it expects that unit to lose while it waits its turn to sell,
+# so slow sellers look as good as they are. The deposit per unit is learned from the
+# latest Sold invoice of the Item Key; one never seen Sold is charged ah_deposit_share of
+# its Vendor Price per posting (nothing without a Vendor Price). The 0.60 default is
+# retail's 48h rate and UNVERIFIED on Forever. post_duration_hours must match the
+# duration you post at (and the rate behind ah_deposit_share). Defaults to 0.60 and 48.
+# Must come before the first [[installs]].
+# ah_deposit_share = 0.60
+# post_duration_hours = 48
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

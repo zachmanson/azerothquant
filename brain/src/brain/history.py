@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS auction_mail (
     count INTEGER NOT NULL,
     price INTEGER,                 -- copper for the stack; NULL for cancelled and expired
     money INTEGER NOT NULL,        -- copper attached
+    deposit INTEGER,               -- copper a sale's posting cost (#78); NULL for other mail
     arrived_at INTEGER,            -- Unix time; NULL until daysLeft starts counting down
     first_read_at INTEGER NOT NULL,
     last_read_at INTEGER NOT NULL,
@@ -264,6 +265,7 @@ class Outcome:
     money: int  # copper paid out: for Sold, after the cut and with the deposit back
     arrived_at: int | None
     first_seen: int  # read_at of the first Mailbox Read it was in
+    deposit: int | None = None  # copper a Sold one's posting cost, from its invoice (#78)
 
 
 @dataclass(frozen=True)
@@ -336,6 +338,7 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     conn.executescript(_SCHEMA)
     _add_column(conn, "listing", "item_name", "TEXT")  # #17
     _add_column(conn, "character_read", "has_profession_list", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "auction_mail", "deposit", "INTEGER")  # #78
     return conn
 
 
@@ -632,8 +635,8 @@ def _insert_mail(
         report.purchases_found += 1
     conn.execute(
         "INSERT INTO auction_mail (era, realm, character, market_id, kind, sender, subject,"
-        " item_name, item_key, count, price, money, arrived_at, first_read_at, last_read_at,"
-        " live) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        " item_name, item_key, count, price, money, deposit, arrived_at, first_read_at,"
+        " last_read_at, live) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
         (
             *owner,
             market_id,
@@ -645,6 +648,7 @@ def _insert_mail(
             mail.count,
             mail.price,
             mail.money,
+            mail.deposit,
             arrival,
             read_at,
             read_at,
@@ -1085,13 +1089,14 @@ _MAIL_COLUMNS = (
 def outcomes(conn: sqlite3.Connection, market: Market) -> list[Outcome]:
     """Every Outcome in the Market, in the order the Brain first saw them."""
     rows = conn.execute(
-        f"SELECT {_MAIL_COLUMNS} FROM auction_mail a JOIN market m ON m.id = a.market_id"
+        f"SELECT {_MAIL_COLUMNS}, a.deposit FROM auction_mail a"
+        f" JOIN market m ON m.id = a.market_id"
         f" WHERE {_MARKET_FILTER} AND a.kind != ? ORDER BY a.first_read_at, a.id",
         (*_market_params(market), MailKind.WON.value),
     )
     return [
-        Outcome(ch, MailKind(kind), name, key, n, price, money, at, first)
-        for ch, kind, name, key, n, price, money, at, first in rows
+        Outcome(ch, MailKind(kind), name, key, n, price, money, at, first, deposit)
+        for ch, kind, name, key, n, price, money, at, first, deposit in rows
     ]
 
 

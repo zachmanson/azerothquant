@@ -91,6 +91,12 @@ DEFAULT_ROI_HINT = 0.20
 # The hassle of an Item Key that doesn't stack (#73): each unit is its own buy and its own
 # post, so every unit a Flip buys, and every one it posts, costs this many copper.
 DEFAULT_NON_STACKING_EFFORT_COPPER = 500
+# Posting on the Auction House costs a deposit, refunded on a sale and lost on each expiry
+# (#78, ADR-0013). An Item Key never seen Sold is charged this share of its Vendor Price
+# per unit per posting. Unverified: retail's 48h rate, since Forever's isn't published.
+DEFAULT_AH_DEPOSIT_SHARE = 0.60
+# How long the player posts for: a unit still unsold after it expires and loses its deposit.
+DEFAULT_POST_DURATION_HOURS = 48
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -159,6 +165,10 @@ class Config:
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
     # doesn't stack.
     non_stacking_effort_copper: int = DEFAULT_NON_STACKING_EFFORT_COPPER
+    # The deposit per unit per posting, as a share of the Vendor Price, for an Item Key
+    # without a Sold invoice to learn it from, and how long a posting lasts.
+    ah_deposit_share: float = DEFAULT_AH_DEPOSIT_SHARE
+    post_duration_hours: float = DEFAULT_POST_DURATION_HOURS
 
 
 def load_config(path: Path) -> Config:
@@ -312,6 +322,20 @@ def load_config(path: Path) -> Config:
         path, raw.get("roi_hint", DEFAULT_ROI_HINT), "roi_hint", lambda x: x >= 0, "of at least 0"
     )
 
+    deposit_share = _parse_number(
+        path,
+        raw.get("ah_deposit_share", DEFAULT_AH_DEPOSIT_SHARE),
+        "ah_deposit_share",
+        lambda x: x >= 0,
+        "of at least 0",
+    )
+    post_hours = _parse_number(
+        path,
+        raw.get("post_duration_hours", DEFAULT_POST_DURATION_HOURS),
+        "post_duration_hours",
+        lambda x: x > 0,
+        "of hours above 0",
+    )
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
@@ -341,6 +365,8 @@ def load_config(path: Path) -> Config:
         craft_min_gain=craft_min_gain,
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
+        ah_deposit_share=deposit_share,
+        post_duration_hours=post_hours,
     )
 
 

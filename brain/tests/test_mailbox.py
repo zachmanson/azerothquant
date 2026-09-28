@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from brain.mailbox import (
@@ -99,7 +101,22 @@ def test_a_sale_has_its_gross_price_and_net_payout():
         price=2304,
         money=2289,
     )
+    assert mail.deposit == 100  # what posting it cost, refunded in the money (#78)
     assert days_left == 30
+
+
+def test_a_mail_matches_itself_from_a_history_that_didnt_keep_its_deposit():
+    mail, _ = parse_mail(SOLD)
+    stored = LiveMail(1, replace(mail, deposit=None), None)
+
+    assert match_mails([stored], [(mail, None)]) == [1]
+
+
+def test_a_sale_whose_invoice_has_no_deposit_has_none_rather_than_an_error():
+    invoice = {k: v for k, v in SOLD["invoice"].items() if k != "deposit"}
+    mail, _ = parse_mail(with_(SOLD, invoice=invoice))
+
+    assert mail.deposit is None
 
 
 def test_a_won_auction_takes_its_item_key_from_the_attachment():

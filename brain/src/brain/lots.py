@@ -172,6 +172,17 @@ def link_sales(
     ]
 
 
+def deposits(outcomes: list[Outcome]) -> dict[str, float]:
+    """What posting one unit of each Item Key cost (#78): the deposit per unit on its
+    latest Sold Outcome's invoice, from `outcomes` already linked (`link_sales`)."""
+    sold = [
+        o
+        for o in outcomes
+        if o.kind is MailKind.SOLD and o.item_key is not None and o.deposit is not None
+    ]
+    return {o.item_key: o.deposit / o.count for o in sorted(sold, key=_when)}
+
+
 def _only(item_keys: set[str]) -> str | None:
     """The one Item Key, or None when there are none or several (Unlinked)."""
     return next(iter(item_keys)) if len(item_keys) == 1 else None

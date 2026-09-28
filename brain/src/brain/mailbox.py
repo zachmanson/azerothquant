@@ -7,7 +7,7 @@ mail seen in the Character's previous Read.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from brain.scan import ItemKey, ItemStringError
@@ -74,6 +74,10 @@ class AuctionMail:
     price: int | None
     # Copper attached; for a sale, the payout after the Auction House cut plus the deposit.
     money: int
+    # Copper a sale's posting cost, from its invoice (#78); None for other mail, or when
+    # the invoice has none. Not part of what identifies a mail: a history from before it
+    # was kept has none for mail still in the inbox, which must still match itself.
+    deposit: int | None = field(default=None, compare=False)
 
 
 def parse_mail(raw: object) -> tuple[AuctionMail, float] | None:
@@ -102,16 +106,19 @@ def parse_mail(raw: object) -> tuple[AuctionMail, float] | None:
         item_name = _required(invoice, "itemName", str)
         count = _required(invoice, "count", int)
         price = _required(invoice, "bid", int)
+        deposit = invoice.get("deposit") if kind is MailKind.SOLD else None
+        if isinstance(deposit, bool) or not isinstance(deposit, int):
+            deposit = None
         # Won items are attached; a sale mail carries only the money.
         item_key = _item_key(raw) if kind is MailKind.WON else None
     else:
         # Cancelled and expired mail has no invoice, only the returned stack.
         item_name = subject[len(prefix) :]
         count = _required(raw, "firstItemQuantity", int)
-        price = None
+        price = deposit = None
         item_key = _item_key(raw)
 
-    mail = AuctionMail(kind, sender, subject, item_name, item_key, count, price, money)
+    mail = AuctionMail(kind, sender, subject, item_name, item_key, count, price, money, deposit)
     return mail, float(days_left)
 
 

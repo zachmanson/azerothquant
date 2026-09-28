@@ -826,6 +826,127 @@ def test_a_flip_to_craft_pays_to_buy_each_reagent_that_doesnt_stack(db, stacks, 
     assert craft.profit == pytest.approx(6 * (949.05 - effort - 100))
 
 
+# --- Deposits (#78) ---
+
+# Posted for an hour at a time, so with 2 Linen selling an hour, units 0-1 of the queue
+# sell in their first posting, 2-3 lose one deposit first, and 4-5 lose two.
+HOURLY_POSTS = replace(CONFIG, post_duration_hours=1)
+
+
+@pytest.mark.parametrize(("hours", "lost"), [(3, 0), (1, 2 * 6 + 2 * 12)])
+def test_held_units_down_the_queue_lose_a_deposit_per_expiry_before_they_sell(db, hours, lost):
+    # With no Sold invoice, each posting of Linen costs 60% of its 10 Vendor Price: 6.
+    # Posted for 3 hours, all 6 sell in their first posting and lose nothing.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=replace(CONFIG, post_duration_hours=hours),
+    )
+
+    sell, _ = result[MARKET].holdings
+    assert (sell.action, sell.quantity) == (Action.SELL, 6)
+    assert sell.profit == pytest.approx(6 * 99 * 0.95 - lost)
+
+
+def linen_sold_for_deposits(*deposits):
+    """A Mailbox Read with a Linen Purchase, which links the name Linen Cloth to its Item
+    Key, and a Sold Outcome per (count, deposit), each arriving an hour after the last."""
+    buy = won(T0, 1, 50)["mails"][0]
+    sales = [
+        sold_mail("Linen Cloth")
+        | {
+            "daysLeft": 29 + n / 24,
+            "invoice": {
+                "invoiceType": "seller",
+                "itemName": "Linen Cloth",
+                "bid": 500,
+                "count": count,
+                "deposit": deposit,
+            },
+        }
+        for n, (count, deposit) in enumerate(deposits)
+    ]
+    return mailbox_read(T0, buy) | {"mails": [buy, *sales], "shownCount": 1 + len(sales)}
+
+
+def test_the_deposit_is_learned_from_the_latest_sold_invoice(db):
+    # The latest sale of Linen paid 20 to post 2: 10 a unit, not the 6 (60% of the 10
+    # Vendor Price) nor the 50 a unit of the earlier one. Posted hourly, units 3-4 of the
+    # queue lose one and 5-6 lose two.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=HOURLY_POSTS,
+        mailbox_reads=[linen_sold_for_deposits((1, 50), (2, 20))],
+    )
+
+    sell = next(r for r in result[MARKET].holdings if r.action is Action.SELL)
+    assert sell.quantity == 6
+    assert sell.profit == pytest.approx(6 * 99 * 0.95 - (2 * 10 + 2 * 20))
+
+
+def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_no_deposit(db):
+    result = run(
+        db, selling_two_linen_an_hour(), [character_read(item(count=10))], config=HOURLY_POSTS
+    )
+
+    sell = next(r for r in result[MARKET].holdings if r.action is Action.SELL)
+    assert (sell.quantity, sell.profit) == (6, pytest.approx(6 * 99 * 0.95))
+
+
+def test_a_held_unit_whose_deposits_eat_its_edge_over_vendor_goes_to_vendor(db):
+    # Posted at 99 for 94.05 after the cut, Linen beats its 90 Vendor Price. But each
+    # posting costs 54 (60% of 90), so from the third unit of the queue on, losing one
+    # first leaves 40.05: those are Vendored, and the first two still Sell.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 90})],
+        config=HOURLY_POSTS,
+    )
+
+    assert result[MARKET].holdings == [
+        Row(LINEN_KEY, Action.VENDOR, 8, price=90, profit=720),
+        Row(
+            LINEN_KEY,
+            Action.SELL,
+            2,
+            price=99,
+            profit=pytest.approx(2 * 99 * 0.95),
+            margin=pytest.approx(99 * 0.95 - 90),
+            sale_events=1,
+        ),
+    ]
+
+
+@pytest.mark.parametrize(("hours", "held", "lost"), [(3, 0, 0), (1, 0, 180), (1, 2, None)])
+def test_a_flip_to_sell_must_clear_the_margin_after_its_last_units_deposits(db, hours, held, lost):
+    # Posted at 999 for 949.05, 3 Linen at 600 clear the 20% margin by 349.05 each. Each
+    # posting costs 180 (60% of 300). Posted hourly, the third unit of the queue loses one
+    # first and still clears. Behind 2 held units, the last is fifth and loses two: a loss.
+    bags = [item(count=held)] if held else []
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=3, unit=600), unit=1000),
+        [character_read(*bags, money=GOLD, vendor_prices={2589: 300})],
+        config=replace(CONFIG, post_duration_hours=hours),
+    )
+
+    flip = Row(
+        LINEN_KEY,
+        Action.SELL,
+        3,
+        price=600,
+        profit=pytest.approx(3 * (949.05 - 600) - (lost or 0)),
+        post_at=999,
+        sale_events=1,
+        cost=1800,
+    )
+    assert result[MARKET].shopping_list == ([] if lost is None else [flip])
+
+
 # --- The Sell Rate Prior (#25) ---
 
 
@@ -1540,6 +1661,23 @@ def test_crafted_output_takes_the_sale_horizon_before_a_flip_to_sell(db):
     assert result[MARKET].shopping_list == []
 
 
+@pytest.mark.parametrize(("hours", "lost"), [(3, 0), (1, 2 * 150 + 2 * 300)])
+def test_a_flip_to_crafts_output_loses_deposits_down_the_queue(db, hours, lost):
+    # #78: 6 Bolts sell within the horizon, posted at 999 for 949.05 each, from 2 Linen
+    # at 100. Each posting costs 150 (60% of the 250 Vendor Price): posted hourly, Bolts
+    # 3-4 lose one first and 5-6 lose two, still clearing the margin and beating Vendor.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(money=GOLD, vendor_prices={2996: 250}, recipes=[recipe()])],
+        config=replace(CONFIG, post_duration_hours=hours),
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.item_key, craft.action, craft.quantity) == (BOLT_KEY, Action.CRAFT, 6)
+    assert craft.profit == pytest.approx(6 * (949.05 - 200) - lost)
+
+
 @pytest.mark.parametrize(("bolt", "crafts"), [(1000, 6), (400, 6), (300, 0)])
 def test_a_flip_to_craft_must_clear_the_flip_margin_on_its_gold(db, bolt, crafts):
     # 2 Linen at 100 a Bolt: 200 of gold needs 1 silver back. A Bolt at 400 Sells for 380
@@ -1891,6 +2029,24 @@ def test_under_a_prediction_its_item_keys_are_bought_to_hold_not_flipped(db):
             prediction="Linen spike",
         )
     ]
+
+
+@pytest.mark.parametrize(("hours", "bought"), [(3, 6), (1, 2)])
+def test_a_buys_exit_is_a_resale_less_the_deposits_it_would_lose(db, hours, bought):
+    # #78: as above, but each posting costs 60 (60% of a 100 Vendor Price). Posted
+    # hourly, the first 1000 would be third in the queue and lose one first: its Max Loss
+    # of 110.95 is more than 10% of it.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
+        [character_read(money=GOLD, vendor_prices={2589: 100})],
+        predictions=[prediction(LINEN_KEY)],
+        config=replace(CONFIG, post_duration_hours=hours),
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert buy.quantity == bought
+    assert buy.max_loss == pytest.approx(2 * -249.05 + (bought - 2) * 50.95)
 
 
 def test_a_buys_exit_is_never_a_resale_above_what_a_merchant_charges(db):

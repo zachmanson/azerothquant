@@ -491,7 +491,9 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # (#64), for 949.05 each after the cut, 939.05 more than a vendor pays.
     assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
     assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
-    assert ["2589", "Sell", "2", "7s 00c", "4s 98c", "14s 00c", "1"] in lines
+    # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
+    # and loses one 6c deposit (60% of the 10c Vendor Price) first (#78).
+    assert ["2589", "Sell", "2", "7s 00c", "4s 92c", "14s 00c", "1"] in lines
 
 
 def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_path):
