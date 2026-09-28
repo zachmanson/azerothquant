@@ -15,8 +15,14 @@ local function link(itemString, name)
   return "|cffffffff|H" .. itemString .. "|h[" .. (name or "Thing") .. "]|h|r"
 end
 
+local NAMES = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread", ["item:2592"] = "Wool Cloth" }
+
+local function names(itemString)
+  return NAMES[itemString]
+end
+
 local function linesFor(recommendations, itemString)
-  return TooltipLines.forLink(recommendations, REALM, FACTION, link(itemString))
+  return TooltipLines.forLink(recommendations, REALM, FACTION, link(itemString), names)
 end
 
 describe("TooltipLines.forLink", function()
@@ -49,19 +55,52 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Sell 4 @ 49c" }, linesFor(r, "item:1179::::::::20:1490::::::::"))
   end)
 
-  it("gives a Craft its note and a Hold its Prediction instead of a price", function()
+  it("gives a Hold its Prediction instead of a price", function()
     local r = recs({
-      holdings = {
-        { itemKey = "2592", action = "Craft", quantity = 1, profit = 136.4, note = "on Kash-Patel: uses 3 of 2592" },
-        { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, prediction = "Phase 2" },
-      },
+      holdings = { { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, prediction = "Phase 2" } },
     })
 
-    assert.are.same({ "AQ: Craft 1 (on Kash-Patel: uses 3 of 2592)" }, linesFor(r, "item:2592"))
     assert.are.same({ "AQ: Hold 20 under Phase 2" }, linesFor(r, "item:12359"))
   end)
 
-  it("gives a Flip to Craft's output a buy-then-craft line, since it has no price", function()
+  it("gives a Craft its Character and a line per held reagent it uses, since it has no price", function()
+    local r = recs({
+      holdings = {
+        {
+          itemKey = "2997",
+          action = "Craft",
+          quantity = 3,
+          profit = 79.8,
+          note = "on Kash-Patel: uses 9 of 2592, 3 of 2320",
+          character = "Kash-Patel",
+          uses = { { itemKey = "2592", quantity = 9 }, { itemKey = "2320", quantity = 3 } },
+        },
+      },
+    })
+
+    assert.are.same(
+      { "AQ: Craft 3 on Kash-Patel", "Use 9 Wool Cloth", "Use 3 Coarse Thread" },
+      linesFor(r, "item:2997")
+    )
+  end)
+
+  it("gives a Craft that can't be made the note saying why", function()
+    local r = recs({
+      holdings = {
+        {
+          itemKey = "2996",
+          action = "Craft",
+          quantity = 0,
+          note = "on Kash-Patel: unknown bind type",
+          character = "Kash-Patel",
+        },
+      },
+    })
+
+    assert.are.same({ "AQ: Craft 0 (on Kash-Patel: unknown bind type)" }, linesFor(r, "item:2996"))
+  end)
+
+  it("gives a Flip to Craft's output a buy-then-craft line, then the reagents it uses and buys", function()
     local r = recs({
       shoppingList = {
         {
@@ -70,13 +109,23 @@ describe("TooltipLines.forLink", function()
           quantity = 6,
           profit = 4500.0,
           cost = 1250.0,
-          note = "on Kash-Patel: uses 12 of 2589 (buy 12)",
-          buys = { { itemKey = "2589", quantity = 12, maxUnitPrice = 120 } },
+          note = "on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
+          buys = {
+            { itemKey = "2589", quantity = 12, maxUnitPrice = 120 },
+            { itemKey = "2320", quantity = 5, maxUnitPrice = 10.0, merchant = true },
+          },
+          character = "Kash-Patel",
+          uses = { { itemKey = "2320", quantity = 1 } },
         },
       },
     })
 
-    assert.are.same({ "AQ: Buy reagents, Craft 6 on Kash-Patel" }, linesFor(r, "item:2996"))
+    assert.are.same({
+      "AQ: Buy reagents, Craft 6 on Kash-Patel",
+      "Use 1 Coarse Thread",
+      "Buy 12 Linen Cloth @ max 1s 20c",
+      "Buy 5 Coarse Thread from a merchant @ 10c",
+    }, linesFor(r, "item:2996"))
   end)
 
   it("adds nothing for rows the Recommendation Table folds away", function()

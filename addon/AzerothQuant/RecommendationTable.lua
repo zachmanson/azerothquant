@@ -74,15 +74,25 @@ local function reagentLine(buy, nameOf)
     .. Money.format(buy.maxUnitPrice)
 end
 
--- A Flip to Craft's tooltip lists its reagent buys; its note only names them by ID.
-local function tooltip(r, nameOf)
+-- A Craft's reagents by name: the held ones it uses, then the ones it buys. A reagent
+-- that's partly held and partly bought shows as a line of each.
+function RecommendationTable.reagentLines(r, nameOf)
   local lines = {}
-  if r.buys then
-    for _, buy in ipairs(r.buys) do
-      lines[#lines + 1] = reagentLine(buy, nameOf)
-    end
-    return lines
+  for _, use in ipairs(r.uses or {}) do
+    lines[#lines + 1] = "Use " .. use.quantity .. " " .. nameFor(use.itemKey, nameOf)
   end
+  for _, buy in ipairs(r.buys or {}) do
+    lines[#lines + 1] = reagentLine(buy, nameOf)
+  end
+  return lines
+end
+
+-- A Craft's tooltip lists its reagents; its note only names them by ID.
+local function tooltip(r, nameOf)
+  if r.uses or r.buys then
+    return RecommendationTable.reagentLines(r, nameOf)
+  end
+  local lines = {}
   if r.margin then
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)
   end
@@ -95,37 +105,39 @@ local function tooltip(r, nameOf)
   return lines
 end
 
--- A Hold only pays off if its Prediction comes true, so its profit isn't known (ADR-0006).
-local function holdingCells(r, name)
-  local profit = r.action == "Hold" and "unknown" or money(r.profit)
-  local note = r.prediction and ("under " .. r.prediction) or r.note or ""
-  return { name, r.action, tostring(r.quantity), money(r.price), profit, note }
-end
-
 -- A row the Brain couldn't choose an Action for, or a Vendor that brings nothing. The
 -- Table folds these into a count, and item tooltips leave them out.
 function RecommendationTable.lowValue(r)
   return r.action == nil or (r.action == "Vendor" and r.profit == 0)
 end
 
--- The Character a Craft row names in its note ("on <Character>: uses ..."), or nil.
-function RecommendationTable.crafter(r)
-  return r.note and r.note:match("^on ([^:]+):")
+-- A Craft's note names reagents by ID, which is no use in game: the summary keeps the
+-- Character and the count of distinct reagents, and leaves the reagents to the tooltip.
+local function craftNote(r)
+  local seen, n = {}, 0
+  for _, list in ipairs({ r.uses or {}, r.buys or {} }) do
+    for _, reagent in ipairs(list) do
+      if not seen[reagent.itemKey] then
+        seen[reagent.itemKey] = true
+        n = n + 1
+      end
+    end
+  end
+  return "on " .. r.character .. ", " .. n .. (n == 1 and " reagent" or " reagents")
 end
 
--- A Flip to Craft's note names reagents by ID, which is no use in game: the summary keeps
--- the Character and leaves the reagents to the tooltip. The Action column says "Craft".
-local function flipToCraftNote(r)
-  local character = RecommendationTable.crafter(r)
-  local n = #r.buys
-  return (character and ("on " .. character .. ", ") or "") .. n
-    .. (n == 1 and " reagent" or " reagents")
+-- A Hold only pays off if its Prediction comes true, so its profit isn't known (ADR-0006).
+-- A Craft that can't be made (it uses nothing) keeps the note saying why.
+local function holdingCells(r, name)
+  local profit = r.action == "Hold" and "unknown" or money(r.profit)
+  local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r)) or r.note or ""
+  return { name, r.action, tostring(r.quantity), money(r.price), profit, note }
 end
 
 -- A Shopping List row is bought to sell as is, or its reagents are bought to craft it.
 local function shoppingCells(r, name)
   local action = r.buys and "Craft" or "Buy"
-  local note = r.buys and flipToCraftNote(r) or r.note or ""
+  local note = r.buys and craftNote(r) or r.note or ""
   return {
     name, action, tostring(r.quantity), money(r.price), money(r.postAt), money(r.profit), money(r.cost), note,
   }

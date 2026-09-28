@@ -47,6 +47,8 @@ _HEADER = (
     "-- recommendations[realm][faction] is that Market's Recommendations, in copper. A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
+    "-- Every Craft row names its character, and lists the held reagents it uses as\n"
+    "-- uses = { { itemKey, quantity } }.\n"
 )
 
 
@@ -105,6 +107,7 @@ _ROW_KEYS = {
     "cost": "cost",
     "prediction": "prediction",
     "max_loss": "maxLoss",
+    "character": "character",
 }
 
 
@@ -117,6 +120,8 @@ def _row(row: Row) -> dict[str, object]:
         out[key] = str(value) if isinstance(value, Action) else value
     if row.buys:
         out["buys"] = [_buy(b) for b in row.buys]
+    if row.uses:
+        out["uses"] = [{"itemKey": u.item_key, "quantity": u.quantity} for u in row.uses]
     return out
 
 

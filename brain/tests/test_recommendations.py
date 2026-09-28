@@ -3,7 +3,7 @@ from pathlib import Path
 
 from brain.config import Era
 from brain.history import Market
-from brain.recommend import Action, MarketRecommendations, ReagentBuy, Row
+from brain.recommend import Action, MarketRecommendations, ReagentBuy, ReagentUse, Row
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
@@ -216,6 +216,8 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
                                 ReagentBuy("2589", 12, 100),
                                 ReagentBuy("2320", 5, 10.0, merchant=True),
                             ),
+                            character="Kash-Patel",
+                            uses=(ReagentUse("2320", 1),),
                         )
                     ],
                     shopping_cost=1250,
@@ -232,11 +234,15 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
         "print(row.action, row.quantity, row.cost, #row.buys) "
         "for _, b in ipairs(row.buys) do "
         "  print(b.itemKey, b.quantity, b.maxUnitPrice, tostring(b.merchant)) "
-        "end",
+        "end "
+        "print(row.character, #row.uses) "
+        "for _, u in ipairs(row.uses) do print(u.itemKey, u.quantity) end",
     )
 
     assert out.splitlines() == [
         "Craft	6	1250	2",
         "2589	12	100	nil",
         "2320	5	10	true",
+        "Kash-Patel	1",
+        "2320	1",
     ]

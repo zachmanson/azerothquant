@@ -8,6 +8,14 @@ local TooltipLines = ns.TooltipLines
 
 local R, G, B = 0.4, 0.8, 1 -- light blue, apart from the game's white and green lines
 
+-- The Beta client has no global GetItemInfo, only C_Item's.
+local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+
+-- A reagent's name, or nil until the client has loaded it.
+local function nameOf(itemString)
+  return (getItemInfo(itemString))
+end
+
 local function addLines(tooltip)
   if not tooltip.GetItem then
     return
@@ -17,7 +25,8 @@ local function addLines(tooltip)
     AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations,
     GetRealmName(),
     UnitFactionGroup("player"),
-    link
+    link,
+    nameOf
   )
   for _, text in ipairs(lines) do
     tooltip:AddLine(text, R, G, B)

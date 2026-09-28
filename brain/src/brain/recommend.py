@@ -59,6 +59,14 @@ class ReagentBuy:
 
 
 @dataclass(frozen=True)
+class ReagentUse:
+    """A Craft's use of `quantity` held units of one reagent."""
+
+    item_key: str
+    quantity: int
+
+
+@dataclass(frozen=True)
 class Row:
     """One line of the table: what to do with `quantity` units of an Item Key."""
 
@@ -83,6 +91,8 @@ class Row:
     # wrong and the units are let go at today's prices.
     max_loss: float | None = None
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
+    character: str = ""  # a Craft's Character, the one that knows the recipe
+    uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
 
 
 @dataclass(frozen=True)
@@ -634,6 +644,12 @@ class _Plan:
             self.crafts,
             profit=self.gain,
             note=f"on {self.character}: uses {uses}",
+            character=self.character,
+            uses=tuple(
+                ReagentUse(key, n - self.bought[key])
+                for key, n in self.used.items()
+                if n > self.bought[key]
+            ),
         )
 
 
@@ -713,7 +729,15 @@ def _crafts(
             craftable.append(plan)
         elif _step(plan, held, crafted, merchant, valuer, under) is not None:
             # Only shown when the reagents are there, or every recipe would be.
-            blocked.append(Row(plan.output, Action.CRAFT, 0, note=f"on {plan.character}: {reason}"))
+            blocked.append(
+                Row(
+                    plan.output,
+                    Action.CRAFT,
+                    0,
+                    note=f"on {plan.character}: {reason}",
+                    character=plan.character,
+                )
+            )
     while True:
         best = None
         for plan in craftable:

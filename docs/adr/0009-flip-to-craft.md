@@ -15,5 +15,6 @@ It runs after held-only crafting, on what's left. Each step takes the single bes
 ## Consequences
 
 - A Flip to Craft is one Shopping List row per recipe, keyed by the output and naming the Character that knows it, with a structured list of reagent buys (Item Key, quantity, most to pay per unit, whether it's a merchant's). The Addon names the reagents, because the Brain only knows names from own Listings, and a reagent is useless to shop for by itemID.
+- Amended by #49: every Craft row, a Holdings Craft or a Flip to Craft, also carries its Character as a field and a structured list of the held reagent units it uses (Item Key, quantity). The Addon names both the reagents a craft uses and the ones it buys, and reads the Character from the field, not from the note. The note stays for the `brain recommend` CLI.
 - Cooldowns, blocked recipes, bind types and Predictions follow ADR-0008: reagents and outputs under an active Prediction are left out, since buying them is a Prediction buy. A blocked recipe shows no Flip to Craft row.
 - Bought reagents start Lots that crafting never closes (ADR-0007), so realized profit doesn't cover Flips to Craft yet.

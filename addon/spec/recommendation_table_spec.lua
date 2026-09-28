@@ -43,10 +43,39 @@ local function flipToCraft()
       { itemKey = "2589", quantity = 12, maxUnitPrice = 120 },
       { itemKey = "2320", quantity = 5, maxUnitPrice = 10.0, merchant = true },
     },
+    character = "Kash-Patel",
+    uses = { { itemKey = "2320", quantity = 1 } },
   }
 end
 
+-- A Holdings Craft as the Brain writes it: every reagent it uses is held.
+local function holdingsCraft()
+  return {
+    itemKey = "2997",
+    action = "Craft",
+    quantity = 3,
+    profit = 79.8,
+    note = "on Kash-Patel: uses 9 of 2592, 3 of 2320",
+    character = "Kash-Patel",
+    uses = { { itemKey = "2592", quantity = 9 }, { itemKey = "2320", quantity = 3 } },
+  }
+end
+
+local NAMES = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread", ["item:2592"] = "Wool Cloth" }
+
+local function names(itemString)
+  return NAMES[itemString]
+end
+
 describe("RecommendationTable.build", function()
+  it("sums up a Holdings Craft's Character and reagents in its note, and names what it uses in its tooltip", function()
+    local view = build(entry({ holdings = { holdingsCraft() } }), AS_OF, names)
+
+    local row = view.sections[1].rows[1]
+    assert.are.same({ "item:2997", "Craft", "3", "", "79c", "on Kash-Patel, 2 reagents" }, row.cells)
+    assert.are.same({ "Use 9 Wool Cloth", "Use 3 Coarse Thread" }, row.tooltip)
+  end)
+
   it("heads the table in two lines: the Scan's age and window hours, then gold and totals", function()
     local view = build(entry(), AS_OF + 12 * 60 + 30)
 
@@ -181,21 +210,20 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "Sales 4" }, shopping.rows[1].tooltip)
   end)
 
-  it("lists a Flip to Craft's reagent buys by name in its tooltip, in place of the ID note", function()
-    local names = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread" }
-    local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, function(itemString)
-      return names[itemString]
-    end)
+  it("lists a Flip to Craft's held reagents, then its reagent buys, by name in its tooltip", function()
+    local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, names)
 
     assert.are.same({
+      "Use 1 Coarse Thread",
       "Buy 12 Linen Cloth @ max 1s 20c",
       "Buy 5 Coarse Thread from a merchant @ 10c",
     }, view.sections[2].rows[1].tooltip)
   end)
 
-  it("shows a Flip to Craft's Action as Craft, and sums up who crafts it and how many reagents in its note", function()
+  it("shows a Flip to Craft's Action as Craft, and sums up who crafts it and how many distinct reagents", function()
     local oneBuy = flipToCraft()
     oneBuy.buys[2] = nil
+    oneBuy.uses = nil
     local view = build(entry({ shoppingList = { flipToCraft(), oneBuy } }))
 
     local rows = view.sections[2].rows
@@ -209,7 +237,7 @@ describe("RecommendationTable.build", function()
   it("names a reagent not cached yet by its Item Key", function()
     local view = build(entry({ shoppingList = { flipToCraft() } }))
 
-    assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[2].rows[1].tooltip[1])
+    assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[2].rows[1].tooltip[2])
   end)
 
   it("shows Prediction buys under the Shopping List", function()

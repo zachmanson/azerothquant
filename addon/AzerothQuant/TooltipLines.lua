@@ -58,12 +58,13 @@ local function itemKey(link)
   return table.concat(key, ":")
 end
 
--- A Craft has no price of its own (its note says what it uses), and a Hold's worth hangs on
--- its Prediction (ADR-0006).
+-- A Craft has no price of its own: it names its Character, and its reagents follow as
+-- lines of their own. One that can't be made keeps the note saying why. A Hold's worth
+-- hangs on its Prediction (ADR-0006).
 local function holdingLine(r)
   local head = "AQ: " .. r.action .. " " .. r.quantity
   if r.action == "Craft" then
-    return head .. " (" .. r.note .. ")"
+    return r.uses and (head .. " on " .. r.character) or (head .. " (" .. r.note .. ")")
   elseif r.action == "Hold" then
     return head .. " under " .. r.prediction
   end
@@ -74,8 +75,7 @@ end
 -- Craft buys the output's reagents, not the output, so it has no price.
 local function buyLine(r)
   if r.buys then
-    local character = RecommendationTable.crafter(r)
-    return "AQ: Buy reagents, Craft " .. r.quantity .. (character and (" on " .. character) or "")
+    return "AQ: Buy reagents, Craft " .. r.quantity .. " on " .. r.character
   end
   local line = "AQ: Buy " .. r.quantity .. " @ max " .. Money.format(r.price)
   if r.prediction then
@@ -84,7 +84,8 @@ local function buyLine(r)
   return line
 end
 
-function TooltipLines.forLink(recommendations, realm, faction, link)
+-- nameOf(itemString) names a Craft's reagents, as in the Recommendation Table.
+function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
   local lines = {}
   local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
   local key = link and itemKey(link)
@@ -95,6 +96,11 @@ function TooltipLines.forLink(recommendations, realm, faction, link)
     for _, r in ipairs(rows) do
       if r.itemKey == key and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r)
+        if r.action == "Craft" then
+          for _, line in ipairs(RecommendationTable.reagentLines(r, nameOf)) do
+            lines[#lines + 1] = line
+          end
+        end
       end
     end
   end

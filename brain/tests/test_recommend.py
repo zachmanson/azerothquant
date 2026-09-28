@@ -18,6 +18,7 @@ from brain.recommend import (
     Action,
     Grade,
     ReagentBuy,
+    ReagentUse,
     Row,
     grades,
     held_at_writing,
@@ -879,6 +880,8 @@ def test_held_reagents_are_crafted_when_the_output_is_worth_more(db):
             1,
             profit=pytest.approx(949.05 - 2 * 94.05),
             note="on Kash-Patel: uses 2 of 2589",
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 2),),
         ),
     ]
 
@@ -909,6 +912,8 @@ def test_crafting_stops_once_more_output_would_not_sell_within_the_horizon(db):
             6,
             profit=pytest.approx(6 * (949.05 - 20)),
             note="on Kash-Patel: uses 12 of 2589",
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 12),),
         ),
         Row(
             LINEN_KEY,
@@ -952,6 +957,8 @@ def test_recipes_competing_for_a_reagent_make_the_better_craft_first(db):
         2,
         profit=pytest.approx(2 * (949.05 - 2 * 94.05)),
         note="on Kash-Patel: uses 4 of 2589",
+        character="Kash-Patel",
+        uses=(ReagentUse(LINEN_KEY, 4),),
     )
 
 
@@ -972,7 +979,13 @@ def test_a_reagent_without_market_data_blocks_the_recipe(db):
 
     assert result[MARKET].holdings == [
         Row(ORE_KEY, None, 2, note="no data"),
-        Row(BOLT_KEY, Action.CRAFT, 0, note="on Kash-Patel: no data for 2770"),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            0,
+            note="on Kash-Patel: no data for 2770",
+            character="Kash-Patel",
+        ),
     ]
 
 
@@ -1011,7 +1024,13 @@ def test_an_output_whose_bind_type_is_unknown_blocks_the_recipe(db):
             profit=pytest.approx(2 * 99 * 0.95),
             sale_events=1,
         ),
-        Row(BOLT_KEY, Action.CRAFT, 0, note="on Kash-Patel: unknown bind type"),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            0,
+            note="on Kash-Patel: unknown bind type",
+            character="Kash-Patel",
+        ),
     ]
 
 
@@ -1032,6 +1051,8 @@ def test_a_bind_on_pickup_output_is_only_worth_its_vendor_price(db):
             1,
             profit=pytest.approx(300 - 2 * 94.05),
             note="on Kash-Patel: uses 2 of 2589",
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 2),),
         ),
     ]
 
@@ -1046,7 +1067,13 @@ def test_a_recipe_still_on_cooldown_as_of_its_read_is_blocked(db):
 
     until = datetime.fromtimestamp(T0 + 3 * HOUR).strftime("%Y-%m-%d %H:%M")
     [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
-    assert craft == Row(BOLT_KEY, Action.CRAFT, 0, note=f"on Kash-Patel: on cooldown until {until}")
+    assert craft == Row(
+        BOLT_KEY,
+        Action.CRAFT,
+        0,
+        note=f"on Kash-Patel: on cooldown until {until}",
+        character="Kash-Patel",
+    )
 
 
 def test_a_cooldown_recipe_crafts_once_per_character_whose_cooldown_has_passed(db):
@@ -1073,6 +1100,8 @@ def test_a_cooldown_recipe_crafts_once_per_character_whose_cooldown_has_passed(d
         2,
         profit=pytest.approx(2 * (949.05 - 20)),
         note="on Alt-One: uses 4 of 2589",
+        character="Alt-One",
+        uses=(ReagentUse(LINEN_KEY, 4),),
     )
 
 
@@ -1126,6 +1155,8 @@ def test_an_output_without_market_data_counts_at_its_vendor_price(db):
             1,
             profit=pytest.approx(300 - 2 * 94.05),
             note="on Kash-Patel: uses 2 of 2589",
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 2),),
         ),
         Row("2576", None, 1, note="no data, incl. 1 crafted"),
     ]
@@ -1167,6 +1198,8 @@ def test_merchant_reagents_cost_their_merchant_cost_and_missing_ones_are_bought(
             2,
             profit=pytest.approx(2 * (949.05 - 2 * 94.05 - 10)),
             note="on Kash-Patel: uses 4 of 2589, 2 of 2320 (buy 1)",
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 4), ReagentUse("2320", 1)),
         ),
     ]
 
@@ -1246,6 +1279,8 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
             cost=11 * 100,
             note="on Kash-Patel: uses 12 of 2589 (buy 11)",
             buys=(ReagentBuy(LINEN_KEY, 11, 100),),
+            character="Kash-Patel",
+            uses=(ReagentUse(LINEN_KEY, 1),),
         )
     ]
     assert result[MARKET].shopping_cost == 1100
@@ -1398,6 +1433,7 @@ def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
             profit=pytest.approx(6 * (949.05 - 10) + 4 * (125 - 10)),
             cost=100,
             note="on Kash-Patel: uses 10 of 2320 (buy 10)",
+            character="Kash-Patel",
             buys=(ReagentBuy(THREAD_KEY, 10, 10, merchant=True),),
         )
     ]
