@@ -1,3 +1,17 @@
+2026-09-28 (later 28): PC CHECKS DONE. Client restarted, `brain rebuild` (23 Scans, clean), `brain watch` restarted. Closed: #53, #86, #87, #18, #51, and #94 (a bug found and fixed on the spot: row tooltips repeated the hook's `On <Character>`/`Use` lines; now `showTooltip` skips lines already on the tooltip). Commits: c29e23d/c10d14f (Nudge.RELOAD_READY_AFTER 10 -> 50: real imports take 33-42 s even with 0 new Scans, filed #92 `later`), ec76ab6 (#94), d0f2e1c (#78: Forever posts for 2/8/24 h only, deposit = floor(Vendor Price x 5%) x 1/4/12, so `post_duration_hours` defaults to 24; 0.60 share confirmed; no 1s minimum).
+- #83: `brain replay` graded 0 Scans. Beta history is only 51.6 h, and the horizon is 7 days. Re-run from about Oct 3, and again before Oct 21. Noted on #83.
+- #85 stays open. Not checkable on today's data: #50 (no AH-bought Holdings), #33 (no chained Craft row), #75 (no blocked Craft row). Booty Bay Broker follow-up is optional.
+- Filed: #93 `later` (an all-folded tab says "No X right now" above its fold line), #95 `core` needs-triage (time-left buckets assume 12-48 h, but Forever's max post is 24 h), #96 `core` bug (AH browse rows for suffixed items have no AQ lines: the tooltip link lacks the suffix).
+- The AH event-name chat spam came from the old AQProbe spike addon, not AQ; the user disabled it.
+- Flips to Craft is empty on real data because no craft clears the Flip margin (best: 41c on 14s 94c), so it isn't a bug. To test the tab, temporarily set `flip_min_margin_share = 0` / `flip_min_margin_copper = 0` at the top of brain/config.toml.
+- Changing only the Budget never fires the "Brain should be done" nudge (that needs a new Scan), so it's easy to reload before the import is done.
+- The user's local pre-pull changes (1072 lines, looked like an older copy of the #86 work) are in `git stash` ("pre-pull local changes 2026-09-28"). Ask before dropping them.
+
+Next, in order:
+1. #96: probe the AH browse row's itemKey in game (a short /run), then fix the tooltip Item Key for suffixed items. It needs the PC.
+2. #95: grill or probe which time-left bucket an 8 h and a 24 h post show on the Beta, then fix the default.
+3. Once `core` is empty: ask whether #90 (Beta Prior, Nov 4 deadline) moves to `core`. Then the `later` queue.
+
 2026-09-28 (later 27): #53 GRILLED and BUILT, on `main`. The spec is the grill comment on the issue. New plain-Lua `Chat.lua` (first logic module in the .toc): `Chat.say` always prints; `Chat.debug` prints only while `AzerothQuantDB.debug`, which `/aq debug` flips (saved, off by default). The five local `say` helpers are gone. Debug-only now: the `Deleted N …` prune lines, `Mailbox Read saved`, `Read N recipes`, `Scan requested`, `N saved Scans not imported`, `Scan ready` (the pulsing buttons cover the last two). busted: `spec/chat_spec.lua`. `claude/zen-mccarthy-xaqoze` was already equal to `main` (the #87 merge is done). #86, #87, #18 and #53 are relabelled `needs-pc`: every open `core` issue now waits only on the PC (or on live data for #83). The #53 checks were added to #85 as a comment. Review notes left as they are (judgement calls): Chat reads the `AzerothQuantDB` and `print` globals instead of having them injected like Nudge does; `debug` guards against a nil db but `toggleDebug` doesn't (a slash command can't run before ADDON_LOADED).
 
 Next, in order:
