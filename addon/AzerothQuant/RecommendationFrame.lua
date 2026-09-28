@@ -35,7 +35,7 @@ local CONTENT_WIDTH = WIDTH - 10 - SCROLL_LEFT - SCROLLBAR_WIDTH
 local COLUMN_WIDTHS = {
   ["Holdings"] = { 230, 70, 50, 110, 110, 80 },
   -- Per click, Per day and ROI after Profit (#98).
-  ["Shopping List"] = { 170, 45, 40, 80, 80, 80, 70, 70, 50, 80 },
+  ["Shopping List"] = { 160, 45, 40, 80, 80, 90, 80, 80, 50, 80 },
   ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
 }
