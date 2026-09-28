@@ -206,7 +206,7 @@ describe("RecommendationTable.build", function()
       "Buy 12 Linen Cloth @ max 1s 20c",
       "Buy 5 Coarse Thread from a merchant @ 10c",
       "Mail 1 Coarse Thread from Alt-One to Kash-Patel",
-    }, view.sections[2].rows[1].tooltip)
+    }, view.sections[3].rows[1].tooltip)
   end)
 
   it("marks the Holdings rows whose Item Key is in the logged-in Character's bags", function()
@@ -356,6 +356,35 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Shopping List (1)", shopping.tab)
   end)
 
+  it("puts Flips to Craft in their own tab after the Shopping List, each folding over the Budget (#87)", function()
+    local dear = flipToCraft()
+    dear.cost = 3000
+    local view = build(
+      entry({
+        shoppingList = {
+          { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 3000 },
+          flipToCraft(),
+          dear,
+          { itemKey = "2589", action = "Vendor", quantity = 2, price = 100, profit = 20.0, cost = 200 },
+        },
+      }),
+      AS_OF,
+      nil,
+      nil,
+      2000
+    )
+
+    local shopping, crafts = view.sections[2], view.sections[3]
+    assert.are.equal("item:2589", shopping.rows[1].itemString)
+    assert.are.equal("Shopping List (1)", shopping.tab)
+    assert.are.equal("1 over the Budget (Reload to re-size)", shopping.more)
+    assert.are.equal("Flips to Craft", crafts.title)
+    assert.are.same(shopping.columns, crafts.columns)
+    assert.are.equal("item:2996", crafts.rows[1].itemString)
+    assert.are.equal("Flips to Craft (1)", crafts.tab)
+    assert.are.equal("1 over the Budget (Reload to re-size)", crafts.more)
+  end)
+
   it("formats the time with WoW's global date, since the client has no os library", function()
     local realOs = os
     _G.date, _G.os = realOs.date, nil
@@ -445,10 +474,11 @@ describe("RecommendationTable.build", function()
       },
     }))
 
-    assert.are.same({ "Holdings (1)", "Shopping List (0)", "Prediction buys (0)" }, {
+    assert.are.same({ "Holdings (1)", "Shopping List (0)", "Flips to Craft (0)", "Prediction buys (0)" }, {
       view.sections[1].tab,
       view.sections[2].tab,
       view.sections[3].tab,
+      view.sections[4].tab,
     })
   end)
 
@@ -464,7 +494,8 @@ describe("RecommendationTable.build", function()
     })
     assert.is_nil(view.sections[2].empty)
     assert.are.equal("Nothing on the Shopping List right now", build(entry()).sections[2].empty)
-    assert.are.equal("No Prediction buys right now", view.sections[3].empty)
+    assert.are.equal("No Flips to Craft right now", view.sections[3].empty)
+    assert.are.equal("No Prediction buys right now", view.sections[4].empty)
   end)
 
   it("shows the Shopping List under the Holdings, with Buy as a Flip to Sell's Action", function()
@@ -488,7 +519,7 @@ describe("RecommendationTable.build", function()
       "Use 1 Coarse Thread",
       "Buy 12 Linen Cloth @ max 1s 20c",
       "Buy 5 Coarse Thread from a merchant @ 10c",
-    }, view.sections[2].rows[1].tooltip)
+    }, view.sections[3].rows[1].tooltip)
   end)
 
   it("shows a Flip to Craft's Action as Craft, and sums up who crafts it and how many distinct reagents", function()
@@ -497,7 +528,7 @@ describe("RecommendationTable.build", function()
     oneBuy.uses = nil
     local view = build(entry({ shoppingList = { flipToCraft(), oneBuy } }))
 
-    local rows = view.sections[2].rows
+    local rows = view.sections[3].rows
     assert.are.same(
       { "item:2996", "Craft", "6", "", "", "45s", "12s 50c", "on Kash-Patel, 2 reagents" },
       rows[1].cells
@@ -508,10 +539,10 @@ describe("RecommendationTable.build", function()
   it("names a reagent not cached yet by its Item Key", function()
     local view = build(entry({ shoppingList = { flipToCraft() } }))
 
-    assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[2].rows[1].tooltip[2])
+    assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[3].rows[1].tooltip[2])
   end)
 
-  it("shows Prediction buys under the Shopping List", function()
+  it("shows Prediction buys after the Flips to Craft", function()
     local view = build(entry({
       predictionBuys = {
         {
@@ -526,7 +557,7 @@ describe("RecommendationTable.build", function()
       },
     }))
 
-    local buys = view.sections[3]
+    local buys = view.sections[4]
     assert.are.equal("Prediction buys", buys.title)
     assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss" }, buys.columns)
     assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s" }, buys.rows[1].cells)
@@ -612,45 +643,44 @@ describe("sorting the Recommendation Table", function()
     end
     local view = build(entry({ predictionBuys = { buy("1", 5000), buy("2", 40), buy("3", 900) } }))
 
-    local buys = view.sections[3]
+    local buys = view.sections[4]
     assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
     assert.are.same({ column = 5, descending = false }, buys.sort)
   end)
 
   it("re-sorts by a money column's value, not its text, keeping rows with no value last", function()
-    -- As text "1g" sorts before "9s"; a Flip to Craft has no Max price of its own.
-    local craft = flipToCraft()
+    -- As text "1g" sorts before "9s"; a Hold's Profit is unknown.
     local view = build(entry({
-      shoppingList = {
-        { itemKey = "1", action = "Sell", quantity = 1, price = 10000, profit = 500, cost = 10000 },
-        craft,
-        { itemKey = "3", action = "Sell", quantity = 1, price = 900, profit = 500, cost = 900 },
+      holdings = {
+        { itemKey = "1", action = "Sell", quantity = 1, price = 10000, profit = 10000 },
+        { itemKey = "2", action = "Hold", quantity = 1, price = 500, cost = 500, prediction = "Phase 2" },
+        { itemKey = "3", action = "Sell", quantity = 1, price = 900, profit = 900 },
       },
     }))
-    local shopping = view.sections[2]
+    local holdings = view.sections[1]
 
-    RecommendationTable.sort(shopping, { column = 4, descending = false })
-    assert.are.same({ "item:3", "item:1", "item:2996" }, itemStrings(shopping))
+    RecommendationTable.sort(holdings, { column = 5, descending = false })
+    assert.are.same({ "item:3", "item:1", "item:2" }, itemStrings(holdings))
 
-    RecommendationTable.sort(shopping, { column = 4, descending = true })
-    assert.are.same({ "item:1", "item:3", "item:2996" }, itemStrings(shopping))
+    RecommendationTable.sort(holdings, { column = 5, descending = true })
+    assert.are.same({ "item:1", "item:3", "item:2" }, itemStrings(holdings))
   end)
 
-  it("sorts the Shopping List by Post at, with a Flip to Craft (no Post at) last", function()
+  it("sorts the Shopping List by Post at, with a Flip to Vendor (no Post at) last", function()
     local view = build(entry({
       shoppingList = {
         { itemKey = "1", action = "Sell", quantity = 1, price = 100, postAt = 900, profit = 500, cost = 100 },
-        flipToCraft(),
+        { itemKey = "2", action = "Vendor", quantity = 1, price = 100, profit = 20, cost = 100 },
         { itemKey = "3", action = "Sell", quantity = 1, price = 100, postAt = 10000, profit = 500, cost = 100 },
       },
     }))
     local shopping = view.sections[2]
 
     RecommendationTable.sort(shopping, { column = 5, descending = true })
-    assert.are.same({ "item:3", "item:1", "item:2996" }, itemStrings(shopping))
+    assert.are.same({ "item:3", "item:1", "item:2" }, itemStrings(shopping))
 
     RecommendationTable.sort(shopping, { column = 5, descending = false })
-    assert.are.same({ "item:1", "item:3", "item:2996" }, itemStrings(shopping))
+    assert.are.same({ "item:1", "item:3", "item:2" }, itemStrings(shopping))
   end)
 
   it("sorts Holdings by ROI, with rows none of whose units were bought last", function()

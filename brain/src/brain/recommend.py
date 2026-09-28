@@ -383,7 +383,7 @@ def recommend_market(
         if config.flips_to_craft
         else []
     )
-    shopping = _options(buys, crafts, spend, config.shopping_list_rows)
+    shopping = _options(buys, crafts, spend, config.shopping_list_rows, config.craft_list_rows)
     crafted = crafting.counts
     rows = [
         _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
@@ -1947,18 +1947,25 @@ def _resells(
 
 
 def _options(
-    buys: list[_VendorBuy | _FlipToSell], crafts: list[list[_CraftBuy]], gold: float, rows: int
+    buys: list[_VendorBuy | _FlipToSell],
+    crafts: list[list[_CraftBuy]],
+    gold: float,
+    rows: int,
+    craft_rows: int,
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
-    recipe's Flips to Craft, sized as if it were the only buy within `gold`, the `rows`
-    most profitable first. A Flip to Sell is priced on the run it buys (ADR-0011)."""
+    recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
+    profitable first. The Flips to Sell and to Vendor are cut to `rows` and the Flips to
+    Craft, apart, to `craft_rows` (#87). A Flip to Sell is priced on the run it buys
+    (ADR-0011)."""
     groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
     for buy in buys:
         groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
-    options = [row for group in groups.values() for row in _option(group, [], gold)]
-    options += [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
-    options.sort(key=lambda r: -r.profit)
-    return options[:rows]
+    flips = [row for group in groups.values() for row in _option(group, [], gold)]
+    made = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
+    flips.sort(key=lambda r: -r.profit)
+    made.sort(key=lambda r: -r.profit)
+    return sorted(flips[:rows] + made[:craft_rows], key=lambda r: -r.profit)
 
 
 def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[ReagentBuy, ...]:

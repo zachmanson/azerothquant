@@ -320,6 +320,7 @@ end
 local NOTHING = {
   ["Holdings"] = "Nothing in Holdings right now",
   ["Shopping List"] = "Nothing on the Shopping List right now",
+  ["Flips to Craft"] = "No Flips to Craft right now",
   ["Prediction buys"] = "No Prediction buys right now",
 }
 
@@ -360,7 +361,7 @@ end
 
 -- holdersOf is the entry's held: which Characters hold each Item Key. inBags(itemKey), given
 -- for Holdings only, says whether the logged-in Character has it in its bags. budget, given
--- for the Shopping List only, folds away the options that cost more (#86).
+-- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
 local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget)
   local held = RecommendationTable.heldUnits(rows)
   local out = { title = title, columns = columns, rows = {}, sort = default }
@@ -450,6 +451,13 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
     end
     return false
   end
+  -- The Shopping List's Flips to Craft get their own tab (#87).
+  local flips, crafts = {}, {}
+  for _, r in ipairs(entry.shoppingList or {}) do
+    local rows = r.buys and crafts or flips
+    rows[#rows + 1] = r
+  end
+  local shoppingColumns = { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" }
   return {
     title = realm .. " " .. faction,
     header = header(entry, now, budget),
@@ -467,8 +475,20 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
       ),
       section(
         "Shopping List",
-        { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" },
-        entry.shoppingList,
+        shoppingColumns,
+        flips,
+        shoppingCells,
+        shoppingKeys,
+        { column = 6, descending = true },
+        nameOf,
+        holdersOf,
+        nil,
+        budget
+      ),
+      section(
+        "Flips to Craft",
+        shoppingColumns,
+        crafts,
         shoppingCells,
         shoppingKeys,
         { column = 6, descending = true },

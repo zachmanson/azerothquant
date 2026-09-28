@@ -1804,6 +1804,43 @@ def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db
     assert [(r.item_key, r.quantity) for r in result[MARKET].prediction_buys] == [("2771", 1)]
 
 
+def test_flips_to_craft_are_cut_apart_from_flips_to_sell_and_to_vendor(db):
+    # #87: shopping_list_rows cuts the Tin and Ore to the Tin alone, and the Bolt, under
+    # craft_list_rows, is still shown. One list, most profit first.
+    tin = "item:2771::::::::20:1490"
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"] += [row(quantity=2, unit=5), row(ORE, quantity=3, unit=5)]
+    scans[1]["listings"].append(row(tin, quantity=3, unit=1))
+    result = run(
+        db,
+        scans,
+        [character_read(money=GOLD, vendor_prices={2770: 6, 2771: 3}, recipes=[recipe()])],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert [(r.item_key, r.action, r.quantity) for r in result[MARKET].shopping_list] == [
+        (BOLT_KEY, Action.CRAFT, 6),
+        ("2771", Action.VENDOR, 3),
+    ]
+
+
+def test_craft_list_rows_cuts_the_flips_to_craft(db):
+    # #87: two recipes make Bolts, from 2 Linen or from 3. Only the better one is shown.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                money=GOLD, recipes=[recipe(), recipe(recipe_id=2964, reagents=((2589, 3),))]
+            )
+        ],
+        config=replace(CONFIG, craft_list_rows=1),
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 100),)
+
+
 def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
     # A Bolt from 1 Thread at 10 Vendors for 125. With 1 silver of gold, only 10 crafts.
     result = run(

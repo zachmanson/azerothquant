@@ -34,6 +34,7 @@ local CONTENT_WIDTH = WIDTH - 10 - SCROLL_LEFT - SCROLLBAR_WIDTH
 local COLUMN_WIDTHS = {
   ["Holdings"] = { 230, 70, 50, 110, 110, 80 },
   ["Shopping List"] = { 190, 60, 45, 95, 95, 95, 95 },
+  ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
 }
 local MAX_COLUMNS = 8
@@ -367,7 +368,7 @@ end
 
 -- Bottom tabs, one per section, in the order RecommendationTable.build gives them. A click
 -- is remembered, so /aq recs reopens that tab.
-local TAB_TITLES = { "Holdings", "Shopping List", "Prediction buys" }
+local TAB_TITLES = { "Holdings", "Shopping List", "Flips to Craft", "Prediction buys" }
 
 local function createTabs()
   for i, title in ipairs(TAB_TITLES) do

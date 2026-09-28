@@ -40,3 +40,9 @@ ADR-0010's one-pass repricing (`_buy_what_fits`) is gone.
 - A held unit's Sell price can sit under a Flip to Sell's Post at for the same Item Key. If the player takes the Flip, they post both at the Flip's price.
 - A Flip to Craft per recipe runs its own greedy loop, and several can walk the same Sub-craft chains. Watch `brain recommend` speed on real data.
 - Grades frozen before this keep their numbers. Later ones value held units with nothing bought.
+
+## Amendment: Flips to Craft get their own cap and tab (#87)
+
+With one cut, Flips to Craft (often tens of silver) fell off a busy Scan's list behind big Flips to Sell, though the player wants to see them. Now the Flips to Sell and to Vendor are sorted by profit and cut to `shopping_list_rows` (50), and the Flips to Craft apart to `craft_list_rows` (25). `shopping` stays one list, the two cuts together, most profit first. The Addon shows the Flips to Craft (the rows with `buys`) in their own **Flips to Craft** tab after the Shopping List, with the same columns. Each tab folds its own options over the Budget.
+
+Replay's `_taken` is unchanged: it goes through the (now longer) list in profit order while the gold lasts, so it grades what the player is shown. Replay numbers from before this change aren't comparable to later ones, since up to 75 options can now be taken.
