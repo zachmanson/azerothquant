@@ -20,6 +20,8 @@ Next, in order:
 Next, in order:
 1. Grill #78 (AH deposits), then needs-info: #33, #19, #38, #44, #45, #15, #14.
 
+The user is away from the PC (no game, no `brain watch`): don't ask for PC steps. When they're back, the parked list in the (later 7) entry still stands, and its `brain watch` restart also picks up #66 and #69.
+
 2026-09-28 (later 7): #67, #73, #75 and #71 LANDED on main (fast-forward to e5f3745) and closed. The user couldn't get in game, so these are parked for when they're back at the PC:
 - Restart `brain watch` (stop all 3 brain.exe/python processes), then /reload. No new Addon files, so no client restart.
 - #75: a blocked Craft row's Note and tooltips say `no market data for <Name>` (not an item ID).
