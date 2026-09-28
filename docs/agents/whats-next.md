@@ -1,3 +1,18 @@
+2026-09-28 (later 18): GRILLED #77 and #84. Both specs are comments on the issues, and both are labelled ready-for-agent.
+- #77 (Craft Chain panel): it no longer waits on #76, which gets a reserved `disenchant` node kind (noted on #76).
+  - Brain: every Craft row (blocked ones too) gets a nested `chain` tree. Node kinds: sell/vendor/craft/use/buy/merchant/leftover. Quantities are row totals, and gold follows `_Sources.cost`. A test asserts the nodes add up to the row's `profit`. `via`/`uses`/`buys` stay.
+  - CLI: `brain recommend --chain <item>`.
+  - Addon: a plain click selects a row, and a shift-click links it in chat (this changes today's click). Selecting a Craft row opens a panel about 300px wide, docked right of the frame: a top-down tree with elbow connectors and a Profit footer. The layout goes in a new plain-Lua `CraftChain.lua` (a .toc change, so the client needs a restart).
+  - Docs: CONTEXT.md gets **Craft Chain**, and ADR-0014 and ADR-0016 get amendments.
+- #84 (own-Market Sell Rate ablation): `recommend_market` takes an optional injected pricer, built only in `replay.py` (DBMarket + the TSM post rule). When given, it replaces the Sell Rate everywhere: unlimited room, has_data = has a DBMarket, no `max_sale_price` cap (the Merchant cap stays), and no expected lost Deposits. It runs on every replay, and the grader is unchanged.
+- #82: /research running in the background, writing docs/research/booty-bay-broker.md.
+
+Next, in order (none need the PC):
+1. #84 build (/tdd), then /code-review + commit. It's small and the Beta replay before Oct 21 wants it.
+2. #77 build (/tdd), then /code-review + commit.
+3. Act on the #82 research verdict.
+4. The needs-triage queue: #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 17): #79 BUILT on branch claude/zen-mccarthy-xaqoze. MailDumpSpike.lua is deleted, along with its .toc line and the two spike comments. `/aq` in RecommendationFrame.lua no longer chains to a previous handler, and an unknown command prints the usage line. Mailbox.lua's ADDON_LOADED sets `AzerothQuantDB.mailDumpSpike = nil`. No busted test: the slash handler is WoW glue (it calls the file-local toggle/reload/say, and the file runs CreateFrame when it loads). /code-review found nothing blocking. The branch is now 6 commits ahead of main, and main hasn't moved. The user merges it when they say to.
 
 User to do at the PC (add to #85): after merging, fully restart the client (a .toc change isn't picked up by /reload). Then check that `/aq foo` prints the usage line and that `/aq recs` still toggles the table.
