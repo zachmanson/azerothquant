@@ -1950,22 +1950,23 @@ def _options(
     buys: list[_VendorBuy | _FlipToSell],
     crafts: list[list[_CraftBuy]],
     gold: float,
-    rows: int,
+    flip_rows: int,
     craft_rows: int,
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
-    profitable first. The Flips to Sell and to Vendor are cut to `rows` and the Flips to
-    Craft, apart, to `craft_rows` (#87). A Flip to Sell is priced on the run it buys
+    profitable first. The Flips to Sell and to Vendor are cut to `flip_rows` and the Flips
+    to Craft, apart, to `craft_rows` (#87). A Flip to Sell is priced on the run it buys
     (ADR-0011)."""
     groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
     for buy in buys:
         groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
     flips = [row for group in groups.values() for row in _option(group, [], gold)]
-    made = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
+    crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
     flips.sort(key=lambda r: -r.profit)
-    made.sort(key=lambda r: -r.profit)
-    return sorted(flips[:rows] + made[:craft_rows], key=lambda r: -r.profit)
+    crafted.sort(key=lambda r: -r.profit)
+    # One list again, most profit first: Replay takes the options in that order.
+    return sorted(flips[:flip_rows] + crafted[:craft_rows], key=lambda r: -r.profit)
 
 
 def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[ReagentBuy, ...]:

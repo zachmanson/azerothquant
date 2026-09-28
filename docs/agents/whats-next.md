@@ -1,3 +1,9 @@
+2026-09-28 (later 26): #87 BUILT on branch `claude/zen-mccarthy-xaqoze` (a cloud session, so it's not on `main` yet: merge it before the PC checks). `_options` cuts the Flips to Sell and Flips to Vendor to `shopping_list_rows` (50), and the Flips to Craft apart to the new `craft_list_rows` (25). `shopping` is still one list sorted by profit. The Addon splits `shoppingList` into a **Flips to Craft** tab after the Shopping List. It splits on `action == "Craft"`, not `r.buys`, because the writer leaves out an empty `buys`. Each tab folds its own options over the Budget. ADR-0017 amendment and CONTEXT.md updated. The PC check was added to #85 as a comment. The #85/#86/#18/#51 PC checks were NOT done: the user was away from the PC. Review notes left as they are (judgement calls): `load_config` has four copies of the whole-number check, where a `_parse_whole` helper would fit; the Addon still tests `r.buys` for "is a Flip to Craft" in its cells and tooltips.
+
+Next, in order:
+1. Merge `claude/zen-mccarthy-xaqoze` into `main`. Then, at the PC: the #85 checklist (including `brain replay` for #83 and the new #87 tab check), the PC checks on #86 and #18, and #51. File a `core` bug for anything that fails. Close #87 once its tab check passes.
+2. #53 grill, then build.
+
 2026-09-28 (later 25): SCOPED. Every open issue now has a `core` or `later` label (see docs/agents/triage-labels.md). Work only on `core` until that queue is empty; new issues default to `later`. The Next lists in the older entries below are superseded by this one.
 - core: #85, #86 and #18 (PC checks of built features), #51 (PC check), #83 (the Beta replay read, by Oct 21), #87 (Flips to Craft section), #53 (quieter chat).
 - later: everything else, including #84, #88, #76, #77, #89, #90 and #91. #90 (Beta Prior) has a Nov 4 deadline, so as `later` it most likely won't make launch. Ask the user whether to move it to `core` or accept thin recommendations for the first days of Live.

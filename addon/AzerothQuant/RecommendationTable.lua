@@ -454,7 +454,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
   -- The Shopping List's Flips to Craft get their own tab (#87).
   local flips, crafts = {}, {}
   for _, r in ipairs(entry.shoppingList or {}) do
-    local rows = r.buys and crafts or flips
+    local rows = r.action == "Craft" and crafts or flips
     rows[#rows + 1] = r
   end
   local shoppingColumns = { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" }
