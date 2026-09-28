@@ -144,6 +144,14 @@ def db():
     conn.close()
 
 
+@pytest.fixture
+def other_db():
+    """A second History, for a run beside the one in `db` (#67)."""
+    conn = open_history(":memory:")
+    yield conn
+    conn.close()
+
+
 def run(db, scans=(), reads=(), config=CONFIG, predictions=(), mailbox_reads=()):
     import_scans(db, list(scans), Era.BETA, config)
     import_mailbox_reads(db, list(mailbox_reads), Era.BETA, config)
@@ -556,6 +564,42 @@ def test_a_flip_to_sell_buys_no_more_than_sells_within_the_horizon(db):
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 6, 500)
 
 
+def test_held_units_that_fill_the_horizon_leave_no_flip_to_sell(db):
+    # #67: 6 sell within the horizon and 6 are held, so the cheap 500s aren't bought.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=6, unit=500), unit=1000),
+        [character_read(item(count=6), money=GOLD)],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_to_sell_buys_only_the_room_held_units_leave(db):
+    # #67: 6 sell within the horizon and 2 are held, so only the 500s are bought, not the
+    # 700s too. Posted at 699 they still clear the margin.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=4, unit=500), row(quantity=2, unit=700), unit=1000),
+        [character_read(item(count=2), money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price, flip.post_at) == (Action.SELL, 4, 500, 699)
+
+
+def test_bound_held_units_leave_the_room_to_flips(db):
+    # #67: bound units can't be sold, so all 6 of the 500s are bought.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=6, unit=500), unit=1000),
+        [character_read(item(count=6, bound=True), money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity) == (Action.SELL, 6)
+
+
 def test_a_flip_to_sell_is_never_resold_above_the_dearest_sale(db):
     # #41: a lone 845 is all that's left once the 300 is bought, but the only sale was at
     # 100. Resold at 100 less the cut, the 300 is a loss.
@@ -721,20 +765,21 @@ def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 6, 500)
 
 
-def test_holdings_are_discounted_less_than_flips(db):
+def test_holdings_are_discounted_less_than_flips(db, other_db):
     # The default Sell Rate Prior for Holdings, 3 h: 1 / 3.3 h * 24 * 7 days = 50.9 of the 100
-    # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought.
-    result = run(
-        db,
-        one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700)),
-        [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
-        config=replace(DEFAULTS, flip_min_sale_events=1),
+    # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought. Held
+    # units take the room before Flips (#67), so the Flips are judged with none held.
+    config = replace(DEFAULTS, flip_min_sale_events=1)
+    scans = one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700))
+    holding = run(
+        db, scans, [character_read(item(count=100), vendor_prices={2589: 10})], config=config
     )
+    flipping = run(other_db, scans, [character_read(money=GOLD)], config=config)
 
-    sell, vendor = result[MARKET].holdings
+    sell, vendor = holding[MARKET].holdings
     assert (sell.action, sell.quantity) == (Action.SELL, 50)
     assert (vendor.action, vendor.quantity) == (Action.VENDOR, 50)
-    [flip] = result[MARKET].shopping_list
+    [flip] = flipping[MARKET].shopping_list
     assert (flip.action, flip.quantity) == (Action.SELL, 6)
 
 
@@ -820,21 +865,21 @@ def one_buyer_takes_a_20_stack(*latest_rows):
     ]
 
 
-def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db):
+def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db, other_db):
     # Holdings, 1 Sale Event: (20 + 1 * 2) / 2 = 11 units, at 48 events a day = 66 in 3 h.
-    # Flips, 5: (20 + 5 * 2) / 6 = 5 units, 30 in 3 h.
+    # Flips, 5: (20 + 5 * 2) / 6 = 5 units, 30 in 3 h. Held units take the room before
+    # Flips (#67), so the Flips are judged with none held.
     config = replace(CONFIG, sale_size_prior_events_holdings=1, sale_size_prior_events_flips=5)
-    result = run(
-        db,
-        one_buyer_takes_a_20_stack(row(quantity=30, unit=500), row(quantity=10, unit=700)),
-        [character_read(item(count=100), money=GOLD, vendor_prices={2589: 10})],
-        config=config,
+    scans = one_buyer_takes_a_20_stack(row(quantity=30, unit=500), row(quantity=10, unit=700))
+    holding = run(
+        db, scans, [character_read(item(count=100), vendor_prices={2589: 10})], config=config
     )
+    flipping = run(other_db, scans, [character_read(money=GOLD)], config=config)
 
-    sell, vendor = result[MARKET].holdings
+    sell, vendor = holding[MARKET].holdings
     assert (sell.action, sell.quantity) == (Action.SELL, 66)
     assert (vendor.action, vendor.quantity) == (Action.VENDOR, 34)
-    [flip] = result[MARKET].shopping_list
+    [flip] = flipping[MARKET].shopping_list
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 30, 500)
 
 
@@ -1392,6 +1437,18 @@ def test_a_flip_to_crafts_sell_room_is_net_of_held_and_flipped_output(db):
     assert (craft.action, craft.quantity) == (Action.CRAFT, 3)
 
 
+def test_crafted_output_takes_the_sale_horizon_before_a_flip_to_sell(db):
+    # #67: 12 held Linen craft the 6 Bolts that sell within the horizon, so the cheap
+    # Bolt isn't bought to Sell.
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"].append(row(BOLT, unit=500))
+    result = run(db, scans, [character_read(item(count=12), money=GOLD, recipes=[recipe()])])
+
+    craft = next(r for r in result[MARKET].holdings if r.action is Action.CRAFT)
+    assert (craft.item_key, craft.quantity) == (BOLT_KEY, 6)
+    assert result[MARKET].shopping_list == []
+
+
 @pytest.mark.parametrize(("bolt", "crafts"), [(1000, 6), (400, 6), (300, 0)])
 def test_a_flip_to_craft_must_clear_the_flip_margin_on_its_gold(db, bolt, crafts):
     # 2 Linen at 100 a Bolt: 200 of gold needs 1 silver back. A Bolt at 400 Sells for 380
@@ -1907,9 +1964,9 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
 
 
 def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(db):
-    # #64: on the written day the two 700s were a Flip to Sell, so the 6 that Sell are
-    # posted under the 1000s at 999, 949.05 after the cut, not under the 700s. The later
-    # Scans at 500 must not count.
+    # #64: on the written day the two 700s were a Flip to Sell (6 sell within the horizon
+    # and 4 are held, #67), so the 4 are posted under the 1000s at 999, 949.05 after the
+    # cut, not under the 700s. The later Scans at 500 must not count.
     written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
     later = T0 + 3 * DAY
     run(
@@ -1919,11 +1976,11 @@ def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(d
             scan(later, row(quantity=20, unit=500)),
             scan(later + HOUR, row(quantity=18, unit=500)),
         ],
-        [character_read(item(count=10), money=GOLD, vendor_prices={2589: 10})],
+        [character_read(item(count=4), money=GOLD, vendor_prices={2589: 10})],
     )
 
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
-        Held("Linen spike", LINEN_KEY, units=10, cost=5734)  # 6 * 949.05 + 4 * 10
+        Held("Linen spike", LINEN_KEY, units=4, cost=3796)  # 4 * 949.05
     ]
 
 

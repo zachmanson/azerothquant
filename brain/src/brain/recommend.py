@@ -9,10 +9,11 @@ and Sell Rate from the Observation Windows before it. All amounts are copper.
 import math
 import sqlite3
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from enum import StrEnum
+from types import MappingProxyType
 
 from brain.config import Config
 from brain.fair_value import Supply, fair_value
@@ -233,14 +234,16 @@ def recommend(
         today = date.fromtimestamp(now)
         active = [p for p in predictions if p.active_on(today)]
         under = {k: p.name for p in active for k in p.item_keys}
-        valuer, buys = _valuer(conn, config, market, now, set(under))
+        holdings = _market_holdings(conn, market, characters)
+        # The Craft Actions value outputs after the Flips, sized with what's held now.
+        valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings))
         supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
         vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
         plans = _plans(known_recipes(conn, market), now)
-        crafting = _crafts(
-            _market_holdings(conn, market, characters), plans, merchant, valuer, set(under), config
-        )
+        crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
         held, crafted = crafting.after, crafting.counts
+        # The crafts change what's held, so the Flips are sized again after them (#67).
+        valuer, buys = valuer.flips(set(under), _unbound_units(held))
         gold = pooled_gold(conn, market.era, market.realm, market.faction)
         hold_buys = [
             buy
@@ -254,7 +257,7 @@ def recommend(
                 rates.get(item_key),
                 vendor.get(_item_id(item_key)),
                 merchant.get(item_key),
-                held[item_key].bags + held[item_key].bank if item_key in held else 0,
+                _unbound(held.get(item_key, Holding())),
                 cut,
                 config,
             )
@@ -407,7 +410,7 @@ def _exit_value(
     data to choose an exit count at the Vendor Price, as when Holding them (_hold)."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
-    valuer, buys = _valuer(conn, config, market, scan)
+    valuer, buys = _valuer(conn, config, market, scan, unbound={item_key: units})
     gold = pooled_gold(conn, market.era, market.realm, market.faction, scan)
     _, valuer = _buy_what_fits(valuer, buys, [], gold, config)
     return valuer.worth(item_key, Holding(bags=units))
@@ -419,10 +422,12 @@ def _valuer(
     market: Market,
     at: int | None,
     under: set[str] = frozenset(),
+    unbound: Mapping[str, int] = MappingProxyType({}),
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, which held units are priced after (#64). Item Keys `under` a
-    Prediction aren't Flipped."""
+    Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
+    which take the Sale Horizon before any Flip to Sell (#67)."""
     scanned = at is not None
     supply = supply_at(conn, market, at) if scanned else {}
     others = supply_at(conn, market, at, others_only=True) if scanned else {}
@@ -430,26 +435,8 @@ def _valuer(
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = _cut(market, config)
-    buys = [
-        buy
-        for item_key, offers in sorted(others.items())
-        if item_key not in under
-        for buy in _flips(
-            item_key,
-            offers,
-            supply[item_key],
-            rates.get(item_key),
-            vendor.get(_item_id(item_key)),
-            merchant.get(item_key),
-            cut,
-            config,
-        )
-    ]
-    flipped: dict[str, Supply] = {}
-    for b in buys:
-        units = b.whole.units if isinstance(b, _FlipToSell) else [(b.unit_buyout, b.quantity)]
-        flipped.setdefault(b.item_key, []).extend(units)
-    return _Valuer(supply, others, flipped, rates, vendor, merchant, cut, config), buys
+    valuer = _Valuer(supply, others, {}, rates, vendor, merchant, cut, config)
+    return valuer.flips(under, unbound)
 
 
 class _Valuer:
@@ -483,6 +470,34 @@ class _Valuer:
             self.cut,
             self._config,
         )
+
+    def flips(
+        self, under: set[str], unbound: Mapping[str, int]
+    ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
+        """The Flips in this Scan, from Item Keys not `under` a Prediction, with the
+        `unbound` held units taking the Sale Horizon first (#67), and this Valuer after
+        them."""
+        buys = [
+            buy
+            for item_key, offers in sorted(self.others.items())
+            if item_key not in under
+            for buy in _flips(
+                item_key,
+                offers,
+                self.supply[item_key],
+                self.rates.get(item_key),
+                self.vendor.get(_item_id(item_key)),
+                self.merchant.get(item_key),
+                unbound.get(item_key, 0),
+                self.cut,
+                self._config,
+            )
+        ]
+        flipped: dict[str, Supply] = {}
+        for b in buys:
+            units = b.whole.units if isinstance(b, _FlipToSell) else [(b.unit_buyout, b.quantity)]
+            flipped.setdefault(b.item_key, []).extend(units)
+        return self.after(flipped), buys
 
     def post_at(self, item_key: str) -> float | None:
         """The price to post one unit at once `flipped` is bought (`_post_at`)."""
@@ -1002,6 +1017,10 @@ def _unbound(h: Holding) -> int:
     return h.bags + h.bank
 
 
+def _unbound_units(held: dict[str, Holding]) -> dict[str, int]:
+    return {key: _unbound(h) for key, h in held.items()}
+
+
 def _crafted(plan: _Plan, holding: Holding) -> Holding:
     """`holding` with one more craft's output added, at the recipe's least quantity."""
     q = plan.recipe.quantity_min
@@ -1183,18 +1202,20 @@ def _flips(
     rate: SellRate | None,
     vendor_price: int | None,
     merchant_cost: float | None,
+    held: int,
     cut: float,
     config: Config,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
 
-    Buy to Sell takes no more than sells within the Sale Horizon, and posts just under
-    the cheapest other player's Listing left once they're bought (`_post_at`), so they
-    sell first. A cheap Listing that would undercut the resale is worth buying through,
-    so every run of the cheapest offers is tried, and the one with the most profit whose
-    every unit clears the Flip margin is bought (#62); the shorter runs that clear it are
-    kept for when gold can't buy that one (ADR-0011). The resale is never above the
+    Buy to Sell takes no more than sells within the Sale Horizon after the `held`
+    unbound units, which take it first (#67), and posts just under the cheapest other
+    player's Listing left once they're bought (`_post_at`), so they sell first. A cheap
+    Listing that would undercut the resale is worth buying through, so every run of the
+    cheapest offers is tried, and the one with the most profit whose every unit clears
+    the Flip margin is bought (#62); the shorter runs that clear it are kept for when
+    gold can't buy that one (ADR-0011). The resale is never above the
     dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
     taken at its word (#41), nor above what a merchant charges for it (#63). Nothing is
     bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
@@ -1203,7 +1224,7 @@ def _flips(
     offers = sorted(offers)
     runs: list[_SellRun] = []
     prefix: Supply = []
-    room = _flip_room(rate, config)
+    room = max(0, _flip_room(rate, config) - held)
     cap = _ceiling(rate.max_sale_price if rate else None, merchant_cost)
     for unit, quantity in offers:
         take = min(quantity, room)

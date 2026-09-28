@@ -181,7 +181,7 @@ The Addon's in-game view of one Market's Recommendations (Holdings, Shopping Lis
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:
-How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it.
+How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it. Held units take it first: a Flip to Sell gets only the room left after the held units that aren't bound (after the Craft Actions), even ones that end up Vendored, since their gold is already spent and a Flip is optional. Best Exit Value follows the same rule.
 _Avoid_: timeout, patience
 
 **Shopping List**:
