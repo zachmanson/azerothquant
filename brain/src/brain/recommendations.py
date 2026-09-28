@@ -55,6 +55,8 @@ _HEADER = (
     "-- A Holdings Sell or Vendor row whose units were bought on the Auction House has\n"
     "-- paid (per unit), paidUnits (how many units that covers), roi (a share, after\n"
     "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
+    "-- held[itemKey] says which Characters hold it, by name: { { character, bags, bank,\n"
+    "-- bound } }, where bound is the part of bags and bank that can't be mailed or sold.\n"
 )
 
 
@@ -94,6 +96,13 @@ def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict
             "holdings": [_row(r) for r in m.holdings],
             "shoppingList": [_row(r) for r in m.shopping_list],
             "predictionBuys": [_row(r) for r in m.prediction_buys],
+            "held": {
+                item_key: [
+                    {"character": h.character, "bags": h.bags, "bank": h.bank, "bound": h.bound}
+                    for h in whose
+                ]
+                for item_key, whose in m.held.items()
+            },
         }
     return by_realm
 

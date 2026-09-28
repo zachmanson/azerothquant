@@ -1,3 +1,13 @@
+2026-09-28 (later 15): #38 BUILT on branch claude/zen-mccarthy-xaqoze (issue still open). `MarketRecommendations.held`: Item Key -> `CharacterHolding(character, bags, bank, bound)` per Character, by name, from the same Reads as Holdings (`recommend._by_character`; `market_holdings` = `_pooled` of it). `bags`/`bank` are totals and `bound` is the part of them that's bound. Written to Recommendations.lua as `held`. Addon (RecommendationTable.lua): `holderLines(whose)` gives `On X: 12 bags, 30 bank (5 bound)` at the end of row and item tooltips. `reagentLines(r, nameOf, whose)` adds `Mail n <Reagent> from Y to <crafter>` lines: the Characters with the most unbound units go first, and the crafter's own bound units count toward what it has. `build(..., character)` puts `RecommendationTable.BAG` (the backpack icon) in front of the Holdings Item cell when the logged-in Character (UnitFullName joined with "-") has the Item Key in its bags. ADR-0009 amendment, CONTEXT.md **Holdings**. /code-review was started while committing: check its findings and fix any.
+
+Known limit: `uses` covers the whole chain, so a reagent a Sub-craft on another Character uses is still mailed to the top crafter.
+
+User to do at the PC: /reload (no new files). Hover a Holdings row and a Craft row, and check the `On X` and `Mail` lines and the bag icon. Then close #38.
+
+Next, in order:
+1. Run the replay on the Beta data (user, before Oct 21), and fix anything it shows.
+2. #79 (small). Then the #77 grill, the #84 grill and #82 /research. The #81 probe waits until the user is at the PC.
+
 2026-09-28 (later 14): #80 BUILT on branch claude/zen-mccarthy-xaqoze (issue still open). New `brain/replay.py` and the `brain replay [--since DAY] [--until DAY]` command. Per Market, it grades every Scan that has a whole Sale Horizon of Scans after it. Each policy's grade is the **value added over holding on**: Vendor gold, plus posts filled by later Sale Events (a Sale Event's dearest price at or above the post, up to its units, cheapest posts first), less Deposits lost, plus what's still held at the end of the horizon at Best Exit Value (`recommend.exit_values`), less gold spent, less the same Holdings untouched. The policies:
 - Brain: `recommend.recommend_market(..., now=t, as_of=t)`, now split out of `recommend`, with the Holdings and gold of then.
 - Auctionator: flips an ask under the next one by more than the cut plus the Deposit, and posts 1c under the cheapest other Listing, or Vendors.

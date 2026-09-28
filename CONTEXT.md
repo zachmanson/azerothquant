@@ -197,7 +197,7 @@ The Recommendations for things to buy on the Auction House.
 _Avoid_: buy list, snipes
 
 **Holdings**:
-Every Item Key the player's Characters own in bags and banks, each with its Recommendation. Built from each Character's latest Character Read, taking the bank from the latest Read that has one. Keyring, equipped gear and unclaimed mail are not Holdings. Held units a Craft Action or a Shopping List Flip to Craft uses show only on that craft's row, not as their own Holdings row.
+Every Item Key the player's Characters own in bags and banks, each with its Recommendation. Built from each Character's latest Character Read, taking the bank from the latest Read that has one. Keyring, equipped gear and unclaimed mail are not Holdings. Held units a Craft Action or a Shopping List Flip to Craft uses show only on that craft's row, not as their own Holdings row. Recommendations pool the Characters of a Market, but the Recommendation Table shows which Characters hold each Item Key, and what to mail a crafter (ADR-0009).
 _Avoid_: inventory (that's only bags), stock
 
 **Character**:

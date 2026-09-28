@@ -1,5 +1,6 @@
 -- Turns an item link into the lines the Addon adds to that item's tooltip: one per
--- Recommendation the Market has for its Item Key, e.g. "AQ: Sell 2 @ 1g 28s".
+-- Recommendation the Market has for its Item Key, e.g. "AQ: Sell 2 @ 1g 28s", then one
+-- per Character holding it.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted.
 local _, ns = ...
@@ -94,11 +95,12 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
     return lines
   end
   local held = RecommendationTable.heldUnits(entry.holdings)[key]
+  local whose = entry.held or {}
   local function add(rows, lineOf)
     for _, r in ipairs(rows) do
       if r.itemKey == key and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r, nameOf)
-        local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf)
+        local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf, whose)
           or RecommendationTable.roiLines(r, held)
         for _, line in ipairs(details) do
           lines[#lines + 1] = line
@@ -109,6 +111,9 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
   add(entry.holdings, holdingLine)
   add(entry.shoppingList, buyLine)
   add(entry.predictionBuys, buyLine)
+  for _, line in ipairs(RecommendationTable.holderLines(whose[key])) do
+    lines[#lines + 1] = line
+  end
   return lines
 end
 

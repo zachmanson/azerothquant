@@ -268,7 +268,8 @@ function redraw()
     GetRealmName(),
     UnitFactionGroup("player"),
     time(),
-    nameOf
+    nameOf,
+    table.concat({ UnitFullName("player") }, "-")
   )
   local n = 0
   local function add(texts, widths, font, item, justify)

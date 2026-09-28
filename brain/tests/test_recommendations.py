@@ -7,6 +7,7 @@ from brain.recommend import (
     Action,
     Blocked,
     BlockReason,
+    CharacterHolding,
     MarketRecommendations,
     ReagentBuy,
     ReagentUse,
@@ -351,4 +352,31 @@ def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
         "2840	2	Alt-One",
         "2996	1	Kash-Patel",
         "nil",
+    ]
+
+
+def test_a_real_lua_reads_which_characters_hold_each_item_key(tmp_path, lua):
+    # #38: keyed by Item Key, not by row, since a split row can't say whose units go where.
+    held = {
+        "2589": [
+            CharacterHolding("Alt-One", bags=4),
+            CharacterHolding("Kash-Patel", bags=17, bank=30, bound=5),
+        ]
+    }
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, held=held)]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local held = r.recommendations["Quel\'Thalas"].Horde.held '
+        'for _, h in ipairs(held["2589"]) do print(h.character, h.bags, h.bank, h.bound) end',
+    )
+
+    assert out.splitlines() == [
+        "Alt-One	4	0	0",
+        "Kash-Patel	17	30	5",
     ]

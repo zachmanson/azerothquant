@@ -250,6 +250,17 @@ class _Queue:
 
 
 @dataclass(frozen=True)
+class CharacterHolding:
+    """How many units of an Item Key one Character holds. `bound` is the part of
+    `bags` and `bank` that can't be mailed or sold."""
+
+    character: str
+    bags: int = 0
+    bank: int = 0
+    bound: int = 0
+
+
+@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -271,6 +282,9 @@ class MarketRecommendations:
     # caps are halved while their pooled return is negative (ADR-0006).
     grades: list[Grade] = field(default_factory=list)
     pooled_return: float | None = None  # None with nothing graded
+    # Where the held units are, by Item Key: the raw Holdings before any craft uses them.
+    # Recommendations pool the Characters; this only says whose they are (#38).
+    held: dict[str, list[CharacterHolding]] = field(default_factory=dict)
 
 
 def recommend(
@@ -299,7 +313,8 @@ def recommend_market(
     today = date.fromtimestamp(now)
     active = [p for p in predictions if p.active_on(today)]
     under = {k: p.name for p in active for k in p.item_keys}
-    holdings = market_holdings(conn, market, characters, as_of)
+    by_character = _by_character(conn, market, characters, as_of)
+    holdings = _pooled(by_character)
     # The Craft Actions value outputs after the Flips, sized with what's held now.
     valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings))
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
@@ -383,6 +398,7 @@ def recommend_market(
         unlinked_sales=sum(o.kind is MailKind.SOLD and o.item_key is None for o in linked),
         grades=graded,
         pooled_return=pooled,
+        held=_whose(by_character),
     )
 
 
@@ -723,9 +739,20 @@ def market_holdings(
 ) -> dict[str, Holding]:
     """What the Market's Characters hold between them, by Item Key. Mail moves items
     between them, so the Sale Horizon applies to the total."""
+    return _pooled(_by_character(conn, market, characters, as_of))
+
+
+def _by_character(
+    conn: sqlite3.Connection, market: Market, characters: list[str], as_of: int | None
+) -> dict[str, dict[str, Holding]]:
+    """What each of the Market's Characters holds, by Character, then Item Key."""
+    return {c: holdings(conn, market.era, market.realm, c, as_of) for c in characters}
+
+
+def _pooled(by_character: dict[str, dict[str, Holding]]) -> dict[str, Holding]:
     total: dict[str, Holding] = {}
-    for character in characters:
-        for item_key, h in holdings(conn, market.era, market.realm, character, as_of).items():
+    for held in by_character.values():
+        for item_key, h in held.items():
             t = total.get(item_key, Holding())
             total[item_key] = Holding(
                 t.bags + h.bags,
@@ -734,6 +761,22 @@ def market_holdings(
                 t.bank_bound + h.bank_bound,
             )
     return dict(sorted(total.items()))
+
+
+def _whose(by_character: dict[str, dict[str, Holding]]) -> dict[str, list[CharacterHolding]]:
+    """Which Characters hold each Item Key, and how many where, Characters by name."""
+    whose: dict[str, list[CharacterHolding]] = {}
+    for character, held in sorted(by_character.items()):
+        for item_key, h in held.items():
+            whose.setdefault(item_key, []).append(
+                CharacterHolding(
+                    character,
+                    bags=h.bags + h.bags_bound,
+                    bank=h.bank + h.bank_bound,
+                    bound=h.bags_bound + h.bank_bound,
+                )
+            )
+    return dict(sorted(whose.items()))
 
 
 def _holding_rows(

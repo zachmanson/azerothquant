@@ -6,8 +6,8 @@ local function noNames()
   return nil
 end
 
-local function build(recommendations, now, nameOf)
-  return RecommendationTable.build(recommendations, REALM, FACTION, now or 0, nameOf or noNames)
+local function build(recommendations, now, nameOf, character)
+  return RecommendationTable.build(recommendations, REALM, FACTION, now or 0, nameOf or noNames, character)
 end
 
 local AS_OF = 1790524206
@@ -109,6 +109,51 @@ describe("RecommendationTable.reagentLines", function()
   end)
 end)
 
+describe("RecommendationTable.reagentLines' mail lines", function()
+  local craft = {
+    itemKey = "2997",
+    action = "Craft",
+    quantity = 1,
+    character = "Kash-Patel",
+    uses = {
+      { itemKey = "2589", quantity = 20 },
+      { itemKey = "2320", quantity = 3 },
+      { itemKey = "2592", quantity = 9 },
+    },
+  }
+
+  it("mails a held reagent the crafter is short of from the biggest holders first, never bound units", function()
+    local whose = {
+      -- The crafter's own bound units still count: it can use them.
+      ["2589"] = {
+        { character = "Alt-One", bags = 12, bank = 0, bound = 2 },
+        { character = "Bank-Alt", bags = 0, bank = 8, bound = 0 },
+        { character = "Kash-Patel", bags = 5, bank = 0, bound = 2 },
+      },
+      ["2320"] = { { character = "Kash-Patel", bags = 3, bank = 0, bound = 0 } },
+      ["2592"] = {
+        { character = "Alt-One", bags = 4, bank = 0, bound = 4 },
+        { character = "Kash-Patel", bags = 5, bank = 0, bound = 0 },
+      },
+    }
+
+    assert.are.same({
+      "Use 20 Linen Cloth",
+      "Use 3 Coarse Thread",
+      "Use 9 Wool Cloth",
+      "Mail 10 Linen Cloth from Alt-One to Kash-Patel",
+      "Mail 5 Linen Cloth from Bank-Alt to Kash-Patel",
+    }, RecommendationTable.reagentLines(craft, names, whose))
+  end)
+
+  it("mails nothing without knowing who holds what", function()
+    assert.are.same(
+      { "Use 20 Linen Cloth", "Use 3 Coarse Thread", "Use 9 Wool Cloth" },
+      RecommendationTable.reagentLines(craft, names)
+    )
+  end)
+end)
+
 describe("RecommendationTable.build", function()
   it("sums up a Holdings Craft's Character and reagents in its note, and names what it uses in its tooltip", function()
     local view = build(entry({ holdings = { holdingsCraft() } }), AS_OF, names)
@@ -116,6 +161,53 @@ describe("RecommendationTable.build", function()
     local row = view.sections[1].rows[1]
     assert.are.same({ "item:2997", "Craft", "3", "", "79c", "", "on Kash-Patel, 2 reagents" }, row.cells)
     assert.are.same({ "Use 9 Wool Cloth", "Use 3 Coarse Thread" }, row.tooltip)
+  end)
+
+  it("ends a row's tooltip with which Characters hold its Item Key", function()
+    local sell = { itemKey = "2589", action = "Sell", quantity = 16, price = 100, profit = 1520, saleEvents = 3 }
+    local held = { ["2589"] = { { character = "Kash-Patel", bags = 12, bank = 4, bound = 0 } } }
+
+    local view = build(entry({ holdings = { sell }, held = held }), AS_OF, names)
+
+    assert.are.same({ "Sales 3", "On Kash-Patel: 12 bags, 4 bank" }, view.sections[1].rows[1].tooltip)
+  end)
+
+  it("tells a Flip to Craft's crafter what to mail it", function()
+    local held = { ["2320"] = { { character = "Alt-One", bags = 1, bank = 0, bound = 0 } } }
+
+    local view = build(entry({ shoppingList = { flipToCraft() }, held = held }), AS_OF, names)
+
+    assert.are.same({
+      "Use 1 Coarse Thread",
+      "Buy 12 Linen Cloth @ max 1s 20c",
+      "Buy 5 Coarse Thread from a merchant @ 10c",
+      "Mail 1 Coarse Thread from Alt-One to Kash-Patel",
+    }, view.sections[2].rows[1].tooltip)
+  end)
+
+  it("marks the Holdings rows whose Item Key is in the logged-in Character's bags", function()
+    local function sell(itemKey)
+      return { itemKey = itemKey, action = "Sell", quantity = 1, price = 100, profit = 95 }
+    end
+    local held = {
+      ["2589"] = { { character = "Kash-Patel", bags = 2, bank = 0, bound = 0 } },
+      ["2592"] = { { character = "Kash-Patel", bags = 0, bank = 3, bound = 0 } },
+      ["2320"] = { { character = "Alt-One", bags = 4, bank = 0, bound = 0 } },
+    }
+    local recs = entry({ holdings = { sell("2589"), sell("2592"), sell("2320") }, shoppingList = { sell("2589") }, held = held })
+
+    local view = build(recs, AS_OF, names, "Kash-Patel")
+
+    local marked = {}
+    for _, row in ipairs(view.sections[1].rows) do
+      marked[row.itemString] = row.cells[1]
+    end
+    assert.are.same({
+      ["item:2589"] = RecommendationTable.BAG .. " Linen Cloth",
+      ["item:2592"] = "Wool Cloth",
+      ["item:2320"] = "Coarse Thread",
+    }, marked)
+    assert.are.equal("Linen Cloth", view.sections[2].rows[1].cells[1])
   end)
 
   it("says why a Holdings Craft can't be made, naming the reagent it has no market data for", function()

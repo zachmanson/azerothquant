@@ -18,6 +18,7 @@ from brain.recommend import (
     Action,
     Blocked,
     BlockReason,
+    CharacterHolding,
     Grade,
     ReagentBuy,
     ReagentUse,
@@ -99,6 +100,7 @@ def character_read(
     recipes=None,
     merchant_costs=None,
     professions=(TAILORING,),
+    bank=None,
 ):
     read = {
         "readAt": at,
@@ -117,6 +119,8 @@ def character_read(
         read["professionList"] = [{"professionID": p} for p in professions]
     if merchant_costs is not None:
         read["merchantCosts"] = merchant_costs
+    if bank is not None:
+        read |= {"bankReadAt": at, "bank": list(bank)}
     return read
 
 
@@ -425,6 +429,28 @@ def test_holdings_are_pooled_across_the_characters_in_a_market(db):
         ),
         Row(LINEN_KEY, Action.VENDOR, 4, price=10, profit=40),
     ]
+
+
+def test_the_market_says_which_characters_hold_each_item_key(db):
+    # Kash-Patel's bank is from an older Read: the latest one never opened it.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [
+            character_read(bank=[item(count=30)], at=T0 - DAY),
+            character_read(item(count=12), item(count=5, bound=True), at=T0),
+            character_read(item(ORE_LINK, count=3), item(count=4), character="Alt-One"),
+            character_read(item(count=50), character="Horde-Alt", faction="Horde"),
+        ],
+    )
+
+    assert result[MARKET].held == {
+        LINEN_KEY: [
+            CharacterHolding("Alt-One", bags=4),
+            CharacterHolding("Kash-Patel", bags=17, bank=30, bound=5),
+        ],
+        ORE_KEY: [CharacterHolding("Alt-One", bags=3)],
+    }
 
 
 # --- Shopping List: Flips ---

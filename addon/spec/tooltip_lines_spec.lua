@@ -101,6 +101,27 @@ describe("TooltipLines.forLink", function()
     )
   end)
 
+  it("follows a Craft's reagents with what to mail its crafter", function()
+    local r = recs({
+      holdings = {
+        {
+          itemKey = "2997",
+          action = "Craft",
+          quantity = 3,
+          profit = 79.8,
+          character = "Kash-Patel",
+          uses = { { itemKey = "2592", quantity = 9 } },
+        },
+      },
+      held = { ["2592"] = { { character = "Alt-One", bags = 9, bank = 0, bound = 0 } } },
+    })
+
+    assert.are.same(
+      { "AQ: Craft 3 on Kash-Patel", "Use 9 Wool Cloth", "Mail 9 Wool Cloth from Alt-One to Kash-Patel" },
+      linesFor(r, "item:2997")
+    )
+  end)
+
   it("gives a Craft on cooldown the note saying so", function()
     local r = recs({
       holdings = {
@@ -207,6 +228,26 @@ describe("TooltipLines.forLink", function()
       "AQ: Buy 3 @ max 10s",
       "AQ: Buy 20 @ max 25s under Phase 2",
     }, linesFor(r, "item:12359"))
+  end)
+
+  it("says which Characters hold the Item Key, after its Recommendations, leaving out zero parts", function()
+    local r = recs({
+      holdings = { { itemKey = "2589", action = "Sell", quantity = 51, price = 100, profit = 4845 } },
+      held = {
+        ["2589"] = {
+          { character = "Alt-One", bags = 4, bank = 0, bound = 0 },
+          { character = "Bank-Alt", bags = 0, bank = 5, bound = 0 },
+          { character = "Kash-Patel", bags = 12, bank = 30, bound = 5 },
+        },
+      },
+    })
+
+    assert.are.same({
+      "AQ: Sell 51 @ 1s",
+      "On Alt-One: 4 bags",
+      "On Bank-Alt: 5 bank",
+      "On Kash-Patel: 12 bags, 30 bank (5 bound)",
+    }, linesFor(r, "item:2589"))
   end)
 
   it("adds nothing without Recommendations for the Market or an item link", function()

@@ -74,10 +74,44 @@ local function reagentLine(buy, nameOf)
     .. Money.format(buy.maxUnitPrice)
 end
 
+-- Units the crafter doesn't hold of a reagent it uses, mailed from the Characters that
+-- hold the most unbound ones first (#38). Bound units can't be mailed, but the crafter's
+-- own count. whose is the entry's held.
+local function mailLines(r, nameOf, whose)
+  local lines = {}
+  for _, use in ipairs(r.uses or {}) do
+    local holders, short = {}, use.quantity
+    for _, h in ipairs(whose[use.itemKey] or {}) do
+      if h.character == r.character then
+        short = short - h.bags - h.bank
+      elseif h.bags + h.bank > h.bound then
+        holders[#holders + 1] = { character = h.character, mailable = h.bags + h.bank - h.bound }
+      end
+    end
+    table.sort(holders, function(a, b)
+      if a.mailable ~= b.mailable then
+        return a.mailable > b.mailable
+      end
+      return a.character < b.character
+    end)
+    for _, h in ipairs(holders) do
+      if short <= 0 then
+        break
+      end
+      local n = math.min(short, h.mailable)
+      lines[#lines + 1] = "Mail " .. n .. " " .. nameFor(use.itemKey, nameOf) .. " from " .. h.character
+        .. " to " .. r.character
+      short = short - n
+    end
+  end
+  return lines
+end
+
 -- A Craft's reagents by name: the Sub-crafts that make short ones (#33), deepest first,
 -- then the held ones it uses, then the ones it buys, across the whole chain. A reagent
--- that's partly held and partly bought shows as a line of each.
-function RecommendationTable.reagentLines(r, nameOf)
+-- that's partly held and partly bought shows as a line of each. Given whose (the entry's
+-- held), the held ones the crafter is short of follow as mail lines.
+function RecommendationTable.reagentLines(r, nameOf, whose)
   local lines = {}
   for _, sub in ipairs(r.via or {}) do
     lines[#lines + 1] = "Craft " .. sub.crafts .. " " .. nameFor(sub.itemKey, nameOf) .. " on " .. sub.character
@@ -87,6 +121,27 @@ function RecommendationTable.reagentLines(r, nameOf)
   end
   for _, buy in ipairs(r.buys or {}) do
     lines[#lines + 1] = reagentLine(buy, nameOf)
+  end
+  for _, line in ipairs(mailLines(r, nameOf, whose or {})) do
+    lines[#lines + 1] = line
+  end
+  return lines
+end
+
+-- Which Characters hold an Item Key (#38), one line each in the Brain's order (by name),
+-- e.g. "On Kash-Patel: 12 bags, 30 bank (5 bound)". whose is the entry's held[itemKey].
+function RecommendationTable.holderLines(whose)
+  local lines = {}
+  for _, h in ipairs(whose or {}) do
+    local parts = {}
+    if h.bags > 0 then
+      parts[#parts + 1] = h.bags .. " bags"
+    end
+    if h.bank > 0 then
+      parts[#parts + 1] = h.bank .. " bank"
+    end
+    local bound = h.bound > 0 and (" (" .. h.bound .. " bound)") or ""
+    lines[#lines + 1] = "On " .. h.character .. ": " .. table.concat(parts, ", ") .. bound
   end
   return lines
 end
@@ -107,6 +162,9 @@ end
 -- The hint that it's a good time to sell (#50): the raid-target star tinted to the hint's
 -- green (its last three numbers), since the game's fonts may not have a star glyph.
 RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0:0:0:0:64:64:0:64:0:64:128:255:128|t"
+
+-- Marks a Holdings row the logged-in Character has in its bags (#38): the backpack icon.
+RecommendationTable.BAG = "|TInterface\\Buttons\\Button-Backpack-Up:0|t"
 
 local GAIN_COLOR, LOSS_COLOR, HINT_COLOR = "|cff1eff00", "|cffff2020", "|cff80ff80"
 
@@ -161,10 +219,10 @@ function RecommendationTable.roiLines(r, held)
   return lines
 end
 
--- A Craft's tooltip lists its reagents; its note only names them by ID.
-local function tooltip(r, nameOf, held)
+-- A row's details. A Craft's list its reagents; its note only names them by ID.
+local function details(r, nameOf, held, whose)
   if r.uses or r.buys then
-    return RecommendationTable.reagentLines(r, nameOf)
+    return RecommendationTable.reagentLines(r, nameOf, whose)
   end
   local lines = RecommendationTable.roiLines(r, held[r.itemKey])
   if r.margin then
@@ -176,6 +234,15 @@ local function tooltip(r, nameOf, held)
   local note = RecommendationTable.note(r, nameOf)
   if note then
     lines[#lines + 1] = note
+  end
+  return lines
+end
+
+-- A row's details, then which Characters hold its Item Key (#38).
+local function tooltip(r, nameOf, held, whose)
+  local lines = details(r, nameOf, held, whose)
+  for _, line in ipairs(RecommendationTable.holderLines(whose[r.itemKey])) do
+    lines[#lines + 1] = line
   end
   return lines
 end
@@ -280,7 +347,9 @@ function RecommendationTable.nextSort(section, state, column)
   return { column = column, descending = not TEXT_COLUMNS[section.columns[column]] }
 end
 
-local function section(title, columns, rows, cells, keys, default, nameOf)
+-- whose is the entry's held: which Characters hold each Item Key. inBags(itemKey), given
+-- for Holdings only, says whether the logged-in Character has it in its bags.
+local function section(title, columns, rows, cells, keys, default, nameOf, whose, inBags)
   local held = RecommendationTable.heldUnits(rows)
   local out = { title = title, columns = columns, rows = {}, sort = default }
   local folded = 0
@@ -290,13 +359,16 @@ local function section(title, columns, rows, cells, keys, default, nameOf)
     else
       local name = nameFor(r.itemKey, nameOf)
       local rowCells = cells(r, name, nameOf)
+      if inBags and inBags(r.itemKey) then
+        rowCells[1] = RecommendationTable.BAG .. " " .. name
+      end
       out.rows[#out.rows + 1] = {
         itemString = itemString(r.itemKey),
         cells = rowCells,
         keys = keys(r, name, rowCells),
         worth = (r.price or 0) * (r.quantity or 0),
         order = #out.rows + 1,
-        tooltip = tooltip(r, nameOf, held),
+        tooltip = tooltip(r, nameOf, held, whose),
       }
     end
   end
@@ -336,10 +408,21 @@ function RecommendationTable.waitingNote(unsaved, unimported)
   return scans .. " waiting: " .. step
 end
 
-function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
+-- character: the logged-in Character, as the Brain names it ("Name-Realm").
+function RecommendationTable.build(recommendations, realm, faction, now, nameOf, character)
   local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
   if not entry then
     return { empty = EMPTY }
+  end
+  local whose = entry.held or {}
+  -- No re-sort and no filter: the marker only points out what's on hand (#38).
+  local function inBags(itemKey)
+    for _, h in ipairs(whose[itemKey] or {}) do
+      if h.character == character and h.bags > 0 then
+        return true
+      end
+    end
+    return false
   end
   return {
     title = realm .. " " .. faction,
@@ -352,7 +435,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         holdingCells,
         holdingKeys,
         { column = 5, descending = true },
-        nameOf
+        nameOf,
+        whose,
+        inBags
       ),
       section(
         "Shopping List",
@@ -361,7 +446,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         shoppingCells,
         shoppingKeys,
         { column = 6, descending = true },
-        nameOf
+        nameOf,
+        whose
       ),
       section(
         "Prediction buys",
@@ -370,7 +456,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
         predictionBuyCells,
         predictionBuyKeys,
         { column = 5, descending = false },
-        nameOf
+        nameOf,
+        whose
       ),
     },
   }
