@@ -267,6 +267,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.flip_min_sale_events == 3
     assert config.post_undercut_copper == 1
     assert config.craft_min_gain == 0
+    assert config.craft_chain_depth == 3
     assert config.roi_hint == 0.2
     assert config.non_stacking_effort_copper == 500
     assert config.ah_deposit_share == 0.6
@@ -287,6 +288,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "flip_min_sale_events = 5\n"
         "post_undercut_copper = 0\n"
         "craft_min_gain = 50\n"
+        "craft_chain_depth = 1\n"
         "roi_hint = 0.5\n"
         "non_stacking_effort_copper = 0\n"
         "ah_deposit_share = 0.15\n"
@@ -306,6 +308,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.flip_min_sale_events == 5
     assert config.post_undercut_copper == 0
     assert config.craft_min_gain == 50
+    assert config.craft_chain_depth == 1
     assert config.roi_hint == 0.5
     assert config.non_stacking_effort_copper == 0
     assert config.ah_deposit_share == 0.15
@@ -339,6 +342,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("post_undercut_copper", "true"),
         ("craft_min_gain", "-1"),
         ("craft_min_gain", '"0"'),
+        ("craft_chain_depth", "0"),  # counts the top craft
+        ("craft_chain_depth", "2.5"),
+        ("craft_chain_depth", "true"),
         ("roi_hint", '"0.2"'),
         ("roi_hint", "true"),
         ("roi_hint", "-0.1"),

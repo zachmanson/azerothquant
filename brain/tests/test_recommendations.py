@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from brain.config import Era
-from brain.history import Market
+from brain.history import Holding, Market
 from brain.recommend import (
     Action,
     Blocked,
@@ -11,6 +11,7 @@ from brain.recommend import (
     ReagentBuy,
     ReagentUse,
     Row,
+    SubCraft,
 )
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
@@ -316,4 +317,38 @@ def test_a_real_lua_reads_why_a_craft_is_blocked(tmp_path, lua):
     assert out.splitlines() == [
         "noData	2770",
         "unknownBindType	nil",
+    ]
+
+
+def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
+    # #33: deepest first, as the Brain lists them. Leftovers stay in the Brain.
+    file = tmp_path / FILE_NAME
+    craft = Row(
+        "5762",
+        Action.CRAFT,
+        1,
+        profit=760.95,
+        note="on Kash-Patel: uses 2 of 2770, via 2 of 2840 on Alt-One, 1 of 2996 on Kash-Patel",
+        character="Kash-Patel",
+        uses=(ReagentUse("2770", 2),),
+        via=(SubCraft("2840", 2, "Alt-One"), SubCraft("2996", 1, "Kash-Patel")),
+        leftovers=(("2840", Holding(bags=1)),),
+    )
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[craft])]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local row = r.recommendations["Quel\'Thalas"].Horde.holdings[1] '
+        "for _, v in ipairs(row.via) do print(v.itemKey, v.crafts, v.character) end "
+        "print(tostring(row.leftovers))",
+    )
+
+    assert out.splitlines() == [
+        "2840	2	Alt-One",
+        "2996	1	Kash-Patel",
+        "nil",
     ]

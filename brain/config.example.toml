@@ -91,6 +91,9 @@
 # one craft at a time, the one that gains the most first, while a craft still gains more
 # than craft_min_gain copper. Defaults to 0. Must come before the first [[installs]].
 # craft_min_gain = 0
+# A short reagent can be crafted too, with another Known Recipe (a Sub-craft, see
+# ADR-0014), down to craft_chain_depth crafts deep, counting the top one. Defaults to 3.
+# craft_chain_depth = 3
 
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
 # it nets after the cut over what its units cost on the Auction House, is at least this

@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from functools import cached_property
 from itertools import groupby
 from types import MappingProxyType
 
@@ -44,8 +45,8 @@ from brain.sell_rate import SellRate, non_stacking, observation_window_hours, se
 class Action(StrEnum):
     VENDOR = "Vendor"
     SELL = "Sell"
-    # From held reagents, valued one step deep (ADR-0008), or on the Shopping List a Flip
-    # to Craft that buys the missing ones (ADR-0009).
+    # From held reagents (ADR-0008), or on the Shopping List a Flip to Craft that buys the
+    # missing ones (ADR-0009). A short reagent can be Sub-crafted first (ADR-0014).
     CRAFT = "Craft"
     HOLD = "Hold"  # only ever under a Prediction (ADR-0006)
 
@@ -67,6 +68,16 @@ class ReagentUse:
 
     item_key: str
     quantity: int
+
+
+@dataclass(frozen=True)
+class SubCraft:
+    """A Sub-craft (#33, ADR-0014): `crafts` crafts on `character` of the Known Recipe that
+    makes `item_key`, a reagent short further up a Craft's chain."""
+
+    item_key: str
+    crafts: int
+    character: str
 
 
 class BlockReason(StrEnum):
@@ -115,6 +126,9 @@ class Row:
     character: str = ""  # a Craft's Character, the one that knows the recipe
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
     blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
+    via: tuple[SubCraft, ...] = ()  # a Craft's Sub-crafts, deepest first (#33)
+    # A Craft's Sub-craft surplus, which joins the crafted Holdings (#33).
+    leftovers: tuple[tuple[str, Holding], ...] = ()
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
     # Purchase Lots cover cost, and how many units that is. Split rows share it.
     paid: float | None = None
@@ -264,7 +278,7 @@ def recommend(
         vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
         plans = _plans(known_recipes(conn, market), now)
         crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
-        held, crafted = crafting.after, crafting.counts
+        held = crafting.after
         # The crafts change what's held, so the Flips are sized again after them (#67).
         valuer, buys = valuer.flips(set(under), _unbound_units(held))
         gold = pooled_gold(conn, market.era, market.realm, market.faction)
@@ -310,7 +324,8 @@ def recommend(
             plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config
         )
         shopping, valuer = _buy_what_fits(valuer, buys, crafts, gold, config)
-        left = crafting.left(shopping)
+        done = crafting.left(shopping)
+        left, crafted = done.after, done.counts
         rows = [
             _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
             for item_key, holding in left.items()
@@ -527,6 +542,7 @@ class _Valuer:
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
+        self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
         """This Valuer with `bought` as the units taken off other players' Listings, and
@@ -639,11 +655,13 @@ class _Valuer:
     def worth(self, item_key: str, holding: Holding) -> float:
         """What the units would bring by their best Actions. Units without enough data to
         choose an exit count at the Vendor Price, or nothing without one."""
-        vendor = self.vendor.get(_item_id(item_key), 0)
-        return sum(
-            r.profit if r.profit is not None else r.quantity * vendor
-            for r in self.rows(item_key, holding)
-        )
+        if (item_key, holding) not in self._worth:
+            vendor = self.vendor.get(_item_id(item_key), 0)
+            self._worth[item_key, holding] = sum(
+                r.profit if r.profit is not None else r.quantity * vendor
+                for r in self.rows(item_key, holding)
+            )
+        return self._worth[item_key, holding]
 
 
 def _merchant(conn: sqlite3.Connection, market: Market) -> dict[str, float]:
@@ -754,8 +772,12 @@ class _Plan:
     until: float | None = None
     crafts: int = 0
     gain: float = 0.0
-    used: Counter[str] = field(default_factory=Counter)  # reagent units, bought ones included
+    # Raw reagent units across the chain, bought ones included, and the ones bought.
+    used: Counter[str] = field(default_factory=Counter)
     bought: Counter[str] = field(default_factory=Counter)
+    # The Sub-crafts by (Item Key, Character): how deep, and how many crafts.
+    via: dict[tuple[str, str], list[int]] = field(default_factory=dict)
+    leftovers: dict[str, Holding] = field(default_factory=dict)
 
     @property
     def output(self) -> str:
@@ -768,23 +790,47 @@ class _Plan:
             needs[str(reagent.item_id)] += reagent.quantity
         return needs
 
+    def add(self, chain: "_Chain") -> None:
+        """Count one more craft's chain into the row."""
+        for key in chain.taken:
+            n = chain.taken[key] + chain.bought(key)
+            if n:
+                self.used[key] += n
+                self.bought[key] += chain.bought(key)
+        for depth, sub in chain.via:
+            entry = self.via.setdefault((sub.item_key, sub.character), [depth, 0])
+            entry[1] += sub.crafts
+        for key, h in chain.leftovers.items():
+            self.leftovers[key] = _plus(self.leftovers.get(key, Holding()), h)
+
     def row(self) -> Row:
         uses = ", ".join(
             f"{n} of {key}" + (f" (buy {self.bought[key]})" if self.bought[key] else "")
             for key, n in self.used.items()
+        )
+        via = tuple(
+            SubCraft(key, crafts, character)
+            for (key, character), (_, crafts) in sorted(
+                self.via.items(), key=lambda entry: -entry[1][0]
+            )
+        )
+        note = f"on {self.character}: uses {uses}" + "".join(
+            f", via {sub.crafts} of {sub.item_key} on {sub.character}" for sub in via
         )
         return Row(
             self.output,
             Action.CRAFT,
             self.crafts,
             profit=self.gain,
-            note=f"on {self.character}: uses {uses}",
+            note=note,
             character=self.character,
             uses=tuple(
                 ReagentUse(key, n - self.bought[key])
                 for key, n in self.used.items()
                 if n > self.bought[key]
             ),
+            via=via,
+            leftovers=tuple(self.leftovers.items()),
         )
 
 
@@ -820,7 +866,8 @@ class _Crafting:
 
     rows: list[Row]
     held: dict[str, Holding]  # what's left of the Holdings once crafted from
-    crafted: dict[str, Holding]  # the outputs made
+    crafted: dict[str, Holding]  # the outputs made, and the Sub-crafts' leftovers
+    spent: Counter[int]  # crafts per recipe, Sub-crafts included, for cooldown limits
 
     @property
     def after(self) -> dict[str, Holding]:
@@ -830,15 +877,18 @@ class _Crafting:
             after[key] = _plus(after.get(key, Holding()), h)
         return dict(sorted(after.items()))
 
-    def left(self, shopping: Sequence[Row]) -> dict[str, Holding]:
-        """The Holdings once the crafts and the Shopping List's Flips to Craft are made: a
-        held unit a Flip to Craft uses is recommended only there (#69)."""
-        held = dict(self.held)
+    def left(self, shopping: Sequence[Row]) -> "_Crafting":
+        """This once the Shopping List's Flips to Craft are made too: a held unit a Flip to
+        Craft uses is recommended only there (#69), and its Sub-crafts' leftovers are
+        crafted Holdings (#33)."""
+        held, crafted = dict(self.held), dict(self.crafted)
         for row in shopping:
             if row.action is Action.CRAFT:
                 for use in row.uses:
                     held[use.item_key] = _take(held[use.item_key], use.quantity)
-        return replace(self, held=held).after
+                for key, h in row.leftovers:
+                    crafted[key] = _plus(crafted.get(key, Holding()), h)
+        return replace(self, held=held, crafted=crafted)
 
     @property
     def counts(self) -> Counter[str]:
@@ -857,23 +907,25 @@ def _crafts(
     """The Craft Actions (ADR-0008), counted into `plans`.
 
     Greedy at the margin: each step makes the one craft that gains the most, the output's
-    worth with its units added less the reagents' worth lost and any Merchant Cost paid,
-    until the best gain is no more than `craft_min_gain`. Outputs are valued by Sell and
-    Vendor only, never crafted further.
+    worth with its units added less what its chain costs (_Sources), until the best gain
+    is no more than `craft_min_gain`. A short reagent can be Sub-crafted (ADR-0014), but
+    outputs are valued by Sell and Vendor only.
     """
     held = dict(held)
     crafted: dict[str, Holding] = {}
+    spent: Counter[int] = Counter()
+    sources = _Sources(held, crafted, None, merchant, valuer, under, plans, spent, config)
     craftable, blocked = [], []
     for plan in plans:
         if plan.output in under:
             continue  # its Held units would include ones not made yet
-        why_blocked = _blocked(plan, merchant, valuer)
+        why_blocked = _blocked(plan, merchant, valuer, sources.makers)
         reason = str(why_blocked) if why_blocked else None
         if reason is None and plan.until is not None:
             reason = f"on cooldown until {datetime.fromtimestamp(plan.until):%Y-%m-%d %H:%M}"
         if reason is None:
             craftable.append(plan)
-        elif _step(plan, held, crafted, merchant, valuer, under) is not None:
+        elif _on_hand(plan, held, merchant, under):
             # Only shown when the reagents are there, or every recipe would be.
             blocked.append(
                 Row(
@@ -888,67 +940,228 @@ def _crafts(
     while True:
         best = None
         for plan in craftable:
-            if plan.limit is not None and plan.crafts >= plan.limit:
+            if plan.limit is not None and spent[plan.recipe.recipe_id] >= plan.limit:
                 continue
-            step = _step(plan, held, crafted, merchant, valuer, under)
+            step = _step(plan, sources)
             if step is not None and (best is None or step[0] > best[1][0]):
                 best = (plan, step)
         if best is None or best[1][0] <= config.craft_min_gain:
             break
-        plan, (gain, takes) = best
+        plan, (gain, chain) = best
         plan.crafts += 1
         plan.gain += gain
-        for key, (take, buy) in takes.items():
-            held[key] = _take(held[key], take) if take else held.get(key, Holding())
-            plan.used[key] += take + buy
-            plan.bought[key] += buy
+        plan.add(chain)
+        sources.commit(plan, chain)
         crafted[plan.output] = _crafted(plan, crafted.get(plan.output, Holding()))
-    return _Crafting([p.row() for p in craftable if p.crafts] + blocked, held, crafted)
+    rows = [p.row() for p in craftable if p.crafts]
+    return _Crafting([replace(r, leftovers=()) for r in rows] + blocked, held, crafted, spent)
 
 
-def _blocked(plan: _Plan, merchant: dict[str, float], valuer: _Valuer) -> Blocked | None:
+def _blocked(
+    plan: _Plan, merchant: dict[str, float], valuer: _Valuer, makers: dict[str, list[_Plan]]
+) -> Blocked | None:
     """Why the recipe can't be valued, if it can't. The guesses lean toward crafting less:
-    a reagent with no market data would be undervalued at its Vendor Price."""
+    a reagent with no market data would be undervalued at its Vendor Price, so it's only
+    ever Sub-crafted, and blocks the recipe when no Known Recipe makes it."""
     if plan.recipe.bind_type is None:
         return Blocked(BlockReason.UNKNOWN_BIND_TYPE)
     for key in plan.needs:
-        if key not in merchant and not valuer.has_data(key):
+        if key not in merchant and not valuer.has_data(key) and key not in makers:
             return Blocked(BlockReason.NO_DATA, key)
     return None
 
 
-def _step(
-    plan: _Plan,
-    held: dict[str, Holding],
-    crafted: dict[str, Holding],
-    merchant: dict[str, float],
-    valuer: _Valuer,
-    under: set[str],
-) -> tuple[float, dict[str, tuple[int, int]]] | None:
-    """What one more craft gains, and per reagent the held units it uses and the units it
-    buys; None if the reagents aren't there. Crafted units and units Held under a
-    Prediction are never reagents."""
-    loss = 0.0
-    takes = {}
+def _on_hand(
+    plan: _Plan, held: dict[str, Holding], merchant: dict[str, float], under: set[str]
+) -> bool:
+    """Whether one craft's reagents are held, or sold by a merchant, some of them held."""
+    held_any = False
     for key, n in plan.needs.items():
-        have = Holding() if key in under else held.get(key, Holding())
-        take = min(n, _units(have))
-        buy = n - take
-        if key in merchant:
-            loss += n * merchant[key]
-        elif buy:
-            return None
-        else:
-            now = _plus(have, crafted.get(key, Holding()))
-            loss += valuer.worth(key, now) - valuer.worth(key, _take(now, take))
-        takes[key] = (take, buy)
-    if not any(take for take, _ in takes.values()):
+        units = 0 if key in under else _units(held.get(key, Holding()))
+        if units < n and key not in merchant:
+            return False
+        held_any = held_any or units > 0
+    return held_any
+
+
+def _step(plan: _Plan, sources: "_Sources") -> tuple[float, "_Chain"] | None:
+    """What one more craft gains, and its chain; None if its reagents can't be had."""
+    chain = sources.chain(plan)
+    if chain is None or not any(chain.taken.values()):
         # Crafts are from held reagents: with merchant ones alone the loop wouldn't end
         # whenever a vendor pays more for the output than the merchant charges.
         return None
-    now = _plus(held.get(plan.output, Holding()), crafted.get(plan.output, Holding()))
-    gain = valuer.worth(plan.output, _crafted(plan, now)) - valuer.worth(plan.output, now)
-    return gain - loss, takes
+    out, valuer = plan.output, sources.valuer
+    now = _plus(sources.held.get(out, Holding()), sources.crafted.get(out, Holding()))
+    gain = valuer.worth(out, _crafted(plan, now)) - valuer.worth(out, now)
+    return gain - sources.cost(chain), chain
+
+
+@dataclass
+class _Chain:
+    """One craft's reagents, sourced (ADR-0014), down through its Sub-crafts."""
+
+    taken: Counter[str] = field(default_factory=Counter)  # held units used, by reagent
+    merchant: Counter[str] = field(default_factory=Counter)  # units bought from a merchant
+    asks: dict[str, Supply] = field(default_factory=dict)  # Auction House units bought
+    via: list[tuple[int, SubCraft]] = field(default_factory=list)  # with how deep
+    leftovers: dict[str, Holding] = field(default_factory=dict)
+    recipes: Counter[int] = field(default_factory=Counter)  # Sub-crafts per recipe
+
+    def copy(self) -> "_Chain":
+        return _Chain(
+            Counter(self.taken),
+            Counter(self.merchant),
+            {key: list(units) for key, units in self.asks.items()},
+            list(self.via),
+            dict(self.leftovers),
+            Counter(self.recipes),
+        )
+
+    def bought(self, key: str) -> int:
+        """The units of `key` bought, from a merchant or on the Auction House."""
+        return self.merchant[key] + sum(n for _, n in self.asks.get(key, []))
+
+
+@dataclass(frozen=True)
+class _Sources:
+    """Where a craft's reagents come from (ADR-0014): held units first, then a merchant's
+    at their Merchant Cost, then for each reagent still short one source, whichever costs
+    less: a Sub-craft, whose own reagents are sourced the same way, or, when `asks` are
+    given (a Flip to Craft), the cheapest Auction House asks. `held`, `crafted`, `asks`
+    and `spent` are the live state of the greedy loop using it.
+
+    A held reagent without market data isn't used, since it can't be valued, and neither
+    is a crafted unit or one Held under a Prediction. A Sub-craft's recipe can't make or
+    use an Item Key already on its path, and a chain is at most `craft_chain_depth` crafts
+    deep. A Disenchant step would be one more source here (#76)."""
+
+    held: dict[str, Holding]
+    crafted: dict[str, Holding]
+    asks: dict[str, Supply] | None
+    merchant: dict[str, float]
+    valuer: _Valuer
+    under: set[str]
+    plans: list[_Plan]
+    spent: Counter[int]  # crafts per recipe so far, for cooldown limits
+    config: Config
+
+    @cached_property
+    def makers(self) -> dict[str, list[_Plan]]:
+        makers: dict[str, list[_Plan]] = {}
+        for plan in self.plans:
+            makers.setdefault(plan.output, []).append(plan)
+        return makers
+
+    def chain(self, plan: _Plan) -> _Chain | None:
+        """One craft of `plan` with its reagents sourced; None if they can't be."""
+        return self._craft(plan, 1, 1, frozenset({plan.output}), _Chain())
+
+    def _craft(
+        self, plan: _Plan, crafts: int, depth: int, path: frozenset[str], chain: _Chain
+    ) -> _Chain | None:
+        for key, n in plan.needs.items():
+            chain = self._source(key, n * crafts, depth, path, chain)
+            if chain is None:
+                return None
+        return chain
+
+    def _source(
+        self, key: str, n: int, depth: int, path: frozenset[str], chain: _Chain
+    ) -> _Chain | None:
+        chain = chain.copy()
+        have = Holding() if key in self.under else self.held.get(key, Holding())
+        left = _units(have) - chain.taken[key]
+        if key in self.merchant:
+            take = min(n, left)
+            chain.taken[key] += take
+            chain.merchant[key] += n - take
+            return chain
+        take = min(n, left) if self.valuer.has_data(key) else 0
+        chain.taken[key] += take
+        short = n - take
+        if not short:
+            return chain
+        options = [self._bought(key, short, chain)] + [
+            self._subcrafted(maker, key, short, depth, path, chain)
+            for maker in self.makers.get(key, [])
+        ]
+        options = [option for option in options if option is not None]
+        return min(options, key=self.cost) if options else None
+
+    def _bought(self, key: str, short: int, chain: _Chain) -> _Chain | None:
+        if self.asks is None or key in self.under:
+            return None
+        cheapest = _cheapest(_without(self.asks.get(key, []), chain.asks.get(key, [])), short)
+        if cheapest is None:
+            return None
+        chain = chain.copy()
+        chain.asks.setdefault(key, []).extend(cheapest)
+        return chain
+
+    def _subcrafted(
+        self, maker: _Plan, key: str, short: int, depth: int, path: frozenset[str], chain: _Chain
+    ) -> _Chain | None:
+        if depth >= self.config.craft_chain_depth or key in path:
+            return None
+        if any(k in path or k == key or k in self.under for k in maker.needs) or key in self.under:
+            return None
+        crafts = math.ceil(short / maker.recipe.quantity_min)
+        recipe_id = maker.recipe.recipe_id
+        if maker.limit is not None and (
+            self.spent[recipe_id] + chain.recipes[recipe_id] + crafts > maker.limit
+        ):
+            return None
+        chain = self._craft(maker, crafts, depth + 1, path | {key}, chain)
+        if chain is None:
+            return None
+        chain.recipes[recipe_id] += crafts
+        chain.via.append((depth + 1, SubCraft(key, crafts, maker.character)))
+        leftover = crafts * maker.recipe.quantity_min - short
+        if leftover:
+            # One whose bind type is unknown counts as bound: it may not sell.
+            bound = maker.recipe.bind_type is None or maker.recipe.bind_type in _BOUND_ON_CRAFT
+            h = Holding(bags_bound=leftover) if bound else Holding(bags=leftover)
+            chain.leftovers[key] = _plus(chain.leftovers.get(key, Holding()), h)
+        return chain
+
+    def gold(self, chain: _Chain) -> float:
+        """What the chain spends at merchants and on the Auction House."""
+        return sum(n * self.merchant[key] for key, n in chain.merchant.items()) + sum(
+            unit * n for units in chain.asks.values() for unit, n in units
+        )
+
+    def cost(self, chain: _Chain) -> float:
+        """What the chain costs: the gold it spends, the effort of buying each unit that
+        doesn't stack (#73), a held merchant reagent at its Merchant Cost, and what the held
+        units it uses would have brought, less what its leftovers bring."""
+        cost = self.gold(chain)
+        cost += sum(
+            self.valuer.effort(key) * n for key, units in chain.asks.items() for _, n in units
+        )
+        for key in {*chain.taken, *chain.leftovers}:
+            if key in self.merchant:
+                cost += chain.taken[key] * self.merchant[key]
+                continue
+            if not chain.taken[key] and key not in chain.leftovers:
+                continue
+            now = _plus(self.held.get(key, Holding()), self.crafted.get(key, Holding()))
+            after = _plus(_take(now, chain.taken[key]), chain.leftovers.get(key, Holding()))
+            cost += self.valuer.worth(key, now) - self.valuer.worth(key, after)
+        return cost
+
+    def commit(self, plan: _Plan, chain: _Chain) -> None:
+        """Take one more craft of `plan` by `chain` out of the live state."""
+        for key, n in chain.taken.items():
+            if n:
+                self.held[key] = _take(self.held[key], n)
+        for key, h in chain.leftovers.items():
+            self.crafted[key] = _plus(self.crafted.get(key, Holding()), h)
+        if self.asks is not None:
+            for key, bought in chain.asks.items():
+                self.asks[key] = _without(self.asks[key], bought)
+        self.spent[plan.recipe.recipe_id] += 1
+        self.spent.update(chain.recipes)
 
 
 @dataclass
@@ -1016,9 +1229,8 @@ class _CraftBuy:
 
     plan: _Plan
     gold: float  # spent on the Auction House and at merchants
-    profit: float  # the output's worth less the reagents' cost, held ones included
-    takes: dict[str, tuple[int, int]]  # per reagent, held units used and units bought
-    asks: dict[str, Supply]  # the Auction House asks it buys
+    profit: float  # the output's worth less the chain's cost, held reagents included
+    chain: "_Chain"
     buys: tuple[ReagentBuy, ...]
     selling: int  # output units that Sell
 
@@ -1043,12 +1255,20 @@ def _flips_to_craft(
 
     Greedy like the Craft Action: each step takes the craft that profits most among those
     clearing the Flip margin against the gold they spend, until none does or the gold
-    runs out. Leftover held reagents are used first, then merchant ones are bought at
-    their Merchant Cost and the rest at the cheapest `asks` left.
+    runs out. Its reagents are sourced like a Craft Action's, but what's still short can
+    be bought at the cheapest `asks` left (_Sources).
     """
-    held = dict(crafting.held)
-    asks = dict(asks)
-    made: Counter[int] = Counter()  # Flips to Craft per recipe
+    sources = _Sources(
+        dict(crafting.held),
+        dict(crafting.crafted),
+        dict(asks),
+        merchant,
+        valuer,
+        under,
+        plans,
+        Counter(crafting.spent),
+        config,
+    )
     # A recipe on cooldown for every Character has a limit of 0.
     candidates = [
         p
@@ -1061,11 +1281,9 @@ def _flips_to_craft(
     while True:
         best = None
         for plan in candidates:
-            if plan.limit is not None and plan.crafts + made[plan.recipe.recipe_id] >= plan.limit:
+            if plan.limit is not None and sources.spent[plan.recipe.recipe_id] >= plan.limit:
                 continue
-            step = _flip_step(
-                plan, held, crafting.crafted, asks, merchant, valuer, outlets[plan.output]
-            )
+            step = _flip_step(plan, sources, outlets[plan.output])
             if step is None or step.gold > gold:
                 continue
             if step.profit < max(
@@ -1078,57 +1296,29 @@ def _flips_to_craft(
             break
         result.append(best)
         gold -= best.gold
-        made[best.plan.recipe.recipe_id] += 1
-        for key, (take, _) in best.takes.items():
-            if take:
-                held[key] = _take(held[key], take)
-        for key, bought in best.asks.items():
-            asks[key] = _without(asks[key], bought)
+        sources.commit(best.plan, best.chain)
         outlets[best.plan.output].take(best.selling)
     return result
 
 
-def _flip_step(
-    plan: _Plan,
-    held: dict[str, Holding],
-    crafted: dict[str, Holding],
-    asks: dict[str, Supply],
-    merchant: dict[str, float],
-    valuer: _Valuer,
-    outlet: _Outlet,
-) -> _CraftBuy | None:
+def _flip_step(plan: _Plan, sources: _Sources, outlet: _Outlet) -> _CraftBuy | None:
     """One more Flip to Craft of `plan`; None if the reagents can't be had, or if nothing
-    needs buying, since that's a Craft Action. A held reagent is only used if there's
-    market data to value it by, and crafted units never are. A reagent bought on the
-    Auction House costs the effort of buying each unit that doesn't stack (#73)."""
-    cost = gold = 0.0
-    takes, bought, buys = {}, {}, []
-    for key, n in plan.needs.items():
-        have = held.get(key, Holding())
-        if key in merchant:
-            take = min(n, _units(have))
-            cost += n * merchant[key]
-            gold += (n - take) * merchant[key]
-            if n - take:
-                buys.append(ReagentBuy(key, n - take, merchant[key], merchant=True))
-        else:
-            take = min(n, _units(have)) if valuer.has_data(key) else 0
-            now = _plus(have, crafted.get(key, Holding()))
-            cost += valuer.worth(key, now) - valuer.worth(key, _take(now, take))
-            if n - take:
-                cheapest = _cheapest(asks.get(key, []), n - take)
-                if cheapest is None:
-                    return None
-                paid = sum(unit * q for unit, q in cheapest)
-                cost += paid + (n - take) * valuer.effort(key)
-                gold += paid
-                bought[key] = cheapest
-                buys.append(ReagentBuy(key, n - take, max(unit for unit, _ in cheapest)))
-        takes[key] = (take, n - take)
+    needs buying, since that's a Craft Action."""
+    chain = sources.chain(plan)
+    if chain is None:
+        return None
+    gold = sources.gold(chain)
     if not gold:
         return None
+    buys = []
+    for key in chain.taken:
+        if chain.merchant[key]:
+            buys.append(ReagentBuy(key, chain.merchant[key], sources.merchant[key], merchant=True))
+        if chain.asks.get(key):
+            units = chain.asks[key]
+            buys.append(ReagentBuy(key, sum(n for _, n in units), max(unit for unit, _ in units)))
     value, selling = outlet.value(plan.recipe.quantity_min)
-    return _CraftBuy(plan, gold, value - cost, takes, bought, tuple(buys), selling)
+    return _CraftBuy(plan, gold, value - sources.cost(chain), chain, tuple(buys), selling)
 
 
 def _cheapest(asks: Supply, n: int) -> Supply | None:
@@ -1581,14 +1771,12 @@ def _shopping_list(
             plan = plans.setdefault(recipe_id, _Plan(buy.plan.recipe, buy.plan.character))
             plan.crafts += 1
             plan.gain += buy.profit
-            for key, (take, bought) in buy.takes.items():
-                plan.used[key] += take + bought
-                plan.bought[key] += bought
+            plan.add(buy.chain)
             r = rows.get(recipe_id, replace(plan.row(), cost=0))
             rows[recipe_id] = replace(
                 plan.row(), cost=r.cost + buy.gold, buys=_merged(r.buys, buy.buys)
             )
-            for key, units in buy.asks.items():
+            for key, units in buy.chain.asks.items():
                 taken.setdefault(recipe_id, {}).setdefault(key, []).extend(units)
             continue
         if isinstance(buy, _FlipToSell):

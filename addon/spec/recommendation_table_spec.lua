@@ -78,11 +78,36 @@ local NAMES = {
   ["item:2320"] = "Coarse Thread",
   ["item:2592"] = "Wool Cloth",
   ["item:2770"] = "Copper Ore",
+  ["item:2840"] = "Copper Bar",
 }
 
 local function names(itemString)
   return NAMES[itemString]
 end
+
+describe("RecommendationTable.reagentLines", function()
+  it("lists a Craft's Sub-crafts deepest first, before what it uses and buys", function()
+    local craft = {
+      itemKey = "5762",
+      action = "Craft",
+      quantity = 1,
+      character = "Kash-Patel",
+      via = {
+        { itemKey = "2840", crafts = 10, character = "Alt-One" },
+        { itemKey = "2996", crafts = 5, character = "Kash-Patel" },
+      },
+      uses = { { itemKey = "2770", quantity = 20 } },
+      buys = { { itemKey = "2589", quantity = 12, maxUnitPrice = 120 } },
+    }
+
+    assert.are.same({
+      "Craft 10 Copper Bar on Alt-One",
+      "Craft 5 item:2996 on Kash-Patel",
+      "Use 20 Copper Ore",
+      "Buy 12 Linen Cloth @ max 1s 20c",
+    }, RecommendationTable.reagentLines(craft, names))
+  end)
+end)
 
 describe("RecommendationTable.build", function()
   it("sums up a Holdings Craft's Character and reagents in its note, and names what it uses in its tooltip", function()

@@ -31,3 +31,7 @@ Settled while building it:
 ## Superseded in part (#32)
 
 ADR-0009 lets reagents be bought on the Auction House to craft, as a Flip to Craft. The Craft Action itself still starts from held reagents.
+
+## Superseded in part (#33)
+
+ADR-0014 lets a short reagent be crafted first with another Known Recipe (a Sub-craft), so a Craft can be a chain. Outputs are still valued by Sell and Vendor only, and a reagent with no market data now blocks a recipe only when nothing can source it.

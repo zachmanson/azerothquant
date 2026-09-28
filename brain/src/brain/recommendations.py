@@ -50,6 +50,8 @@ _HEADER = (
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
     "-- uses = { { itemKey, quantity } }. One that can't be made says why as\n"
     '-- blocked = { reason = "noData", itemKey } or { reason = "unknownBindType" }.\n'
+    "-- A Craft that crafts a short reagent first lists those Sub-crafts, deepest first,\n"
+    "-- as via = { { itemKey, crafts, character } }; uses and buys cover the whole chain.\n"
     "-- A Holdings Sell or Vendor row whose units were bought on the Auction House has\n"
     "-- paid (per unit), paidUnits (how many units that covers), roi (a share, after\n"
     "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
@@ -133,6 +135,10 @@ def _row(row: Row) -> dict[str, object]:
         out["uses"] = [{"itemKey": u.item_key, "quantity": u.quantity} for u in row.uses]
     if row.blocked:
         out["blocked"] = _blocked(row.blocked)
+    if row.via:
+        out["via"] = [
+            {"itemKey": v.item_key, "crafts": v.crafts, "character": v.character} for v in row.via
+        ]
     return out
 
 

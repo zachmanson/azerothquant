@@ -85,6 +85,7 @@ DEFAULT_PREDICTIONS_CAP_SHARE = 0.40
 # Crafting (ADR-0008): one more craft is only made while it gains more than this many
 # copper.
 DEFAULT_CRAFT_MIN_GAIN = 0
+DEFAULT_CRAFT_CHAIN_DEPTH = 3
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
@@ -160,6 +161,8 @@ class Config:
     predictions_cap_share: float = DEFAULT_PREDICTIONS_CAP_SHARE
     # A craft is only made while it gains more than this many copper (ADR-0008).
     craft_min_gain: float = DEFAULT_CRAFT_MIN_GAIN
+    # The most crafts deep a chain of Sub-crafts goes, counting the top craft (#33).
+    craft_chain_depth: int = DEFAULT_CRAFT_CHAIN_DEPTH
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
@@ -318,6 +321,12 @@ def load_config(path: Path) -> Config:
         lambda x: x >= 0,
         "of copper of at least 0",
     )
+    chain_depth = raw.get("craft_chain_depth", DEFAULT_CRAFT_CHAIN_DEPTH)
+    if isinstance(chain_depth, bool) or not isinstance(chain_depth, int) or chain_depth < 1:
+        raise ConfigError(
+            f"{path}: craft_chain_depth must be a whole number of crafts of at least 1, "
+            f"got {chain_depth!r}"
+        )
     roi_hint = _parse_number(
         path, raw.get("roi_hint", DEFAULT_ROI_HINT), "roi_hint", lambda x: x >= 0, "of at least 0"
     )
@@ -363,6 +372,7 @@ def load_config(path: Path) -> Config:
         prediction_cap_share=cap_share,
         predictions_cap_share=total_cap_share,
         craft_min_gain=craft_min_gain,
+        craft_chain_depth=chain_depth,
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,

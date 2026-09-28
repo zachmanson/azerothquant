@@ -74,10 +74,14 @@ local function reagentLine(buy, nameOf)
     .. Money.format(buy.maxUnitPrice)
 end
 
--- A Craft's reagents by name: the held ones it uses, then the ones it buys. A reagent
+-- A Craft's reagents by name: the Sub-crafts that make short ones (#33), deepest first,
+-- then the held ones it uses, then the ones it buys, across the whole chain. A reagent
 -- that's partly held and partly bought shows as a line of each.
 function RecommendationTable.reagentLines(r, nameOf)
   local lines = {}
+  for _, sub in ipairs(r.via or {}) do
+    lines[#lines + 1] = "Craft " .. sub.crafts .. " " .. nameFor(sub.itemKey, nameOf) .. " on " .. sub.character
+  end
   for _, use in ipairs(r.uses or {}) do
     lines[#lines + 1] = "Use " .. use.quantity .. " " .. nameFor(use.itemKey, nameOf)
   end

@@ -22,6 +22,7 @@ from brain.recommend import (
     ReagentBuy,
     ReagentUse,
     Row,
+    SubCraft,
     grades,
     held_at_writing,
     recommend,
@@ -1865,6 +1866,208 @@ def test_a_cooldown_recipe_flips_to_craft_only_what_held_crafts_left_of_its_limi
 
     [craft] = result[MARKET].shopping_list
     assert craft.quantity == 1
+
+
+# --- Sub-crafts (#33, ADR-0014) ---
+
+ORE_LINK = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+BAR = "item:2840::::::::20:1490"
+BAR_KEY = "2840"
+SMELT = recipe(2657, output=2840, reagents=[(2770, 1)])
+BOLT_FROM_BARS = recipe(2963, output=2996, reagents=[(2840, 2)])
+
+
+def selling(*prices, sale_events=1):
+    """Each (item string, unit) selling 2 an hour, as `sale_events` Sale Events an hour
+    apart: 6 of each sell within the 3 h horizon, at a Fair Value of `unit`."""
+    return [
+        scan(T0 + n * HOUR, *(row(it, quantity=20 - 2 * n, unit=unit) for it, unit in prices))
+        for n in range(sale_events + 1)
+    ]
+
+
+def test_a_chain_whose_first_step_loses_money_alone_is_crafted(db):
+    # Ore Sells for 94.05 after the cut and a Bar only for 46.55, so smelting alone loses.
+    # Two Bars make a Bolt that Sells for 949.05.
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, 50), (BOLT, 1000)),
+        [character_read(item(ORE_LINK, count=2), recipes=[SMELT, BOLT_FROM_BARS])],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            BOLT_KEY,
+            Action.SELL,
+            1,
+            price=999,
+            profit=pytest.approx(949.05),
+            sale_events=1,
+            note="incl. 1 crafted",
+        ),
+        Row(
+            BOLT_KEY,
+            Action.CRAFT,
+            1,
+            profit=pytest.approx(949.05 - 2 * 94.05),
+            note="on Kash-Patel: uses 2 of 2770, via 2 of 2840 on Kash-Patel",
+            character="Kash-Patel",
+            uses=(ReagentUse(ORE_KEY, 2),),
+            via=(SubCraft(BAR_KEY, 2, "Kash-Patel"),),
+        ),
+    ]
+
+
+BAR_LINK = "|cffffffff|Hitem:2840::::::::20:1490:::::::::|h[Copper Bar]|h|r"
+
+
+def test_a_sub_craft_never_uses_an_item_key_already_on_its_path(db):
+    # A made-up recipe turns 1 Bar into 2 Ore. Smelting one of them back into a Bar
+    # would leave an Ore over for nothing, every time: Bar -> Ore -> Bar is refused.
+    # Turning the Bar into Ore to Sell loses (949.05 for 2 x 94.05).
+    unsmelt = recipe(9999, output=2770, reagents=[(2840, 1)], quantity=2)
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, 1000)),
+        [character_read(item(BAR_LINK), recipes=[SMELT, unsmelt])],
+    )
+
+    assert [r for r in result[MARKET].holdings if r.action is Action.CRAFT] == []
+
+
+BAG = "item:5762::::::::20:1490"
+BAG_FROM_BOLT = recipe(2000, output=5762, reagents=[(2996, 1)])
+
+
+@pytest.mark.parametrize(("depth", "crafts"), [(3, 1), (2, 0)])
+def test_a_chain_is_at_most_craft_chain_depth_crafts_deep(db, depth, crafts):
+    # Ore -> Bar -> Bolt -> Bag is 3 crafts deep. Only the Bag pays for the 2 Ore.
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, 50), (BOLT, 150), (BAG, 1000)),
+        [character_read(item(ORE_LINK, count=2), recipes=[SMELT, BOLT_FROM_BARS, BAG_FROM_BOLT])],
+        config=replace(CONFIG, craft_chain_depth=depth),
+    )
+
+    made = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert [(r.item_key, r.quantity) for r in made] == ([("5762", 1)] if crafts else [])
+    if crafts:
+        assert made[0].via == (
+            SubCraft(BAR_KEY, 2, "Kash-Patel"),
+            SubCraft(BOLT_KEY, 1, "Kash-Patel"),
+        )
+
+
+def test_a_reagent_without_market_data_is_sub_crafted_but_its_held_units_are_not_used(db):
+    # Bars were never seen on the Auction House, so the 2 held can't be valued and stay
+    # put. Smelting 2 Ore into Bars for the Bolt doesn't need a Bar's value.
+    result = run(
+        db,
+        selling((ORE, 100), (BOLT, 1000)),
+        [
+            character_read(
+                item(ORE_LINK, count=2),
+                item(BAR_LINK, count=2),
+                recipes=[SMELT, BOLT_FROM_BARS],
+            )
+        ],
+    )
+
+    holdings = result[MARKET].holdings
+    [craft] = [r for r in holdings if r.action is Action.CRAFT]
+    assert craft.via == (SubCraft(BAR_KEY, 2, "Kash-Patel"),)
+    assert craft.uses == (ReagentUse(ORE_KEY, 2),)
+    assert craft.profit == pytest.approx(949.05 - 2 * 94.05)
+    assert Row(BAR_KEY, None, 2, note="no data") in holdings
+
+
+def test_a_cooldown_sub_recipes_limit_is_shared_by_every_chain(db):
+    # Smelting is ready on one Character, so once. Bars have no market data, so a Bolt
+    # (from 1 Bar) can only come through smelting: one Bolt from the 4 Ore held, and no
+    # Flip to Craft buying Ore to smelt more.
+    result = run(
+        db,
+        selling((ORE, 100), (BOLT, 1000)),
+        [
+            character_read(
+                item(ORE_LINK, count=4),
+                money=GOLD,
+                recipes=[
+                    recipe(2657, output=2840, reagents=[(2770, 1)], cooldown=30 * MINUTE),
+                    recipe(2963, output=2996, reagents=[(2840, 1)]),
+                ],
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    assert (craft.quantity, craft.via) == (1, (SubCraft(BAR_KEY, 1, "Kash-Patel"),))
+    assert [r for r in result[MARKET].shopping_list if r.action is Action.CRAFT] == []
+
+
+SMELT_TWO = recipe(2657, output=2840, reagents=[(2770, 1)], quantity=2)
+BOLT_FROM_BAR = recipe(2963, output=2996, reagents=[(2840, 1)])
+
+
+def test_a_sub_crafts_leftover_joins_the_crafted_holdings(db):
+    # A smelt makes 2 Bars and the Bolt needs 1: the other Sells for 46.55, which the
+    # craft's gain counts.
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, 50), (BOLT, 1000)),
+        [character_read(item(ORE_LINK), recipes=[SMELT_TWO, BOLT_FROM_BAR])],
+    )
+
+    holdings = result[MARKET].holdings
+    [craft] = [r for r in holdings if r.action is Action.CRAFT]
+    assert craft.profit == pytest.approx(949.05 - 94.05 + 46.55)
+    assert (
+        Row(
+            BAR_KEY,
+            Action.SELL,
+            1,
+            price=49,
+            profit=pytest.approx(46.55),
+            sale_events=1,
+            note="incl. 1 crafted",
+        )
+        in holdings
+    )
+
+
+def test_a_flip_to_crafts_sub_craft_leftovers_join_the_crafted_holdings(db):
+    # Bars have no market data, so each Bolt smelts 1 Ore bought at 100 and leaves a Bar.
+    result = run(
+        db,
+        selling((ORE, 100), (BOLT, 1000)),
+        [character_read(money=GOLD, recipes=[SMELT_TWO, BOLT_FROM_BAR])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.quantity, craft.via) == (6, (SubCraft(BAR_KEY, 6, "Kash-Patel"),))
+    assert craft.buys == (ReagentBuy(ORE_KEY, 6, 100),)
+    assert result[MARKET].holdings == [Row(BAR_KEY, None, 6, note="no data, incl. 6 crafted")]
+
+
+@pytest.mark.parametrize(
+    ("bar", "buys", "via"),
+    [
+        (300, ReagentBuy(ORE_KEY, 12, 100), (SubCraft(BAR_KEY, 12, "Kash-Patel"),)),
+        (90, ReagentBuy(BAR_KEY, 12, 90), ()),
+    ],
+    ids=["ore is cheaper", "bars are cheaper"],
+)
+def test_a_flip_to_craft_buys_whichever_of_the_reagent_or_its_sub_craft_costs_less(
+    db, bar, buys, via
+):
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, bar), (BOLT, 1000)),
+        [character_read(money=GOLD, recipes=[SMELT, BOLT_FROM_BARS])],
+    )
+
+    [craft] = [r for r in result[MARKET].shopping_list if r.item_key == BOLT_KEY]
+    assert (craft.quantity, craft.buys, craft.via) == (6, (buys,), via)
 
 
 # --- Predictions (#26) ---
