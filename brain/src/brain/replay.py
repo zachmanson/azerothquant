@@ -36,22 +36,22 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import _when, link_sales, lots
+from brain.lots import happened_at, link_sales, lots
 from brain.mailbox import MailKind
 from brain.observation import SaleEvent, sell_rate_evidence
 from brain.predictions import Prediction
 from brain.recommend import (
-    _BOUND_ON_CRAFT,
+    BOUND_ON_CRAFT,
     Action,
     MarketRecommendations,
-    _cheapest,
-    _cut,
-    _item_id,
-    _without,
+    auction_cut,
+    cheapest,
     deposit_of,
     exit_values,
+    item_id_of,
     market_holdings,
     recommend_market,
+    without,
 )
 
 
@@ -65,17 +65,19 @@ class Policy(StrEnum):
     BRAIN_WITHOUT_DEPOSITS = "Brain without Deposits"
 
 
-# How each Brain run's config differs from the full Brain's.
-_BRAINS: dict[Policy, dict[str, object]] = {
-    Policy.BRAIN: {},
-    Policy.BRAIN_WITHOUT_SUB_CRAFTS: {"craft_chain_depth": 1},
-    Policy.BRAIN_WITHOUT_FLIPS_TO_CRAFT: {"flips_to_craft": False},
-    Policy.BRAIN_WITHOUT_DEPOSITS: {"deposits": False},
+# Each Brain run's config, from the full Brain's.
+_BRAINS: dict[Policy, Callable[[Config], Config]] = {
+    Policy.BRAIN: lambda c: c,
+    Policy.BRAIN_WITHOUT_SUB_CRAFTS: lambda c: replace(c, craft_chain_depth=1),
+    Policy.BRAIN_WITHOUT_FLIPS_TO_CRAFT: lambda c: replace(c, flips_to_craft=False),
+    Policy.BRAIN_WITHOUT_DEPOSITS: lambda c: replace(c, deposits=False),
 }
 
 
 @dataclass(frozen=True)
 class MarketReplay:
+    """One Market's replay: each policy's value added, summed over the Scans graded."""
+
     market: Market
     scans: int  # the Scans graded: ones with a whole Sale Horizon of Scans after them
     graded: dict[Policy, float] = field(default_factory=dict)  # value added, summed
@@ -121,18 +123,27 @@ _DB_OUTLIER_DEVIATIONS = 1.5
 _TSM_FLOOR_SHARE = 0.8
 
 
-def db_market(conn: sqlite3.Connection, market: Market, at: int) -> dict[str, float]:
+def db_market(
+    conn: sqlite3.Connection,
+    market: Market,
+    at: int,
+    cache: dict[int, dict[str, float]] | None = None,
+) -> dict[str, float]:
     """The emulated TSM's DBMarket of every Item Key, from the Market's Scans in the 14
-    days up to `at`, every Listing counted, own ones included."""
+    days up to `at`, every Listing counted, own ones included. A day is 24 h back from
+    `at`, not a calendar day. `cache` keeps each Scan's values by its time, for a caller
+    asking again at later Scans."""
+    cache = {} if cache is None else cache
     by_day: dict[str, dict[int, list[float]]] = {}
     for t in scan_times(conn, market):
         day = (at - t) // 86400
         if not 0 <= day < _DB_DAYS:
             continue
-        for item_key, supply in supply_at(conn, market, t).items():
-            value = _scan_market_value(supply)
-            if value is not None:
-                by_day.setdefault(item_key, {}).setdefault(day, []).append(value)
+        if t not in cache:
+            values = {k: _scan_market_value(s) for k, s in supply_at(conn, market, t).items()}
+            cache[t] = {k: v for k, v in values.items() if v is not None}
+        for item_key, value in cache[t].items():
+            by_day.setdefault(item_key, {}).setdefault(day, []).append(value)
     return {
         item_key: sum((_DB_DAYS - d) * statistics.mean(v) for d, v in days.items())
         / sum(_DB_DAYS - d for d in days)
@@ -141,6 +152,7 @@ def db_market(conn: sqlite3.Connection, market: Market, at: int) -> dict[str, fl
 
 
 def _scan_market_value(supply: Supply) -> float | None:
+    """One Scan's market value of an Item Key (see above); None with no units."""
     prices = sorted(unit for unit, n in supply for _ in range(n))
     if not prices:
         return None
@@ -185,9 +197,10 @@ def replay(
         events = sell_rate_evidence(conn, market, config, since + 1, until + horizon + 1)
         deposit = deposit_of(conn, config, market)
         vendor = vendor_prices(conn, market.era)
-        cut = _cut(market, config)
+        cut = auction_cut(market, config)
         recipes = known_recipes(conn, market)
         merchant = {str(i): cost for i, cost in merchant_costs(conn, market).items()}
+        scan_values: dict[int, dict[str, float]] = {}
         graded: Counter[Policy] = Counter()
         for t in replayed:
             later = [e for e in events.sale_events if t < e.seen_at <= t + horizon]
@@ -197,12 +210,9 @@ def replay(
             gold = pooled_gold(conn, market.era, market.realm, market.faction, t)
             moves = {
                 policy: _brain(
-                    recommend_market(
-                        conn, replace(config, **changes), market, predictions, t, as_of=t
-                    ),
-                    vendor,
+                    recommend_market(conn, run(config), market, predictions, t, as_of=t), vendor
                 )
-                for policy, changes in _BRAINS.items()
+                for policy, run in _BRAINS.items()
             } | {
                 Policy.AUCTIONATOR: _auctionator(held, others, vendor, gold, deposit, cut),
                 Policy.TSM: _tsm(
@@ -211,13 +221,14 @@ def replay(
                     vendor,
                     recipes,
                     merchant,
-                    db_market(conn, market, t),
+                    db_market(conn, market, t, scan_values),
                     db_min_buyout(conn, market, t),
                     gold,
                 ),
             }
             for policy, m in moves.items():
-                graded[policy] += _grade(conn, config, market, m, later, deposit, t) - untouched
+                value = _grade(conn, config, market, m, later, deposit, cut, t)
+                graded[policy] += value - untouched
         realized = _realized(conn, market, since, until, cut)
         result.append(MarketReplay(market, len(replayed), dict(graded), realized))
     return result
@@ -234,7 +245,7 @@ def _realized(
     proceeds = sum(
         o.price * (1 - cut)
         for o in linked
-        if o.kind is MailKind.SOLD and since <= _when(o) <= until
+        if o.kind is MailKind.SOLD and since <= happened_at(o) <= until
     )
     cost = sum(
         sale.units * lot.cost / lot.units
@@ -246,27 +257,50 @@ def _realized(
 
 
 def _brain(m: MarketRecommendations, vendor: Mapping[int, int]) -> _Moves:
+    """The Brain's Recommendations as moves: Sell rows posted, Vendor rows vendored (for
+    nothing without a Vendor Price), no-data and Hold units held on to, and what the
+    Shopping List and Prediction buys spend. A Flip to Craft's output is posted and
+    vendored as it was valued; a Craft Action's is in the Holdings rows."""
     moves = _Moves()
     for r in m.holdings:
         if r.action is Action.SELL:
             moves.posts.append(_Post(r.item_key, r.quantity, r.price))
         elif r.action is Action.VENDOR:
-            moves.vendored += r.quantity * r.price
+            moves.vendored += r.quantity * (r.price or 0)
         elif r.action in (None, Action.HOLD):
             moves.kept[r.item_key] += r.quantity
         elif r.action is Action.CRAFT:
-            moves.spent += r.gold
+            moves.spent += r.merchant_gold
     for r in m.shopping_list:
         moves.spent += r.cost
         if r.action is Action.SELL:
             moves.posts.append(_Post(r.item_key, r.quantity, r.post_at))
         elif r.action is Action.VENDOR:
-            moves.vendored += r.quantity * vendor[_item_id(r.item_key)]
+            moves.vendored += r.quantity * vendor[item_id_of(r.item_key)]
         elif r.action is Action.CRAFT and r.made is not None:
-            vendor_price = vendor.get(_item_id(r.item_key), 0)
-            moves.posts.append(_Post(r.item_key, r.made.selling, r.made.post_at))
+            if r.made.selling:
+                moves.posts.append(_Post(r.item_key, r.made.selling, r.made.post_at))
+            vendor_price = vendor.get(item_id_of(r.item_key), 0)
             moves.vendored += (r.made.units - r.made.selling) * vendor_price
+    for r in m.prediction_buys:
+        moves.spent += r.cost
+        moves.kept[r.item_key] += r.quantity
     return moves
+
+
+def _exit(
+    moves: _Moves, item_key: str, h: Holding, price: float | None, vendor_price: int | None
+) -> None:
+    """A baseline's way out for held units: bound ones Vendored, the rest posted at
+    `price`, or without one Vendored, or held on to without a Vendor Price either."""
+    unbound = h.bags + h.bank
+    moves.vendored += (h.bags_bound + h.bank_bound) * (vendor_price or 0)
+    if price is not None:
+        moves.posts.append(_Post(item_key, unbound, price))
+    elif vendor_price is not None:
+        moves.vendored += unbound * vendor_price
+    else:
+        moves.kept[item_key] += unbound
 
 
 def _auctionator(
@@ -304,16 +338,10 @@ def _auctionator(
         moves.posts.append(_Post(item_key, units, post))
         asks[item_key] = [(unit, n) for unit, n in asks[item_key] if unit != low]
     for item_key, h in held.items():
-        vendor_price = vendor.get(_item_id(item_key))
-        bound, unbound = h.bags_bound + h.bank_bound, h.bags + h.bank
-        moves.vendored += bound * (vendor_price or 0)
+        vendor_price = vendor.get(item_id_of(item_key))
         post = asks[item_key][0][0] - 1 if asks.get(item_key) else None
-        if post is not None and post * (1 - cut) > (vendor_price or 0):
-            moves.posts.append(_Post(item_key, unbound, post))
-        elif vendor_price is not None:
-            moves.vendored += unbound * vendor_price
-        else:
-            moves.kept[item_key] += unbound
+        pays = post is not None and post * (1 - cut) > (vendor_price or 0)
+        _exit(moves, item_key, h, post if pays else None, vendor_price)
     return moves
 
 
@@ -336,16 +364,9 @@ def _tsm(
     moves = _Moves()
     held = _tsm_crafts(held, others, recipes, merchant, market_value, min_buyout, gold, moves)
     for item_key, h in held.items():
-        vendor_price = vendor.get(_item_id(item_key))
-        bound, unbound = h.bags_bound + h.bank_bound, h.bags + h.bank
-        moves.vendored += bound * (vendor_price or 0)
+        vendor_price = vendor.get(item_id_of(item_key))
         price = _tsm_price(market_value.get(item_key), others.get(item_key), vendor_price)
-        if price is not None:
-            moves.posts.append(_Post(item_key, unbound, price))
-        elif vendor_price is not None:
-            moves.vendored += unbound * vendor_price
-        else:
-            moves.kept[item_key] += unbound
+        _exit(moves, item_key, h, price, vendor_price)
     return moves
 
 
@@ -373,7 +394,7 @@ def _tsm_crafts(
     for recipe in (by_id[i] for i in sorted(by_id)):
         output = str(recipe.output_item_id)
         worth = market_value.get(output)
-        if recipe.bind_type is None or recipe.bind_type in _BOUND_ON_CRAFT:
+        if recipe.bind_type is None or recipe.bind_type in BOUND_ON_CRAFT:
             continue
         if recipe.cooldown is not None or worth is None:
             continue
@@ -396,7 +417,7 @@ def _tsm_crafts(
             for key, n in taken.items():
                 units[key] -= n
             for key, supply in bought.items():
-                asks[key] = _without(asks[key], supply)
+                asks[key] = without(asks[key], supply)
             made[output] += recipe.quantity_min
     result = {}
     for item_key in sorted({*held, *made}):
@@ -433,17 +454,19 @@ def _tsm_craft(
         if key in merchant:
             spend += short * merchant[key]
             continue
-        cheapest = _cheapest(asks.get(key, []), short)
-        if cheapest is None:
+        asked = cheapest(asks.get(key, []), short)
+        if asked is None:
             return None
-        bought[key] = cheapest
-        spend += sum(unit * k for unit, k in cheapest)
+        bought[key] = asked
+        spend += sum(unit * k for unit, k in asked)
     return spend, cost + spend, taken, bought
 
 
 def _tsm_price(
     market_value: float | None, asks: Supply | None, vendor_price: int | None
 ) -> float | None:
+    """The emulated TSM's price to post at; None without a DBMarket. It never posts above
+    the normal price, even when the cheapest Listing is dearer."""
     if market_value is None:
         return None
     normal = max(market_value, vendor_price or 0)
@@ -459,11 +482,12 @@ def _grade(
     moves: _Moves,
     later: list[SaleEvent],
     deposit: Callable[[str], float],
+    cut: float,
     at: int,
 ) -> float:
     """What `moves` made at the Scan requested `at` bring by the end of the Sale Horizon,
-    and what's still held then is worth."""
-    cut = _cut(market, config)
+    and what's still held then is worth. An unsold post has lost a Deposit per posting
+    expired by then; its Best Exit Value from then on charges only the ones after."""
     posting = config.post_duration_hours * 3600
     horizon = config.sale_horizon_seconds
     value = moves.vendored - moves.spent

@@ -453,3 +453,17 @@ def test_realized_profit_is_the_range_s_sales_after_the_cut_less_their_lots_cost
     )
 
     assert result[MARKET].realized_profit == pytest.approx(500 * 0.95 - 50)
+
+
+def test_units_with_no_vendor_price_to_vendor_at_bring_nothing(db):
+    # The Linen's Vendor Price was never seen, and the Sale Horizon only sells 6 of 10.
+    result = run(
+        db,
+        linen_selling_then_crashing(),
+        [character_read(item(count=10))],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    # The 4 left over bring nothing either way. Held untouched, 6 Sell at 19.
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(6 * 99 * 0.95 - 6 * 19 * 0.95)

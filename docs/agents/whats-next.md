@@ -1,3 +1,26 @@
+2026-09-28 (later 14): #80 BUILT on branch claude/zen-mccarthy-xaqoze (issue still open). New `brain/replay.py` and the `brain replay [--since DAY] [--until DAY]` command. Per Market, it grades every Scan that has a whole Sale Horizon of Scans after it. Each policy's grade is the **value added over holding on**: Vendor gold, plus posts filled by later Sale Events (a Sale Event's dearest price at or above the post, up to its units, cheapest posts first), less Deposits lost, plus what's still held at the end of the horizon at Best Exit Value (`recommend.exit_values`), less gold spent, less the same Holdings untouched. The policies:
+- Brain: `recommend.recommend_market(..., now=t, as_of=t)`, now split out of `recommend`, with the Holdings and gold of then.
+- Auctionator: flips an ask under the next one by more than the cut plus the Deposit, and posts 1c under the cheapest other Listing, or Vendors.
+- Emulated TSM: `db_market` / `db_min_buyout`, with the method in ADR-0015. Posts between 0.8x DBMarket and DBMarket, and crafts one level deep with no Sell Rate.
+- Ablations: `craft_chain_depth=1`, and the new Config fields `flips_to_craft` / `deposits` (not config.toml keys).
+
+The grader always charges Deposits. Realized profit is the range's Sold Outcomes after the cut, less the Lot cost they closed. The Beta Market is labelled provisional. Row got `merchant_gold` (a Craft Action's merchant spend) and `made` (`CraftOutput`: a Flip to Craft's output units, selling, post_at). Both are `compare=False` and not written to Lua. The `_Outlet` now keeps `post_at`. The helpers replay needs went public: `auction_cut`, `item_id_of`, `cheapest`, `without`, `BOUND_ON_CRAFT`, `market_holdings`, `deposit_of`, and `lots.happened_at`. The own-Market Sell Rate ablation was split to #84 (needs-triage, needs a grill).
+
+Review leftovers (judgement calls, not done):
+- The Known Recipes, Merchant Costs, deposits and Lots (Hold costs/ROI) the Brain uses at a past Scan are the latest, not as of it.
+- A Flip to Craft posts all its outputs at the one `post_at`.
+- Data Clumps in the baseline signatures (held/others/vendor/gold; market_value/min_buyout), and `_tsm_craft` returns a 4-tuple.
+- Prediction buys are graded as held units (no test: none of the replay tests has Predictions).
+
+NOT checked on real data: speed. Each replayed Scan runs 4 `recommend_market`s and 7 `exit_values`, and each rebuilds Sell Rates. If it's too slow, cache `sell_rates` per (Market, Scan) in `_valuer`, or add a `--every N`. Also not checked: whether the numbers look sane on the Beta Archive.
+
+User to do: run `brain replay` on the Beta history before Oct 21 (from brain/, no restart needed). Post the table on #80, then close #80 if it runs.
+
+Next, in order:
+1. Run the replay on Beta data (user), and fix anything it shows.
+2. #38 build (tdd), then /code-review + commit.
+3. #79 (small). Then #77 grill, #84 grill, #82 /research. #81 probe when the user is at the PC.
+
 2026-09-28 (later 13): GRILLED "keep going vs. TSM". Two new ADRs, and CONTEXT.md **Addon** and **Recommendation Table** updated. ADR-0003 is superseded in part.
 - ADR-0015: keep going, judged by a replay over the Archive.
   - What TSM offers on Forever: nothing. There is no official support and no Forever AuctionDB data, and Blizzard's auction API reportedly has no Forever data either. Auctionator and Auctioneer forks already run there. Beta ends Oct 21, and Live launches Nov 4.

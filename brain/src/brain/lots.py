@@ -61,7 +61,7 @@ def lots(
     written = {p.name: start_of(p.written) for p in predictions}
     result = sorted(
         [
-            Lot(p.item_key, _when(p), p.count, p.price, (), _bought_under(p, predictions))
+            Lot(p.item_key, happened_at(p), p.count, p.price, (), _bought_under(p, predictions))
             for p in purchases
         ]
         + [Lot(h.item_key, written[h.prediction], h.units, h.cost, (), h.prediction) for h in held],
@@ -72,7 +72,7 @@ def lots(
     # In the order they happened; a Prediction's held units are as of the start of its
     # written day, so a sale at that same moment comes after it.
     events: list[tuple[int, int, Prediction | Outcome]] = sorted(
-        [(written[p.name], 0, p) for p in predictions] + [(_when(o), 1, o) for o in sales],
+        [(written[p.name], 0, p) for p in predictions] + [(happened_at(o), 1, o) for o in sales],
         key=lambda event: event[:2],
     )
     for at, _, event in events:
@@ -86,7 +86,7 @@ def lots(
 def _bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str | None:
     """The Prediction a Purchase's units belong to: the one of its Item Key that stood
     when it was bought, from the start of its written day until it ended."""
-    bought_at = _when(purchase)
+    bought_at = happened_at(purchase)
     for p in predictions:
         if purchase.item_key in p.item_keys and start_of(p.written) <= bought_at < ended_at(p):
             return p.name
@@ -180,7 +180,7 @@ def deposits(outcomes: list[Outcome]) -> dict[str, float]:
         for o in outcomes
         if o.kind is MailKind.SOLD and o.item_key is not None and o.deposit is not None
     ]
-    return {o.item_key: o.deposit / o.count for o in sorted(sold, key=_when)}
+    return {o.item_key: o.deposit / o.count for o in sorted(sold, key=happened_at)}
 
 
 def _only(item_keys: set[str]) -> str | None:
@@ -193,6 +193,6 @@ def start_of(day: date) -> int:
     return int(datetime(day.year, day.month, day.day).timestamp())
 
 
-def _when(mail: Purchase | Outcome) -> int:
+def happened_at(mail: Purchase | Outcome) -> int:
     """When the mail's event happened: its arrival, else when the Brain first saw it."""
     return mail.arrived_at if mail.arrived_at is not None else mail.first_seen

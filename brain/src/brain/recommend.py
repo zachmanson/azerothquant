@@ -142,7 +142,7 @@ class Row:
     # A Craft Action's gold spent at merchants, and a Flip to Craft's output, for the
     # replay (#80). Plumbing, not part of the Recommendation: not written to
     # Recommendations.lua, nor compared.
-    gold: float = field(default=0.0, compare=False)
+    merchant_gold: float = field(default=0.0, compare=False)
     made: CraftOutput | None = field(default=None, compare=False)
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
     # Purchase Lots cover cost, and how many units that is. Split rows share it.
@@ -320,7 +320,7 @@ def recommend_market(
             offers,
             supply[item_key],
             rates.get(item_key),
-            vendor.get(_item_id(item_key)),
+            vendor.get(item_id_of(item_key)),
             merchant.get(item_key),
             _unbound(held.get(item_key, Holding())),
             valuer.queue(item_key, flips=True),
@@ -330,11 +330,11 @@ def recommend_market(
     ]
     outlets = {
         plan.output: _outlet(
-            plan.recipe.bind_type in _BOUND_ON_CRAFT,
+            plan.recipe.bind_type in BOUND_ON_CRAFT,
             supply.get(plan.output, []),
             for_sale.get(plan.output, []),
             rates.get(plan.output),
-            vendor.get(_item_id(plan.output)),
+            vendor.get(item_id_of(plan.output)),
             merchant.get(plan.output),
             _unbound(held.get(plan.output, Holding())),
             valuer.flipped.get(plan.output, []),
@@ -345,7 +345,7 @@ def recommend_market(
         )
         for plan in plans
     }
-    asks = {key: _without(offers, valuer.flipped.get(key, [])) for key, offers in for_sale.items()}
+    asks = {key: without(offers, valuer.flipped.get(key, [])) for key, offers in for_sale.items()}
     crafts = (
         _flips_to_craft(plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config)
         if config.flips_to_craft
@@ -444,7 +444,7 @@ def grades(
             result.append(frozen[p.name])
             continue
         graded_at = ended_at(p) + config.sale_horizon_seconds
-        settled = settle(p, market_lots, graded_at, _cut(market, config))
+        settled = settle(p, market_lots, graded_at, auction_cut(market, config))
         open_value = sum(
             _exit_value(conn, config, market, item_key, units, graded_at)
             for item_key, units in settled.open_units.items()
@@ -543,7 +543,7 @@ def _valuer(
     rates = sell_rates(conn, market, config, at) if scanned else {}
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
-    cut = _cut(market, config)
+    cut = auction_cut(market, config)
     # Like Vendor Prices, the latest seen: a deposit rate doesn't move.
     linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
     valuer = _Valuer(
@@ -611,7 +611,7 @@ class _Valuer:
             return 0.0
         if item_key in self.deposits:
             return self.deposits[item_key]
-        return self._config.ah_deposit_share * self.vendor.get(_item_id(item_key), 0)
+        return self._config.ah_deposit_share * self.vendor.get(item_id_of(item_key), 0)
 
     def queue(self, item_key: str, flips: bool) -> _Queue:
         """The Item Key's sale queue, at its Sell Rate under the Flip or Holdings priors."""
@@ -649,7 +649,7 @@ class _Valuer:
                 offers,
                 self.supply[item_key],
                 self.rates.get(item_key),
-                self.vendor.get(_item_id(item_key)),
+                self.vendor.get(item_id_of(item_key)),
                 self.merchant.get(item_key),
                 unbound.get(item_key, 0),
                 self.queue(item_key, flips=True),
@@ -685,7 +685,7 @@ class _Valuer:
             has_data,
             post_at,
             rate,
-            self.vendor.get(_item_id(item_key)),
+            self.vendor.get(item_id_of(item_key)),
             self.queue(item_key, flips=False),
             self.cut,
             self._config,
@@ -701,7 +701,7 @@ class _Valuer:
         """What the units would bring by their best Actions. Units without enough data to
         choose an exit count at the Vendor Price, or nothing without one."""
         if (item_key, holding) not in self._worth:
-            vendor = self.vendor.get(_item_id(item_key), 0)
+            vendor = self.vendor.get(item_id_of(item_key), 0)
             self._worth[item_key, holding] = sum(
                 r.profit if r.profit is not None else r.quantity * vendor
                 for r in self.rows(item_key, holding)
@@ -714,7 +714,7 @@ def _merchant(conn: sqlite3.Connection, market: Market) -> dict[str, float]:
     return {str(item_id): cost for item_id, cost in merchant_costs(conn, market).items()}
 
 
-def _cut(market: Market, config: Config) -> float:
+def auction_cut(market: Market, config: Config) -> float:
     return config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
 
 
@@ -803,7 +803,7 @@ def _holding_rows(
 
 # Enum.ItemBind values whose items can't go on the Auction House: Bind on Pickup and
 # quest items.
-_BOUND_ON_CRAFT = {1, 4}
+BOUND_ON_CRAFT = {1, 4}
 
 
 @dataclass
@@ -879,7 +879,7 @@ class _Plan:
             ),
             via=via,
             leftovers=tuple(self.leftovers.items()),
-            gold=self.gold,
+            merchant_gold=self.gold,
         )
 
 
@@ -1155,11 +1155,11 @@ class _Sources:
     def _bought(self, key: str, short: int, chain: _Chain) -> _Chain | None:
         if self.asks is None or key in self.under:
             return None
-        cheapest = _cheapest(_without(self.asks.get(key, []), chain.asks.get(key, [])), short)
-        if cheapest is None:
+        bought = cheapest(without(self.asks.get(key, []), chain.asks.get(key, [])), short)
+        if bought is None:
             return None
         chain = chain.copy()
-        chain.asks.setdefault(key, []).extend(cheapest)
+        chain.asks.setdefault(key, []).extend(bought)
         return chain
 
     def may_use(
@@ -1190,7 +1190,7 @@ class _Sources:
         leftover = crafts * maker.recipe.quantity_min - short
         if leftover:
             # One whose bind type is unknown counts as bound: it may not sell.
-            bound = maker.recipe.bind_type is None or maker.recipe.bind_type in _BOUND_ON_CRAFT
+            bound = maker.recipe.bind_type is None or maker.recipe.bind_type in BOUND_ON_CRAFT
             h = Holding(bags_bound=leftover) if bound else Holding(bags=leftover)
             chain.leftovers[key] = _plus(chain.leftovers.get(key, Holding()), h)
         return chain
@@ -1229,7 +1229,7 @@ class _Sources:
             self.crafted[key] = _plus(self.crafted.get(key, Holding()), h)
         if self.asks is not None:
             for key, bought in chain.asks.items():
-                self.asks[key] = _without(self.asks[key], bought)
+                self.asks[key] = without(self.asks[key], bought)
         self.spent[plan.recipe.recipe_id] += 1
         self.spent.update(chain.recipes)
 
@@ -1396,7 +1396,7 @@ def _flip_step(plan: _Plan, sources: _Sources, outlet: _Outlet) -> _CraftBuy | N
     )
 
 
-def _cheapest(asks: Supply, n: int) -> Supply | None:
+def cheapest(asks: Supply, n: int) -> Supply | None:
     """The cheapest `n` units of sorted (unit buyout, quantity) asks; None if too few."""
     taken = []
     for unit, quantity in asks:
@@ -1419,7 +1419,7 @@ def _unbound_units(held: dict[str, Holding]) -> dict[str, int]:
 def _crafted(plan: _Plan, holding: Holding) -> Holding:
     """`holding` with one more craft's output added, at the recipe's least quantity."""
     q = plan.recipe.quantity_min
-    if plan.recipe.bind_type in _BOUND_ON_CRAFT:
+    if plan.recipe.bind_type in BOUND_ON_CRAFT:
         return replace(holding, bags_bound=holding.bags_bound + q)
     return replace(holding, bags=holding.bags + q)
 
@@ -1497,7 +1497,7 @@ def _hold(
                     if r.profit is not None:
                         value = r.profit / r.quantity
                     else:
-                        value = vendor.get(_item_id(item_key), 0)
+                        value = vendor.get(item_id_of(item_key), 0)
                     today.append((value, i, n))
             units += _costed(sorted(today), lot_costs.get((p.name, item_key), []))
         held: dict[str, Row] = {}
@@ -1650,7 +1650,7 @@ def _flips(
     if vendor_price is not None:
         buys += [
             _VendorBuy(item_key, unit, quantity, vendor_price - effort - unit)
-            for unit, quantity in _without(offers, to_sell)
+            for unit, quantity in without(offers, to_sell)
             if vendor_price - effort - unit > 0
         ]
     return buys
@@ -1795,8 +1795,8 @@ def _post_at(
     (#62): just under the cheapest of them left, so it sells first, or `cap` if that's
     lower. The player's own Listings, the rest of `supply`, are matched rather than
     undercut. None if no Listing is left to price against."""
-    left = _without(others, bought)
-    own = _without(supply, others)
+    left = without(others, bought)
+    own = without(supply, others)
     prices = [left[0][0] - config.post_undercut_copper] if left else []
     prices += [own[0][0]] if own else []
     if not prices:
@@ -1811,7 +1811,7 @@ def _ceiling(*caps: float | None) -> float | None:
     return min(known) if known else None
 
 
-def _without(supply: Supply, bought: Supply) -> Supply:
+def without(supply: Supply, bought: Supply) -> Supply:
     left = Counter()
     for unit, quantity in supply:
         left[unit] += quantity
@@ -1944,7 +1944,7 @@ def _buy_what_fits(
         or _resells(
             _resale_of(after, row.item_key),
             row.price,
-            valuer.vendor.get(_item_id(row.item_key)),
+            valuer.vendor.get(item_id_of(row.item_key)),
             valuer.effort(row.item_key),
             valuer.flip_lost(row.item_key, row.quantity)[0],
             config,
@@ -1998,7 +1998,7 @@ def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[Reage
     return tuple(merged.values())
 
 
-def _item_id(item_key: str) -> int:
+def item_id_of(item_key: str) -> int:
     """The itemID of a stored Item Key ("itemID" or "itemID:bonus1:..."): Vendor Price
     belongs to it, not to the random suffix."""
     return int(item_key.split(":", 1)[0])
