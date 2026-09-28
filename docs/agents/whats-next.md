@@ -1,3 +1,9 @@
+2026-09-28 (later 36): Discussion only, no code. The user asked why Kingsblood's Per day was 9g 50s on a Qty 1, 3s 71c flip. Its Sell Rate is ~250 units/day after the priors (448 units in 13 Sale Events over 7.7 h, with chunks of 124/63/54/47), so one unit clears in ~6 min, and Profit/days blows up. Filed #101 (needs-triage): floor Per day's days at 1 (or the Sale Horizon) so Per day never beats Profit, and update CONTEXT.md. Not filed: mass cancels look the same as mass buys in Sell Rate (no seller data). The user may want that filed later.
+
+Next, in order:
+1. Not at the PC: #76 Disenchant (ready-for-agent, spec on the issue), then #101 (triage it first: 1 day vs Sale Horizon), #88, #77, #84.
+2. Next PC sitting: the #85 checks in "later 35".
+
 2026-09-28 (later 35): #100 FIXED and closed (97ce455), found with /diagnosing-bugs. Root cause confirmed with an in-game probe: taking a mail restarted the 2 s quiet timer, so the mail was gone before the Read. Now `MailboxVisit.lua` saves a Read on every update that changed the AH mail. Verified in game: a Magefist Gloves won mail taken right away became a Purchase. `brain rebuild` done, and `brain watch` restarted on current main.
 - Found on the client and fixed in the same commit: headers can show `Retrieving data` (no Read is saved then), and a taken mail lingers for a moment with nothing attached, which double-counted a Willow Belt sale (`parse_mail` now returns None for it). Also, a Read with any unreadable mail no longer marks mail taken, and `readAt` is bumped to stay increasing across visits (ADR-0005 amendment, CONTEXT.md "Mailbox Read").
 - Client facts (probe): MAIL_SHOW comes with 0 mails, and the first MAIL_INBOX_UPDATE ~0.3 s later has headers ready. Reading headers causes no update loop. MAIL_CLOSED did NOT show up in the probe log. An empty inbox fires no update. For probes, log to `AzerothQuantDB.<key>` and read SavedVariables after /reload, since chat only shows a few lines.
