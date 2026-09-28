@@ -2,7 +2,7 @@
 
 Copy of the global `Z:/vibing/CLAUDE.md` for cloud sessions, which only see the repo. Loaded by the SessionStart hook in `.claude/settings.json`, only when running in the cloud. Keep in sync with the local file.
 
-Plugins don't load in the cloud, so skills are the ones in `.claude/skills/`, invoked without a plugin prefix (`/tdd`, not `/mattpocock-skills:tdd`). `ui-ux-pro-max` is not available here.
+Plugins don't load in the cloud, so skills are the ones in `.claude/skills/`, invoked without a plugin prefix (`/tdd`, not `/mattpocock-skills:tdd`). `ui-ux-pro-max` is in `.claude/skills/` too.
 
 ## Workflow
 - For new feature work, reach for the Matt Pocock skills (`/tdd`, `/research`, `/prototype`) as needed rather than a formal GSD-style process — no forced planning ceremony for every phase.
@@ -55,3 +55,9 @@ The rules above are for real feature/debugging work. Skip the formal skill and j
 ## Communication
 - Be concise. No trailing summaries, no restating what was just done.
 - Lead with the answer or action, then reasoning if needed.
+
+## Cloud notes
+- Tests: `cd brain && pytest -q` and `busted --directory=addon`. The SessionStart hook installs both; if either is missing, read `/tmp/cloud-session-start.log`.
+- The Brain's live data (`brain/history.sqlite`, `brain/archive/`, `brain/config.toml`, `brain/predictions.toml`) is gitignored and not here. Anything that needs it, or the game, is for a local session: note it in the handoff.
+- `gh issue view/comment/edit` go through GraphQL, which the cloud GitHub proxy may reject with a 403. Fall back to REST: `gh api repos/zachmanson/azerothquant/issues/<n>`, `.../issues/<n>/comments` (GET, or POST `-f body=...`), `.../issues/<n>/labels` (POST `-f "labels[]=..."`).
+- Push straight to `main` (fine in this repo). If the session was started on a `claude/...` branch, merge or push it to `main` before the handoff.

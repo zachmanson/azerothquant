@@ -2,10 +2,12 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -n \"$CLAUDE_CODE_REMOTE_SESSION_ID\" ]; then cat \"$CLAUDE_PROJECT_DIR/docs/agents/global-rules.md\"; fi"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/cloud-session-start.sh\"",
+            "timeout": 600
           }
         ]
       }
