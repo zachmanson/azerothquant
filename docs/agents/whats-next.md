@@ -1,3 +1,27 @@
+2026-09-28 (later 22): GRILLED #88, #76 and #87. The specs are comments on the issues, and all three are labelled ready-for-agent. Filed #89 (Flip to Disenchant on the Shopping List, needs-triage, split out of #76).
+- #88 Buy Under:
+  - One per Item Key, from its best way out: Vendor, Sell, or a Craft it's a reagent of (any Character's Known Recipes, pooled).
+  - The value before the margin is `way_out_value`. CONTEXT.md bans "worth", so don't use it as a term. A Craft way costs the other reagents at their cheapest current source and ignores Holdings. The Flip margin and effort are charged once, at the top.
+  - Shown only if >= `buy_under_min_sightings` (1) distinct Scans in `buy_under_window_days` (7) saw a Listing under it. Units are ∞ for a Vendor outlet, else the Sell Rate room.
+  - Not graded by the replay.
+  - Addon: a Buy Under tab, a tooltip line, and a highlight on the modern AuctionHouseFrame ScrollBox rows (needs a PC check).
+  - The wand loop is only an example; don't special-case it.
+- #76 Disenchant (build after #88):
+  - A static `data/disenchant.toml`, re-derived from the wiki tables. TSM's file is All Rights Reserved, so don't copy it.
+  - Gated by the Enchanting skill level (new columns on known_profession).
+  - Scans record `itemInfo` (ilvl, quality, classID, equipLoc) into an `item_info` table.
+  - Disenchant Results are captured in the Addon. `brain disenchants` compares them to the tables with 95% intervals and "too few Results" under 20. The user stressed that a lucky or unlucky run must never read as a table change, and nothing auto-updates.
+  - Adds Disenchant as a Holdings Action (bound units too), in Best Exit Value, as group Buy Unders, and as the Craft Chain `disenchant` node.
+- #87: `craft_list_rows` (25) as a separate cap for Flips to Craft, in their own `Flips to Craft` tab. Budget folding is per tab. Replay `_taken` is unchanged: it grades the longer shown list, so replay numbers from before this change aren't comparable.
+- Research facts (not saved as a file): Forever's Greater Magic Wand likely takes 2 Lesser Magic Essence (from snippets). Forever adds an "Arcane Salvager" said to improve disenchanting, with no numbers published.
+
+Next, in order (none need the PC):
+1. #84 build (/tdd), then /code-review + commit.
+2. #87 build (/tdd), small, then /code-review + commit.
+3. #88 build (/tdd), then /code-review + commit.
+4. #77 build (/tdd), then #76.
+5. The needs-triage queue: #89, #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 21): FILED #87 and #88 from the user's feedback on #86 (both needs-triage).
 - #87: Flips to Craft get their own Shopping List section and cap. In the one top-50 list sorted by profit, small craft options lose to big Flips to Sell.
 - #88 Buy Under: the Brain computes the most a reagent (per Known Recipe) or a Disenchant source (quality, item-level band, armor or weapon) is worth. A target shows only if past Scans saw Listings under it. The Addon flags Auction House results at or under a target live, since Scans every 15 minutes miss short-lived Listings. The user's example is the Beta Greater Magic Wand loop (DE item level 16-20 green weapons at about 21s or less, craft wands, vendor them). The reagent half doesn't need #76; the Disenchant half does. A comment on #76 links them. "Buy Under" is a proposed CONTEXT.md term (snipe is banned).
