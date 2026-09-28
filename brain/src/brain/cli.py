@@ -407,13 +407,13 @@ def _watch(config: Config) -> int:
     log.info("Watching %s in %s (Ctrl+C to stop)", SAVEDVARIABLES_FILE, folders)
     try:
         while True:
-            _watch_step(config, watcher)
+            watch_step(config, watcher)
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         return 0
 
 
-def _watch_step(
+def watch_step(
     config: Config, watcher: Watcher, clock: Callable[[], float] = time.monotonic
 ) -> None:
     ready: list[Path] = []
@@ -425,13 +425,11 @@ def _watch_step(
             return
         results = run_import(config, ready)
         _log_results(results)
-        # What the Addon's RELOAD_READY_AFTER guesses at (#71), less the settle time.
-        log.info(
-            "Imported %d new Scans in %.1fs",
-            sum(r.report.scans_imported for r in results if r.report is not None),
-            clock() - noticed,
-        )
         failed = [r.path for r in results if r.error is not None]
+        if len(failed) < len(results):
+            # Up to Recommendations.lua written: what the Addon's RELOAD_READY_AFTER guesses
+            # at (#71), less the settle time. Not logged when every file failed.
+            log.info("Import took %.1fs", clock() - noticed)
     except Exception:
         # A long-running watcher logs and carries on rather than exit on one bad pass.
         log.exception("Import failed; will try again")

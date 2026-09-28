@@ -35,7 +35,7 @@ describe("Nudge.due", function()
 end)
 
 describe("Nudge.whenReloadReady", function()
-  -- Fakes for C_Timer.After, the Reload button pulse and a chat line.
+  -- Fakes for C_Timer.After, starting the Reload button pulse and a chat line.
   local function world()
     local w = { timers = {}, pulses = 0, lines = {} }
     w.after = function(seconds, fn)

@@ -413,8 +413,9 @@ local function createReloadButton()
 
   -- A Scan starts and ends on its own clock, so follow it while the frame is shown.
   button:SetScript("OnUpdate", function(self)
-    self:SetEnabled(not Scanner.busy())
-    Scanner.setPulsing(pulse, Scanner.reloadReady() and not Scanner.busy())
+    local busy = Scanner.busy()
+    self:SetEnabled(not busy)
+    Scanner.setPulsing(pulse, Scanner.reloadReady() and not busy)
     local text = RecommendationTable.waitingNote(Scanner.waiting())
     if text ~= note:GetText() then
       note:SetText(text)

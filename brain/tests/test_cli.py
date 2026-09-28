@@ -13,11 +13,11 @@ import pytest
 from brain.archive import Archive
 from brain.cli import (
     RebuildError,
-    _watch_step,
     run_import,
     run_rebuild,
     run_recommend,
     savedvariables_files,
+    watch_step,
 )
 from brain.config import Config, Era, Install
 from brain.history import (
@@ -134,10 +134,10 @@ def test_watch_logs_how_long_an_import_took(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     clock = iter([100.0, 110.0, 114.2]).__next__
 
-    _watch_step(config, watcher, clock)  # sees the file for the first time
-    _watch_step(config, watcher, clock)  # it has settled: import
+    watch_step(config, watcher, clock)  # sees the file for the first time
+    watch_step(config, watcher, clock)  # it has settled: import
 
-    assert "Imported 2 new Scans in 4.2s" in caplog.text
+    assert "Import took 4.2s" in caplog.text
 
 
 def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_path):

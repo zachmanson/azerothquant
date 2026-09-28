@@ -4,7 +4,9 @@
 -- On load it also deletes the Scans the Brain has imported (Prune.lua). While
 -- the AH is open the button pulses whenever a Scan can run, and it says in chat when a
 -- Scan would complete an Observation Window (Nudge.lua).
--- ns.Scanner.busy() says whether a Scan is in flight.
+-- ns.Scanner.busy() says whether a Scan is in flight, and reloadReady() whether the Brain
+-- should have imported the Scans saved at load (#71). It also lends the Scan button's
+-- pulse (addPulse, setPulsing) to the Reload button.
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
@@ -72,13 +74,13 @@ local function addPulse(target)
 end
 
 -- Callers run every second or frame, so only start or stop the pulse on a change.
-local function setPulsing(pulse, on)
-  if on and not pulse:IsPlaying() then
-    pulse.glow:Show()
-    pulse:Play()
-  elseif not on and pulse:IsPlaying() then
-    pulse:Stop()
-    pulse.glow:Hide()
+local function setPulsing(group, on)
+  if on and not group:IsPlaying() then
+    group.glow:Show()
+    group:Play()
+  elseif not on and group:IsPlaying() then
+    group:Stop()
+    group.glow:Hide()
   end
 end
 

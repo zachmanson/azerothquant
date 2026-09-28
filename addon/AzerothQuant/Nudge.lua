@@ -2,7 +2,8 @@
 -- Scan cooldown ends while the Auction House is open, if a Scan then would
 -- complete an Observation Window with the previous one (ADR-0004). Separately,
 -- the Scan button pulses whenever a Scan can run, which is exactly when it's
--- enabled: AH open, cooldown over, no Scan pending (Scanner.lua, #48).
+-- enabled: AH open, cooldown over, no Scan pending (Scanner.lua, #48). And after a
+-- load with unimported Scans, it decides when to say the Brain should be done (#71).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
@@ -31,20 +32,20 @@ end
 
 -- How long after a load `brain watch` should have imported the Scans it saved and
 -- rewritten Recommendations.lua: a guess, since the Addon can't see that file change.
--- Tune it by the "Imported N new Scans in Xs" lines `brain watch` logs, plus its 3 s
+-- Tune it by the "Import took Xs" lines `brain watch` logs, plus its 3 s
 -- settle time (#71).
 Nudge.RELOAD_READY_AFTER = 10
 Nudge.RELOAD_READY_LINE = "The Brain should be done: Reload to see the new Scan."
 
 -- On a load with `unimported` saved Scans, waits RELOAD_READY_AFTER seconds, then
--- starts the Reload button's pulse and says so in chat once. `after`, `pulse` and `say`
--- are C_Timer.After, the pulse and the chat line.
-function Nudge.whenReloadReady(unimported, after, pulse, say)
+-- calls `ready` (which starts the Reload button's pulse) and says so in chat once.
+-- `after` and `say` are C_Timer.After and the chat line.
+function Nudge.whenReloadReady(unimported, after, ready, say)
   if unimported == 0 then
     return
   end
   after(Nudge.RELOAD_READY_AFTER, function()
-    pulse()
+    ready()
     say(Nudge.RELOAD_READY_LINE)
   end)
 end
