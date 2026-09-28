@@ -33,6 +33,6 @@ The reagent-source function (`_Sources` in recommend.py) is where a Disenchant s
 ## Consequences
 
 - Supersedes ADR-0008's "one step, outputs valued by Sell and Vendor only" and ADR-0009's "Outputs are still not crafted further". Outputs are still valued by Sell and Vendor only; it's the reagents that chain.
-- A recipe shows a blocked row only when some reagent can't be sourced at all: a reagent with no market data blocks it only when no merchant sells it and no Known Recipe makes it.
+- A recipe shows a blocked row only when some reagent can't be sourced at all: a reagent with no market data blocks it only when no merchant sells it and no Known Recipe may make it for this recipe under the guards (depth, path, cooldown). A maker whose own reagents aren't there shows no row, like any recipe whose reagents aren't there.
 - The search tries each source for each short reagent, so each greedy step values more Holdings than before; the Valuer memoizes what a Holding is worth.
 - Best Exit Value is unchanged in code: Grades and held-at-writing never counted crafts (ADR-0010).

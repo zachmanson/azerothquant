@@ -1956,6 +1956,9 @@ def test_a_chain_is_at_most_craft_chain_depth_crafts_deep(db, depth, crafts):
             SubCraft(BAR_KEY, 2, "Kash-Patel"),
             SubCraft(BOLT_KEY, 1, "Kash-Patel"),
         )
+        assert made[0].note == (
+            "on Kash-Patel: uses 2 of 2770, via 2 of 2840 on Kash-Patel, 1 of 2996 on Kash-Patel"
+        )
 
 
 def test_a_reagent_without_market_data_is_sub_crafted_but_its_held_units_are_not_used(db):
@@ -2068,6 +2071,28 @@ def test_a_flip_to_craft_buys_whichever_of_the_reagent_or_its_sub_craft_costs_le
 
     [craft] = [r for r in result[MARKET].shopping_list if r.item_key == BOLT_KEY]
     assert (craft.quantity, craft.buys, craft.via) == (6, (buys,), via)
+
+
+@pytest.mark.parametrize(
+    ("smelt", "config"),
+    [
+        (SMELT, replace(CONFIG, craft_chain_depth=1)),
+        (recipe(2657, output=2840, reagents=[(2770, 1)], cooldown=3 * HOUR), CONFIG),
+    ],
+    ids=["no chains", "smelt on cooldown"],
+)
+def test_a_reagent_without_market_data_that_cant_be_sub_crafted_blocks_the_recipe(
+    db, smelt, config
+):
+    result = run(
+        db,
+        selling((ORE, 100), (BOLT, 1000)),
+        [character_read(item(BAR_LINK, count=2), recipes=[smelt, BOLT_FROM_BARS])],
+        config=config,
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.item_key == BOLT_KEY]
+    assert craft.blocked == Blocked(BlockReason.NO_DATA, BAR_KEY)
 
 
 # --- Predictions (#26) ---

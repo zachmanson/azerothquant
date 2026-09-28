@@ -177,7 +177,7 @@ What a held Item Key's units cost, per unit, from its open Purchase Lots not tie
 _Avoid_: cost basis, buy price
 
 **Best Exit Value**:
-The most one unit of an Item Key is worth via its best Action, valued by Sell and Vendor. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts (ADR-0010).
+The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts (ADR-0010).
 _Avoid_: value, worth
 
 **Recommendation**:
