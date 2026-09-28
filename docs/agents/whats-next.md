@@ -2,7 +2,9 @@
 
 Review leftovers (judgement calls, not done): `Row.leftovers` is internal plumbing on the public Row; `_subcrafted` counts an unknown-bind leftover as bound while `_crafted` counts an unknown-bind top output as unbound (top recipes with unknown bind are blocked anyway); `_on_hand` (blocked-row display) and `_step`'s "some held unit taken" say the same rule two ways; config.py now has four hand-written "whole number >= 1" checks (a `_parse_whole` helper is due). Not checked on real data: `brain recommend` speed with chains (each step tries every maker per short reagent).
 
-User to do: close #33, restart `brain watch`, /reload (no new Addon files). In game: hover a chained Craft row and check the `Craft N <Bar> on <Character>` lines come before Use/Buy.
+User to do now: close #33.
+
+Parked until the user is back at the PC (they can't do in-game checks now; don't ask before then): restart `brain watch` (stop all 3 processes), /reload (no new Addon files), then hover a chained Craft row and check the `Craft N <Bar> on <Character>` lines come before Use/Buy. Also note how long `brain recommend` takes with chains. The earlier parked lists (later 10, later 7, #19 spike) still stand.
 
 Next, in order:
 1. #38 build (tdd), then /code-review + commit.
