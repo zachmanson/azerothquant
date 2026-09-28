@@ -1,5 +1,7 @@
 # azerothquant
 
+Read `docs/agents/whats-next.md` at the start of every session: it has the work queue and the gotchas. Handoffs update that file.
+
 ## Agent skills
 
 ### Issue tracker

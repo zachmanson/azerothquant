@@ -19,3 +19,6 @@ brain/archive/
 
 # The player's Predictions (copy from brain/predictions.example.toml)
 brain/predictions.toml
+
+# Per-machine Claude Code settings
+.claude/settings.local.json
