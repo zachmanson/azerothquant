@@ -99,7 +99,7 @@ def test_markets_do_not_mix_windows(db):
 # --- the expiry rule for Disappearances ---
 
 # The least time left in each bucket is the previous bucket's longest: 0, 30 min, 2 h, 12 h.
-LEAST_TIME_LEFT = {1: 0, 2: 30 * MINUTE, 3: 2 * HOUR, 4: 8 * HOUR}
+LEAST_TIME_LEFT = {1: 0, 2: 30 * MINUTE, 3: 2 * HOUR, 4: 12 * HOUR}
 
 
 @pytest.mark.parametrize("bucket", [2, 3, 4])

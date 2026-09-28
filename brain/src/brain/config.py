@@ -27,9 +27,10 @@ class Install:
     era: Era
 
 
-# Longest time left in each bucket (1 = shortest), in minutes: <30m, 30m-2h, 2-8h, 8-24h.
-# These are Classic's: Forever posts for 2, 8 or 24 h (#78), not retail's 12/24/48 h (#95).
-DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 8 * 60, 24 * 60)
+# Longest time left in each bucket (1 = shortest), in minutes: <30m, 30m-2h, 2-12h, 12-24h.
+# The labels are the Forever client's (#95); the last bucket ends at 24 h because Forever
+# posts for 2, 8 or 24 h (#78), not retail's 48 h.
+DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 24 * 60)
 
 
 # Longest gap between two Scans of a Market that still counts as an Observation Window

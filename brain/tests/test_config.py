@@ -120,12 +120,12 @@ era = "beta"
 """
 
 
-def test_time_left_buckets_default_to_classic(tmp_path):
+def test_time_left_buckets_default_to_the_forever_labels(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
-    # Forever posts for 2, 8 or 24 h (#78), so Classic's <30m, 30m-2h, 2-8h, 8-24h, as the
-    # longest time left in each bucket (seconds).
-    assert config.time_left_max_seconds == (30 * 60, 2 * 3600, 8 * 3600, 24 * 3600)
+    # The client's labels are <30m, 30m-2h, 2-12h, >12h (#95), and Forever posts for at most
+    # 24 h (#78). The longest time left in each bucket, in seconds.
+    assert config.time_left_max_seconds == (30 * 60, 2 * 3600, 12 * 3600, 24 * 3600)
 
 
 def test_time_left_buckets_can_be_set(tmp_path):

@@ -7,9 +7,9 @@
 # Use single quotes so Windows backslashes are taken literally.
 
 # Optional: the longest time left, in minutes, in each Auction House time-left bucket
-# (shortest first). Defaults to Classic's <30m, 30m-2h, 2-8h, 8-24h, since Forever posts
-# for 2, 8 or 24 h. Must come before the first [[installs]].
-# time_left_max_minutes = [30, 120, 480, 1440]
+# (shortest first). Defaults to the Forever client's <30m, 30m-2h, 2-12h, >12h, capped at
+# 24 h since Forever posts for 2, 8 or 24 h. Must come before the first [[installs]].
+# time_left_max_minutes = [30, 120, 720, 1440]
 
 # Optional: the longest gap, in minutes, between two Scans of a Market that still counts
 # as an Observation Window. Only those gaps count toward Sell Rate (see ADR-0004).
