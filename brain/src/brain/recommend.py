@@ -331,7 +331,7 @@ def held_at_writing(
     Once the Market has a Scan after its written day, a Prediction's are frozen in
     grades.toml and read from there from then on (#66)."""
     characters = character_markets(conn).get(market, [])
-    frozen = load_frozen(config.grades_path).held
+    frozen = load_frozen(config.grades_path, market).held
     times = scan_times(conn, market)
     result = []
     for p in predictions:
@@ -348,8 +348,9 @@ def held_at_writing(
             units = h.bags + h.bank
             cost = _exit_value(conn, config, market, item_key, units, at)
             costed.append(Held(p.name, item_key, units, round(cost)))
-        if config.grades_path and times and times[-1] >= start_of(p.written + timedelta(days=1)):
-            freeze_held(config.grades_path, p.name, costed)
+        day_passed = times and times[-1] >= start_of(p.written + timedelta(days=1))
+        if config.grades_path is not None and day_passed:
+            freeze_held(config.grades_path, market, p.name, costed)
         result += costed
     return result
 
@@ -362,15 +363,16 @@ def grades(
     now: int,
 ) -> list[Grade]:
     """The Grade of each Prediction a Sale Horizon has passed since it ended, by `now`.
-    A Grade is frozen in grades.toml the first time, and read from there from then on
-    (#66)."""
+    A Grade is frozen in grades.toml the first time the Market has a Scan at or after its
+    grading moment, and read from there from then on (#66)."""
     due = [p for p in predictions if ended_at(p) + config.sale_horizon_seconds <= now]
     if not due:
         return []
-    frozen = load_frozen(config.grades_path).grades
+    frozen = load_frozen(config.grades_path, market).grades
     if all(p.name in frozen for p in due):
         return [frozen[p.name] for p in due]
     market_lots = _market_lots(conn, config, market, predictions)
+    times = scan_times(conn, market)
     result = []
     for p in due:
         if p.name in frozen:
@@ -384,8 +386,9 @@ def grades(
             if units
         )
         grade = Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost)
-        if config.grades_path:
-            freeze_grade(config.grades_path, grade)
+        # Once a Scan at or after its grading moment is in, what it rests on is too.
+        if config.grades_path is not None and times and times[-1] >= graded_at:
+            freeze_grade(config.grades_path, market, grade)
         result.append(grade)
     return result
 

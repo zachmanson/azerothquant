@@ -332,32 +332,6 @@ def test_grades_come_back_the_same_from_the_archive(tmp_path):
     assert grade.cost > 0
 
 
-def test_a_frozen_grade_outlives_the_history_it_was_worked_out_from(tmp_path):
-    # #66: grades.toml is kept apart from the history, which a rebuild recreates.
-    install = tmp_path / "_classic_beta_"
-    file = install_with_savedvariables(install)
-    config = dataclasses.replace(
-        config_for(tmp_path, Install(install, Era.BETA)), grades_path=tmp_path / "grades.toml"
-    )
-    linen = Prediction(
-        name="Linen spike",
-        reason="Tailoring quests",
-        item_keys=("2589",),
-        catalyst="Phase 2",
-        written=date(2026, 9, 22),
-        lapse=date(2026, 11, 17),
-        happened=date(2026, 9, 22),
-    )
-    now = 1_800_000_000
-    run_import(config, [file])
-    with closing(open_history(config.history_path)) as conn:
-        [grade] = grades(conn, config, MARKET, [linen], now)
-    assert grade.cost > 0
-
-    with closing(open_history(tmp_path / "fresh.sqlite")) as conn:
-        assert grades(conn, config, MARKET, [linen], now) == [grade]
-
-
 def test_vendor_prices_come_back_the_same_from_the_archive(tmp_path):
     # The Archive is JSON, which turns the itemID keys into strings, and an empty Lua
     # table reads as a list. Neither may change what the rebuilt history holds.

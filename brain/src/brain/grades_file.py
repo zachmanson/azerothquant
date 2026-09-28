@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from brain.history import Market
 from brain.lots import Held
 
 _HEADER = (
@@ -46,23 +47,16 @@ class Grade:
 
 @dataclass(frozen=True)
 class Frozen:
-    """What grades.toml holds, by Prediction name."""
+    """What grades.toml holds for one Market, by Prediction name."""
 
     held: dict[str, tuple[Held, ...]] = field(default_factory=dict)
     grades: dict[str, Grade] = field(default_factory=dict)
 
 
-def load_frozen(path: Path | None) -> Frozen:
-    """What's frozen in `path`; nothing without a path or before the file is written."""
-    if path is None:
-        return Frozen()
-    try:
-        with open(path, "rb") as f:
-            raw = tomllib.load(f)
-    except FileNotFoundError:
-        return Frozen()
-    except tomllib.TOMLDecodeError as e:
-        raise GradesError(f"{path}: {e}") from None
+def load_frozen(path: Path | None, market: Market) -> Frozen:
+    """What's frozen in `path` for `market`; nothing without a path or before the file is
+    written. A Prediction names Item Keys, not a Market, so each Market has its own."""
+    raw = _load(path)
     try:
         held = {
             name: tuple(
@@ -74,7 +68,7 @@ def load_frozen(path: Path | None) -> Frozen:
                 )
                 for u in entry["units"]
             )
-            for name, entry in raw.get("held", {}).items()
+            for name, entry in _entries(raw, "held", market).items()
         }
         grades = {
             name: Grade(
@@ -84,26 +78,28 @@ def load_frozen(path: Path | None) -> Frozen:
                 float(_typed(entry["open_value"], int | float)),
                 _typed(entry["cost"], int),
             )
-            for name, entry in raw.get("grades", {}).items()
+            for name, entry in _entries(raw, "grades", market).items()
         }
     except (KeyError, TypeError, AttributeError) as e:
         raise GradesError(f"{path}: an entry is malformed ({e!r}); delete it to redo it") from None
     return Frozen(held, grades)
 
 
-def freeze_held(path: Path, prediction: str, held: Sequence[Held]) -> None:
+def freeze_held(path: Path, market: Market, prediction: str, held: Sequence[Held]) -> None:
     """Append a Prediction's held-at-writing units, which may be none."""
     units = ", ".join(
         f"{{ item_key = {_string(h.item_key)}, units = {h.units}, cost = {h.cost} }}" for h in held
     )
-    _append(path, f"[held.{_string(prediction)}]\nunits = [{units}]\n")
+    _append(path, "held", market, prediction, f"units = [{units}]\n")
 
 
-def freeze_grade(path: Path, grade: Grade) -> None:
+def freeze_grade(path: Path, market: Market, grade: Grade) -> None:
     """Append a Prediction's Grade."""
     _append(
         path,
-        f"[grades.{_string(grade.prediction)}]\n"
+        "grades",
+        market,
+        grade.prediction,
         f"graded_at = {grade.graded_at}\n"
         f"proceeds = {float(grade.proceeds)!r}\n"
         f"open_value = {float(grade.open_value)!r}\n"
@@ -111,10 +107,34 @@ def freeze_grade(path: Path, grade: Grade) -> None:
     )
 
 
-def _append(path: Path, table: str) -> None:
+def _load(path: Path | None) -> dict:
+    if path is None:
+        return {}
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except tomllib.TOMLDecodeError as e:
+        raise GradesError(f"{path}: {e}") from None
+
+
+def _entries(raw: dict, kind: str, market: Market) -> dict:
+    """One kind of entry for one Market: [<kind>.<era>.<realm>.<faction>.<Prediction>]."""
+    return raw.get(kind, {}).get(market.era, {}).get(market.realm, {}).get(market.faction, {})
+
+
+def _append(path: Path, kind: str, market: Market, prediction: str, body: str) -> None:
+    # Read again right before writing: another Brain process may have frozen it since the
+    # caller loaded, and a second table of the same name would make the file unreadable.
+    if prediction in _entries(_load(path), kind, market):
+        return
+    header = ".".join(
+        _string(part) for part in (kind, market.era, market.realm, market.faction, prediction)
+    )
     new = not path.exists()
     with open(path, "a", encoding="utf-8", newline="\n") as f:
-        f.write((_HEADER if new else "") + "\n" + table)
+        f.write((_HEADER if new else "") + f"\n[{header}]\n" + body)
 
 
 def _string(text: str) -> str:

@@ -2115,7 +2115,7 @@ def test_a_best_exit_is_never_a_sale_above_what_a_merchant_charges(db):
 # --- Frozen in grades.toml (#66) ---
 
 
-def frozen(tmp_path):
+def freezing(tmp_path):
     return replace(CONFIG, grades_path=tmp_path / "grades.toml")
 
 
@@ -2133,7 +2133,7 @@ def test_a_held_at_writing_cost_is_frozen_once_its_day_has_passed(db, tmp_path, 
         [*selling_two_linen_an_hour(), scan(later, row(quantity=20, unit=500))],
         [character_read(item(count=10), vendor_prices={2589: 10})],
     )
-    config = frozen(tmp_path)
+    config = freezing(tmp_path)
     p = prediction(LINEN_KEY, written=written)
     assert held_at_writing(db, config, MARKET, [p]) == [Held("Linen spike", LINEN_KEY, 10, 604)]
 
@@ -2147,7 +2147,7 @@ def test_a_held_at_writing_cost_is_not_frozen_before_a_scan_after_its_day(
 ):
     # Written the day after the last Scan: a Scan or a Read from its day may still come.
     run(db, selling_two_linen_an_hour(), [character_read(item(count=10), vendor_prices={2589: 10})])
-    config = frozen(tmp_path)
+    config = freezing(tmp_path)
     p = prediction(LINEN_KEY, written=date.fromtimestamp(T0 + HOUR) + timedelta(days=1))
     held_at_writing(db, config, MARKET, [p])
 
@@ -2157,17 +2157,53 @@ def test_a_held_at_writing_cost_is_not_frozen_before_a_scan_after_its_day(
 
 
 def test_a_grade_is_frozen_once_worked_out(db, tmp_path, monkeypatch):
-    run(db, selling_two_linen_an_hour(), [character_read(item(count=10), vendor_prices={2589: 10})])
-    config = frozen(tmp_path)
     written = TODAY + timedelta(days=1)
     p = prediction(LINEN_KEY, written=written, happened=written + timedelta(days=1))
     now = start_of(written + timedelta(days=2)) + 3 * HOUR
+    run(
+        db,
+        [*selling_two_linen_an_hour(), scan(now, row(quantity=20))],
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+    )
+    config = freezing(tmp_path)
     [grade] = grades(db, config, MARKET, [p], now)
     assert grade.open_value > 0
 
     monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
 
     assert grades(db, config, MARKET, [p], now + DAY) == [grade]
+
+
+def test_a_frozen_grade_outlives_the_history_it_was_worked_out_from(db, other_db, tmp_path):
+    # grades.toml is kept apart from the history, which `brain rebuild` recreates (ADR-0005).
+    written = TODAY + timedelta(days=1)
+    p = prediction(LINEN_KEY, written=written, happened=written + timedelta(days=1))
+    now = start_of(written + timedelta(days=2)) + 3 * HOUR
+    run(
+        db,
+        [*selling_two_linen_an_hour(), scan(now, row(quantity=20))],
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+    )
+    config = freezing(tmp_path)
+    [grade] = grades(db, config, MARKET, [p], now)
+    assert grade.cost > 0
+
+    assert grades(other_db, config, MARKET, [p], now) == [grade]
+
+
+def test_a_grade_is_not_frozen_before_a_scan_at_its_grading_moment(db, tmp_path, monkeypatch):
+    # A Scan or a Read from before the grading moment may still come.
+    run(db, selling_two_linen_an_hour(), [character_read(item(count=10), vendor_prices={2589: 10})])
+    config = freezing(tmp_path)
+    written = TODAY + timedelta(days=1)
+    p = prediction(LINEN_KEY, written=written, happened=written + timedelta(days=1))
+    now = start_of(written + timedelta(days=2)) + 3 * HOUR
+    grades(db, config, MARKET, [p], now)
+
+    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+
+    [grade] = grades(db, config, MARKET, [p], now)
+    assert grade.open_value == 0
 
 
 # --- Grading (#27) ---
