@@ -56,7 +56,7 @@ describe("Nudge.whenReloadReady", function()
     Nudge.whenReloadReady(2, w.after, w.pulse, w.say)
 
     assert.are.equal(1, #w.timers)
-    assert.are.equal(10, w.timers[1].seconds)
+    assert.are.equal(Nudge.RELOAD_READY_AFTER, w.timers[1].seconds)
     assert.are.equal(0, w.pulses)
     assert.are.same({}, w.lines)
 
