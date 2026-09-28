@@ -13,6 +13,7 @@ Chat.lua
 Money.lua
 Scan.lua
 MailboxRead.lua
+MailboxVisit.lua
 CharacterRead.lua
 KnownRecipes.lua
 MerchantCosts.lua

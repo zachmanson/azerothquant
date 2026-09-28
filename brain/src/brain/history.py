@@ -579,10 +579,12 @@ def _import_mailbox_read(
         return
 
     current = []
+    unreadable = 0
     for raw_mail in mails:
         try:
             parsed = parse_mail(raw_mail)
         except MailFormatError as e:
+            unreadable += 1
             report.mails_unreadable += 1
             report.warn(f"Mailbox Read at {read_at} for {raw['character']}: skipped a mail: {e}")
             continue
@@ -603,8 +605,9 @@ def _import_mailbox_read(
             )
 
     # Over 50 mails, the inbox shows only some: a mail missing from an incomplete Read
-    # may just be hidden, so it stays live.
-    if raw.get("shownCount") == raw.get("totalCount"):
+    # may just be hidden, so it stays live. So may one the Brain can't read, such as a
+    # header or invoice the client hadn't loaded yet (#100).
+    if raw.get("shownCount") == raw.get("totalCount") and unreadable == 0:
         seen = set(matches)
         conn.executemany(
             "UPDATE auction_mail SET live = 0 WHERE id = ?",

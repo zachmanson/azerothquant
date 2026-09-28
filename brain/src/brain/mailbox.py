@@ -82,7 +82,7 @@ class AuctionMail:
 
 def parse_mail(raw: object) -> tuple[AuctionMail, float] | None:
     """The mail and its daysLeft, or None for Auction House mail that is neither an
-    Outcome nor a Purchase (outbid notices)."""
+    Outcome nor a Purchase (outbid notices, and mail caught mid-take)."""
     if not isinstance(raw, dict):
         raise MailFormatError(f"a mail must be a table, got {raw!r}")
     sender = _required(raw, "sender", str)
@@ -96,6 +96,12 @@ def parse_mail(raw: object) -> tuple[AuctionMail, float] | None:
     if prefix is None:
         raise MailFormatError(f"unrecognized Auction House mail subject {subject!r}")
     kind = _KINDS_BY_PREFIX[prefix]
+
+    # Every Auction House mail brings money or an item. Taking one empties it a moment
+    # before it is deleted, and a Read can land in between (#100): it's on its way out,
+    # and read as a new mail it would count twice.
+    if money == 0 and raw.get("firstItemLink") is None:
+        return None
 
     if kind in (MailKind.SOLD, MailKind.WON):
         # The price and count are only in the invoice.

@@ -567,6 +567,19 @@ def read_mail(db, *reads):
     return import_mailbox_reads(db, list(reads), Era.BETA, CONFIG)
 
 
+def test_a_sale_seen_again_mid_take_is_one_outcome(db):
+    # Seen on the client (#100): the money leaves the mail a moment before the mail goes.
+    sold = sold_mail(days=29.99)
+    read_mail(
+        db,
+        read_with(T0, sold),
+        read_with(T0 + 1, {**sold, "money": 0}),
+        read_with(T0 + 2),
+    )
+
+    assert len(outcomes(db, MARKET)) == 1
+
+
 def test_mail_becomes_outcomes_and_purchases_in_the_senders_market(db):
     read_mail(db, read_with(T0, sold_mail(count=8, price=2304), won_mail(days=29.5)))
 
@@ -641,6 +654,23 @@ def test_mail_hidden_by_a_full_inbox_isnt_counted_again_when_it_shows(db):
         read_with(T0, sold_mail()),
         read_with(T0 + HOUR, shown=0, total=60),
         read_with(T0 + 2 * HOUR, sold_mail()),
+    )
+
+    assert len(outcomes(db, MARKET)) == 1
+
+
+def test_a_mail_that_cant_be_read_yet_isnt_counted_again_when_it_can(db):
+    # A header or invoice the client hasn't loaded yet (#100) may be a mail already
+    # known, so a Read with an unreadable mail takes nothing out of the inbox.
+    sold = sold_mail(days=29.99)
+    loading = {**sold, "subject": "Retrieving data"}
+    no_invoice = {k: v for k, v in sold.items() if k != "invoice"}
+    read_mail(
+        db,
+        read_with(T0, sold),
+        read_with(T0 + 1, loading),
+        read_with(T0 + 2, no_invoice),
+        read_with(T0 + 3, sold),
     )
 
     assert len(outcomes(db, MARKET)) == 1

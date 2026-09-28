@@ -103,3 +103,16 @@ describe("MailboxRead.build", function()
     assert.are.equal(4, read.mails[2].index)
   end)
 end)
+
+describe("MailboxRead.loading", function()
+  it("is true while any header still shows the client's loading subject", function()
+    local loading = pack(nil, 134939, "Alliance Auction House", "Retrieving data", 952, 0, 29.99)
+
+    assert.is_true(MailboxRead.loading({ SOLD, { header = loading, invoice = pack() } }, "Retrieving data"))
+  end)
+
+  it("is false once every header has loaded", function()
+    assert.is_false(MailboxRead.loading({ SOLD, CANCELLED }, "Retrieving data"))
+    assert.is_false(MailboxRead.loading({}, "Retrieving data"))
+  end)
+end)

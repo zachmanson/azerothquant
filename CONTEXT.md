@@ -34,7 +34,7 @@ One full pass over every Listing on the Auction House, as it stood at the moment
 _Avoid_: snapshot, dump
 
 **Mailbox Read**:
-The Auction House mail in one Character's inbox (sales, purchases, cancellations, expiries), exactly as it stood when the player opened the mailbox. Other mail, such as COD and player letters, is left out. Mail stays until the player takes it, so the same mail shows up in every Mailbox Read until then.
+The Auction House mail in one Character's inbox (sales, purchases, cancellations, expiries), exactly as it stood at one moment of a mailbox visit. A visit saves one when the mailbox opens and another each time that mail changes, so a mail taken moments after opening is still in an earlier one. Other mail, such as COD and player letters, is left out. Mail stays until the player takes it, so the same mail shows up in every Mailbox Read until then. A mail missing from the next complete Mailbox Read was taken; one with nothing left attached is on its way out, and one the Brain can't read (a header or invoice the client hadn't loaded yet) makes the Read incomplete.
 _Avoid_: mail scan (a Scan is only ever the Auction House)
 
 **Archive**:

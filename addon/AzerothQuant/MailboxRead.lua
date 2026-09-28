@@ -1,5 +1,6 @@
--- Shapes one Mailbox Read (the Auction House mail in a Character's inbox, taken once
--- per mailbox visit) into the table stored in SavedVariables. Mail is kept raw; the
+-- Shapes one Mailbox Read (the Auction House mail in a Character's inbox, taken whenever
+-- it changes during a mailbox visit; see MailboxVisit.lua) into the table stored in
+-- SavedVariables. Mail is kept raw; the
 -- Brain turns it into Outcomes and Purchases (ADR-0005 amendment).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
@@ -82,6 +83,17 @@ function MailboxRead.build(visit, mails)
     skippedMails = skipped,
     mails = kept,
   }
+end
+
+-- Whether any header still shows loadingSubject (RETRIEVING_DATA), the subject the
+-- client shows until it has loaded a header (#100). mails as for build.
+function MailboxRead.loading(mails, loadingSubject)
+  for _, m in ipairs(mails) do
+    if m.header[4] == loadingSubject then
+      return true
+    end
+  end
+  return false
 end
 
 ns.MailboxRead = MailboxRead

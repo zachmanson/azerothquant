@@ -163,11 +163,25 @@ def test_outbid_mail_is_neither_an_outcome_nor_a_purchase():
 @pytest.mark.parametrize(
     "mail",
     [
+        with_(SOLD, money=0),
+        with_(WON, itemCount=None, firstItemQuantity=None, firstItemLink=None),
+        with_(CANCELLED, itemCount=None, firstItemQuantity=None, firstItemLink=None),
+    ],
+)
+def test_mail_with_nothing_left_attached_is_being_taken_and_is_neither(mail):
+    # Taking a mail empties it a moment before it is deleted, and a Read can land in
+    # between (#100). Every Auction House mail brings money or an item, so an empty one
+    # is on its way out; read as a new mail, a sale would count twice.
+    assert parse_mail(mail) is None
+
+
+@pytest.mark.parametrize(
+    "mail",
+    [
         with_(SOLD, subject="Something new: Tigerseye"),
         with_(SOLD, invoice={**SOLD["invoice"], "invoiceType": "buyer"}),
         {k: v for k, v in SOLD.items() if k != "invoice"},
         with_(SOLD, invoice={**SOLD["invoice"], "bid": None}),
-        with_(WON, firstItemLink=None),
         with_(CANCELLED, firstItemQuantity=None),
         with_(CANCELLED, daysLeft=None),
         with_(CANCELLED, sender=None),
