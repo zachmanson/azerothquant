@@ -67,16 +67,22 @@ class ReagentUse:
     quantity: int
 
 
+class BlockReason(StrEnum):
+    NO_DATA = "noData"  # a reagent with neither market data nor a Merchant Cost
+    UNKNOWN_BIND_TYPE = "unknownBindType"  # the output's, so whether it can be sold
+
+
 @dataclass(frozen=True)
 class Blocked:
-    """Why a recipe can't be valued (#75): "noData" for `item_key`, a reagent with neither
-    market data nor a Merchant Cost, or "unknownBindType" for its output."""
+    """Why a recipe can't be valued (#75). The Addon names `item_key`, a NO_DATA reagent."""
 
-    reason: str
+    reason: BlockReason
     item_key: str = ""
 
     def __str__(self) -> str:
-        return f"no data for {self.item_key}" if self.reason == "noData" else "unknown bind type"
+        if self.reason is BlockReason.NO_DATA:
+            return f"no data for {self.item_key}"
+        return "unknown bind type"
 
 
 @dataclass(frozen=True)
@@ -782,8 +788,8 @@ def _crafts(
     for plan in plans:
         if plan.output in under:
             continue  # its Held units would include ones not made yet
-        why = _blocked(plan, merchant, valuer)
-        reason = str(why) if why else None
+        why_blocked = _blocked(plan, merchant, valuer)
+        reason = str(why_blocked) if why_blocked else None
         if reason is None and plan.until is not None:
             reason = f"on cooldown until {datetime.fromtimestamp(plan.until):%Y-%m-%d %H:%M}"
         if reason is None:
@@ -797,7 +803,7 @@ def _crafts(
                     0,
                     note=f"on {plan.character}: {reason}",
                     character=plan.character,
-                    blocked=why,
+                    blocked=why_blocked,
                 )
             )
     while True:
@@ -825,10 +831,10 @@ def _blocked(plan: _Plan, merchant: dict[str, float], valuer: _Valuer) -> Blocke
     """Why the recipe can't be valued, if it can't. The guesses lean toward crafting less:
     a reagent with no market data would be undervalued at its Vendor Price."""
     if plan.recipe.bind_type is None:
-        return Blocked("unknownBindType")
+        return Blocked(BlockReason.UNKNOWN_BIND_TYPE)
     for key in plan.needs:
         if key not in merchant and not valuer.has_data(key):
-            return Blocked("noData", key)
+            return Blocked(BlockReason.NO_DATA, key)
     return None
 
 

@@ -32,7 +32,7 @@ from brain.history import (
     latest_scan_times,
 )
 from brain.lua_literal import assignment
-from brain.recommend import Action, MarketRecommendations, ReagentBuy, Row
+from brain.recommend import Action, Blocked, MarketRecommendations, ReagentBuy, Row
 
 FILE_NAME = "Recommendations.lua"
 GLOBAL_NAME = "AzerothQuantRecommendations"
@@ -132,8 +132,14 @@ def _row(row: Row) -> dict[str, object]:
     if row.uses:
         out["uses"] = [{"itemKey": u.item_key, "quantity": u.quantity} for u in row.uses]
     if row.blocked:
-        blocked = {"reason": row.blocked.reason, "itemKey": row.blocked.item_key}
-        out["blocked"] = {k: v for k, v in blocked.items() if v}
+        out["blocked"] = _blocked(row.blocked)
+    return out
+
+
+def _blocked(blocked: Blocked) -> dict[str, object]:
+    out: dict[str, object] = {"reason": str(blocked.reason)}
+    if blocked.item_key:
+        out["itemKey"] = blocked.item_key
     return out
 
 

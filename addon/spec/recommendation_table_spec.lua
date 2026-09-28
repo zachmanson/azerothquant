@@ -117,6 +117,14 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "on Kash-Patel: unknown bind type" }, row.tooltip)
   end)
 
+  it("keeps a blocked Craft's note when it doesn't know the reason", function()
+    local view = build(entry({ holdings = { blockedCraft({ reason = "somethingNew" }) } }), AS_OF, names)
+
+    local row = view.sections[1].rows[1]
+    assert.are.equal("on Kash-Patel: no data for 2770", row.cells[7])
+    assert.are.same({ "on Kash-Patel: no data for 2770" }, row.tooltip)
+  end)
+
   it("shows a Holding's ROI green, red, or brighter green and starred when it's a good time to sell", function()
     local function roiCell(fields)
       local r = { itemKey = "2589", action = "Sell", quantity = 1, price = 200, profit = 190 }

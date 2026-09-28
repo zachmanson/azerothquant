@@ -3,7 +3,15 @@ from pathlib import Path
 
 from brain.config import Era
 from brain.history import Market
-from brain.recommend import Action, Blocked, MarketRecommendations, ReagentBuy, ReagentUse, Row
+from brain.recommend import (
+    Action,
+    Blocked,
+    BlockReason,
+    MarketRecommendations,
+    ReagentBuy,
+    ReagentUse,
+    Row,
+)
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
@@ -280,7 +288,7 @@ def test_a_real_lua_reads_why_a_craft_is_blocked(tmp_path, lua):
         0,
         note="on Kash-Patel: no data for 2770",
         character="Kash-Patel",
-        blocked=Blocked("noData", "2770"),
+        blocked=Blocked(BlockReason.NO_DATA, "2770"),
     )
     unknown = Row(
         "2997",
@@ -288,7 +296,7 @@ def test_a_real_lua_reads_why_a_craft_is_blocked(tmp_path, lua):
         0,
         note="on Kash-Patel: unknown bind type",
         character="Kash-Patel",
-        blocked=Blocked("unknownBindType"),
+        blocked=Blocked(BlockReason.UNKNOWN_BIND_TYPE),
     )
     file.write_text(
         render(

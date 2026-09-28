@@ -17,6 +17,7 @@ from brain.predictions import Prediction
 from brain.recommend import (
     Action,
     Blocked,
+    BlockReason,
     Grade,
     ReagentBuy,
     ReagentUse,
@@ -1118,7 +1119,7 @@ def test_a_reagent_without_market_data_blocks_the_recipe(db):
             0,
             note="on Kash-Patel: no data for 2770",
             character="Kash-Patel",
-            blocked=Blocked("noData", ORE_KEY),
+            blocked=Blocked(BlockReason.NO_DATA, ORE_KEY),
         ),
     ]
 
@@ -1164,7 +1165,7 @@ def test_an_output_whose_bind_type_is_unknown_blocks_the_recipe(db):
             0,
             note="on Kash-Patel: unknown bind type",
             character="Kash-Patel",
-            blocked=Blocked("unknownBindType"),
+            blocked=Blocked(BlockReason.UNKNOWN_BIND_TYPE),
         ),
     ]
 

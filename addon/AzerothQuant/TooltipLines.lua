@@ -65,7 +65,7 @@ local function holdingLine(r, nameOf)
   local head = "AQ: " .. r.action .. " " .. r.quantity
   if r.action == "Craft" then
     return r.uses and (head .. " on " .. r.character)
-      or (head .. " (" .. (RecommendationTable.blockedNote(r, nameOf) or r.note) .. ")")
+      or (head .. " (" .. RecommendationTable.note(r, nameOf) .. ")")
   elseif r.action == "Hold" then
     return head .. " under " .. r.prediction
   end

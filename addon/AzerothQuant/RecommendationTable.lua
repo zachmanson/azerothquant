@@ -87,15 +87,17 @@ function RecommendationTable.reagentLines(r, nameOf)
   return lines
 end
 
--- Why a Craft can't be made, e.g. "on Kash-Patel: no market data for Copper Ore", or nil
--- when it can. The Brain writes the reason as fields, so the reagent can go by name (#75).
-function RecommendationTable.blockedNote(r, nameOf)
-  if not r.blocked then
-    return nil
+-- A row's note. A Craft that can't be made says why, e.g. "on Kash-Patel: no market data
+-- for Copper Ore": the Brain writes the reason as fields, so the reagent goes by name (#75).
+-- A reason the Addon doesn't know yet keeps the Brain's note.
+function RecommendationTable.note(r, nameOf)
+  local reason = r.blocked and r.blocked.reason
+  if reason == "noData" then
+    return "on " .. r.character .. ": no market data for " .. nameFor(r.blocked.itemKey, nameOf)
+  elseif reason == "unknownBindType" then
+    return "on " .. r.character .. ": unknown bind type"
   end
-  local why = r.blocked.reason == "noData" and ("no market data for " .. nameFor(r.blocked.itemKey, nameOf))
-    or "unknown bind type"
-  return "on " .. r.character .. ": " .. why
+  return r.note
 end
 
 -- The hint that it's a good time to sell (#50): the raid-target star tinted to the hint's
@@ -167,7 +169,7 @@ local function tooltip(r, nameOf, held)
   if r.saleEvents then
     lines[#lines + 1] = "Sales " .. r.saleEvents
   end
-  local note = RecommendationTable.blockedNote(r, nameOf) or r.note
+  local note = RecommendationTable.note(r, nameOf)
   if note then
     lines[#lines + 1] = note
   end
@@ -200,7 +202,7 @@ end
 local function holdingCells(r, name, nameOf)
   local profit = r.action == "Hold" and "unknown" or money(r.profit)
   local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r))
-    or RecommendationTable.blockedNote(r, nameOf) or r.note or ""
+    or RecommendationTable.note(r, nameOf) or ""
   return { name, r.action, tostring(r.quantity), money(r.price), profit, roiCell(r), note }
 end
 
