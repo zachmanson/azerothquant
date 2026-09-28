@@ -16,6 +16,7 @@ from brain.cli import (
     run_import,
     run_rebuild,
     run_recommend,
+    run_replay,
     savedvariables_files,
     watch_step,
 )
@@ -494,6 +495,28 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one 6c deposit (60% of the 10c Vendor Price) first (#78).
     assert ["2589", "Sell", "2", "7s 00c", "4s 92c", "14s 00c", "1"] in lines
+
+
+def test_replay_prints_each_markets_policies_with_the_brains_lead_over_each(tmp_path):
+    # A 1 h Sale Horizon, so the first of the two Scans an hour apart can be graded.
+    config = dataclasses.replace(_three_linen_held(tmp_path), sale_horizon_seconds=3600)
+
+    text = run_replay(config, since=None, until=None)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Classic Beta PvP Alliance (beta): provisional, Beta never decides" in text
+    assert "Replayed 1 Scan, each graded over the 1.0 h Sale Horizon after it" in text
+    assert ["Policy", "Value added", "Brain over it"] in lines
+    policies = [line[0] for line in lines if line and line[0].startswith(("Brain", "Auc", "TSM"))]
+    assert policies == [
+        "Brain",
+        "Auctionator",
+        "TSM",
+        "Brain without Sub-crafts",
+        "Brain without Flips to Craft",
+        "Brain without Deposits",
+    ]
+    assert "Realized profit over the range: 0c" in text
 
 
 def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_path):

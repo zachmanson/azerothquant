@@ -172,6 +172,10 @@ class Config:
     # without a Sold invoice to learn it from, and how long a posting lasts.
     ah_deposit_share: float = DEFAULT_AH_DEPOSIT_SHARE
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS
+    # Features the replay switches off one at a time to see what each is worth (#80,
+    # ADR-0015). Always on outside it: not read from config.toml.
+    flips_to_craft: bool = True
+    deposits: bool = True
 
 
 def load_config(path: Path) -> Config:

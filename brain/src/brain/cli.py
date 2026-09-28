@@ -4,6 +4,7 @@
     brain watch      import each SavedVariables file whenever the client rewrites it
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
+    brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
 
 All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003).
@@ -19,7 +20,7 @@ import time
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from brain.archive import Archive
@@ -34,9 +35,11 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.lots import start_of
 from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import Action, MarketRecommendations, Row, held_units, recommend
 from brain.recommendations import write_recommendations
+from brain.replay import MarketReplay, Policy, replay
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
 
@@ -259,6 +262,62 @@ def _rebuild(config: Config) -> int:
     return 0
 
 
+def _replay(config: Config, since: date | None, until: date | None) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        text = run_replay(config, since, until)
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
+        return 1
+    except PredictionsError as e:
+        log.error("Can't load the Predictions: %s", e)
+        return 1
+    print(text, end="")
+    return 0
+
+
+def run_replay(config: Config, since: date | None, until: date | None) -> str:
+    """The replay (#80, ADR-0015) over the Scans from the start of `since` to the end of
+    `until` (all of them without), per Market, as text."""
+    predictions = load_predictions(config.predictions_path)
+    start = 0 if since is None else start_of(since)
+    end = 2**62 if until is None else start_of(until + timedelta(days=1)) - 1
+    with closing(open_history(config.history_path)) as conn:
+        markets = replay(conn, config, predictions, start, end)
+    if not markets:
+        return "No Character has a Market with a Scan yet.\n"
+    hours = config.sale_horizon_seconds / 3600
+    return "\n".join(_render_replay(m, hours) for m in markets)
+
+
+def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
+    market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
+    if m.market.era is Era.BETA:
+        market += ": provisional, Beta never decides"
+    scans = "Scan" if m.scans == 1 else "Scans"
+    table = _table(
+        ["Policy", "Value added", "Brain over it"],
+        [
+            [
+                policy.value,
+                _money(m.graded[policy]),
+                "" if policy is Policy.BRAIN else _percent(m.over(policy)),
+            ]
+            for policy in Policy
+            if policy in m.graded
+        ],
+    )
+    return (
+        f"{market}\n"
+        f"Replayed {m.scans} {scans}, each graded over the {horizon_hours:.1f} h Sale Horizon"
+        " after it\n"
+        f"{table}\n"
+        f"Realized profit over the range: {_money(m.realized_profit)}\n"
+    )
+
+
 def run_recommend(config: Config) -> str:
     """The Recommendations for every Market the player has Characters in, as text."""
     predictions = load_predictions(config.predictions_path)
@@ -452,6 +511,11 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("watch", help="import SavedVariables files whenever they change")
     commands.add_parser("rebuild", help="recreate the history database from the Archive")
     commands.add_parser("recommend", help="print what to do with Holdings, and what to buy")
+    replaying = commands.add_parser(
+        "replay", help="grade the Brain against Auctionator and emulated TSM on past Scans"
+    )
+    replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
+    replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -467,6 +531,8 @@ def main(argv: list[str] | None = None) -> int:
         return _rebuild(config)
     if args.command == "recommend":
         return _recommend(config)
+    if args.command == "replay":
+        return _replay(config, args.since, args.until)
     return _watch(config)
 
 
