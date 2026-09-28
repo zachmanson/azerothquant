@@ -1,3 +1,21 @@
+2026-09-28 (later 13): GRILLED "keep going vs. TSM". Two new ADRs, and CONTEXT.md **Addon** and **Recommendation Table** updated. ADR-0003 is superseded in part.
+- ADR-0015: keep going, judged by a replay over the Archive.
+  - What TSM offers on Forever: nothing. There is no official support and no Forever AuctionDB data, and Blizzard's auction API reportedly has no Forever data either. Auctionator and Auctioneer forks already run there. Beta ends Oct 21, and Live launches Nov 4.
+  - The test: the Brain against an Auctionator baseline and an emulated TSM baseline (DBMarket and DBMinBuyout computed from our Scans), graded by Best Exit Value, with ablations (Sub-crafts, Flip to Craft, Deposits, own-Market Sell Rate).
+  - Checkpoints: the Beta read is provisional. The binding Live read comes at ~Dec 2. Continue if the Brain beats Auctionator by at least 10% and is no worse than TSM. Stop if it's within ±5% of Auctionator. Anything in between gets a 2-week live split.
+  - Outside data (TSM, Booty Bay Broker) only supplements ours, as a prior. It replaces one of our metrics only if the replay proves it predicts better.
+- ADR-0016: the Addon posts or cancels the selected row, one protected call per click, only in `OnClick`. It never buys, bids or takes mail. An addon/spec test enforces the API-name rule.
+- Issues:
+  - #80 replay harness (ready-for-agent)
+  - #81 Post/Cancel button (ready-for-human: in-game probe first, for `ADDON_ACTION_BLOCKED` and whether posting takes a Confirm step)
+  - #82 Booty Bay Broker research (needs-info)
+  - #83 checkpoints (ready-for-human)
+
+Next, in order:
+1. #80 build (tdd), then /code-review + commit. Run it on Beta data before Oct 21.
+2. #38 build (tdd), then /code-review + commit.
+3. #79 (small). Then #77 grill. #82 /research. #81 probe when the user is at the PC.
+
 2026-09-28 (later 12): #33 BUILT and pushed to main (issue still open for the user to close). Sub-crafts (ADR-0014, CONTEXT.md **Sub-craft**): a greedy step is still one more craft of recipe R, but its reagents come from `_Sources` (recommend.py): held (no-data held units aren't used), then merchant, then one source per short reagent, a Sub-craft (recursive) or the AH asks (Flip to Craft only), whichever costs less by `_Sources.cost` (gold + effort + held worth lost - leftovers' worth). `_Sources.may_use` holds the guards: path rule, `craft_chain_depth` (config, default 3, counts the top craft), Predictions, cooldown limits via a shared `spent` Counter (`_Crafting.spent` carries it into Flips to Craft). `_Chain` is one craft's sourcing; `_Plan.add(chain)` aggregates `used`/`bought`/`via`. Rows get `via = (SubCraft(item_key, crafts, character), ...)`, deepest first, written to Recommendations.lua; the CLI note is `on X: uses 2 of 2770, via 2 of 2840 on Y, 1 of 2996 on Z`. Leftovers: a Craft Action's go straight into `crafting.crafted`; a Flip to Craft's ride on `Row.leftovers` (not written to Lua) into `_Crafting.with_shopping` (was `left`, now returns a `_Crafting`). A no-data reagent blocks a recipe only when no maker passes `may_use` for it. `_Valuer.worth` is memoized (the search values many Holdings). Addon: `reagentLines` puts `Craft N <Name> on <Character>` lines first (both tooltips).
 
 Review leftovers (judgement calls, not done): `Row.leftovers` is internal plumbing on the public Row; `_subcrafted` counts an unknown-bind leftover as bound while `_crafted` counts an unknown-bind top output as unbound (top recipes with unknown bind are blocked anyway); `_on_hand` (blocked-row display) and `_step`'s "some held unit taken" say the same rule two ways; config.py now has four hand-written "whole number >= 1" checks (a `_parse_whole` helper is due). Not checked on real data: `brain recommend` speed with chains (each step tries every maker per short reagent).
