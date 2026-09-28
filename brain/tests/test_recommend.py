@@ -887,9 +887,13 @@ def test_the_deposit_is_learned_from_the_latest_sold_invoice(db):
     assert sell.profit == pytest.approx(6 * 99 * 0.95 - (2 * 10 + 2 * 20))
 
 
-def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_no_deposit(db):
+@pytest.mark.parametrize("vendor_prices", [None, {2589: 0}])
+def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_no_deposit(db, vendor_prices):
     result = run(
-        db, selling_two_linen_an_hour(), [character_read(item(count=10))], config=HOURLY_POSTS
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices=vendor_prices)],
+        config=HOURLY_POSTS,
     )
 
     sell = next(r for r in result[MARKET].holdings if r.action is Action.SELL)

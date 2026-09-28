@@ -212,7 +212,8 @@ class _Queue:
         """The deposits unit i of the queue (0-based) is expected to lose."""
         if not self.deposit or not self.units_per_hour:
             return 0.0
-        return math.floor(i / self.units_per_hour / self.post_hours) * self.deposit
+        # A hair over, so a unit exactly on an expiry isn't rounded down to before it.
+        return math.floor(i / self.units_per_hour / self.post_hours + 1e-9) * self.deposit
 
     def lost_by(self, start: int, units: int) -> float:
         """The deposits units `start` up to `start + units` are expected to lose in all."""
