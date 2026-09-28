@@ -2,12 +2,15 @@
 -- Market's Recommendations from AzerothQuantRecommendations, one section per bottom tab.
 -- All shaping happens in RecommendationTable.lua; this file only draws it and talks to the
 -- WoW API. It opens next to a faction Auction House (not a Neutral one, whose Market the
--- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position and the tab
--- last picked are saved in AzerothQuantDB; open/closed is not.
+-- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, the tab
+-- last picked and each Market's Budget are saved in AzerothQuantDB; open/closed is not.
 --
 -- Read-only: hover shows a tooltip and shift-click links the item. Nothing else (ADR-0003).
+-- The Budget box (#86) only saves what the player will spend: the table hides options over
+-- it at once, and Character.lua hands it to the Brain in the next Character Read.
 local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
+local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
 
@@ -53,6 +56,15 @@ local getItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoIn
 
 local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
+end
+
+-- The logged-in Character's Market's Budget in copper, or nil for all its gold.
+local function budgetKey()
+  return RecommendationTable.budgetKey(GetRealmName(), UnitFactionGroup("player") or "")
+end
+
+local function savedBudget()
+  return db.budgets and db.budgets[budgetKey()]
 end
 
 -- The item's name, or nil until the client has loaded it (GET_ITEM_INFO_RECEIVED follows).
@@ -269,7 +281,8 @@ function redraw()
     UnitFactionGroup("player"),
     time(),
     nameOf,
-    table.concat({ UnitFullName("player") }, "-")
+    table.concat({ UnitFullName("player") }, "-"),
+    savedBudget()
   )
   local n = 0
   local function add(texts, widths, font, item, justify)
@@ -389,6 +402,47 @@ local function reload()
   ReloadUI()
 end
 
+local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Prediction buys. "
+  .. "Blank for all your gold. Options over it hide now; Reload to re-size the rest."
+
+-- Left of the Reload button. Enter saves it (blank clears it); Escape puts it back.
+local function createBudgetBox(button)
+  local box = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+  box:SetSize(60, 20)
+  box:SetAutoFocus(false)
+  box:SetMaxLetters(10)
+  box:SetPoint("RIGHT", button, "LEFT", -10, 0)
+  box.label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  box.label:SetPoint("RIGHT", box, "LEFT", -8, 0)
+  box.label:SetText("Budget (g)")
+  box:SetScript("OnEnterPressed", function(self)
+    local copper, ok = Money.parseGold(self:GetText())
+    if ok then
+      db.budgets = db.budgets or {}
+      db.budgets[budgetKey()] = copper
+      redraw()
+    else
+      say("Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.")
+    end
+    self:SetText(Money.goldText(savedBudget()))
+    self:ClearFocus()
+  end)
+  box:SetScript("OnEscapePressed", function(self)
+    self:SetText(Money.goldText(savedBudget()))
+    self:ClearFocus()
+  end)
+  box:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(BUDGET_TIP, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  box:SetScript("OnLeave", GameTooltip_Hide)
+  box:SetScript("OnShow", function(self)
+    self:SetText(Money.goldText(savedBudget()))
+  end)
+  frame.budget = box
+end
+
 local function createReloadButton()
   local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   button:SetSize(70, 22)
@@ -403,10 +457,12 @@ local function createReloadButton()
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", GameTooltip_Hide)
+  createBudgetBox(button)
 
-  -- Scans the table doesn't reflect yet, in orange left of the button, which lights up.
+  -- Scans the table doesn't reflect yet, in orange left of the Budget box, and the button
+  -- lights up.
   local note = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  note:SetPoint("RIGHT", button, "LEFT", -8, 0)
+  note:SetPoint("RIGHT", frame.budget.label, "LEFT", -8, 0)
   note:SetTextColor(1, 0.5, 0.25)
 
   -- Pulses once the Brain should have imported the Scans saved at load (#71).

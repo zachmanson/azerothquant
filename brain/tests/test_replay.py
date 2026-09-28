@@ -209,6 +209,38 @@ def test_the_brains_buys_to_vendor_bring_the_vendor_price(db):
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(3 * (50 - 5))
 
 
+def test_the_brain_takes_its_options_most_profit_first_while_the_gold_lasts(db):
+    # #86: 20 copper. Each option is sized on its own: all 3 Ore to Vendor (15 copper, 135
+    # profit) and both Tin (20 copper, 40 profit). Together they'd need 35, so the replay
+    # takes the Ore, and the 5 left can't buy the Tin.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        linen_selling_then_crashing(row(ORE, quantity=3, unit=5), row(tin, quantity=2, unit=10)),
+        [character_read(money=20, vendor_prices={2589: 10, 2770: 50, 2771: 30})],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(3 * (50 - 5))
+
+
+def test_a_held_reagent_the_brains_flip_to_craft_uses_is_not_also_sold(db):
+    # #86: the held Linen is on a Holdings Sell row and the Flip to Craft uses it too
+    # (buying 5 more at 100 for 3 Bolts, posted at 999). Taken, the craft has it. Held
+    # untouched, the Linen would Sell at 19 at the end of the horizon.
+    result = run(
+        db,
+        linen_selling_then_crashing(bolts=True),
+        [character_read(item(), money=10_000, vendor_prices={2589: 10}, recipes=[recipe()])],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    brain = 3 * 999 * 0.95 - 5 * 100 - 19 * 0.95
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(brain)
+
+
 ORE_LINK = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
 
 

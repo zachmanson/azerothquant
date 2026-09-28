@@ -95,6 +95,11 @@
 # ADR-0014), down to craft_chain_depth crafts deep, counting the top one. Defaults to 3.
 # craft_chain_depth = 3
 
+# Optional: how many options the Shopping List shows, most profit first. Each is sized on
+# its own, within the Budget set in game (or all the gold), so they're alternatives, not
+# one basket (#86). Defaults to 50. Must come before the first [[installs]].
+# shopping_list_rows = 50
+
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
 # it nets after the cut over what its units cost on the Auction House, is at least this
 # share. Only a hint; the Action stands either way. Defaults to 0.20. Must come before the

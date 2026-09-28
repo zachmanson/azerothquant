@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS character_read (
     has_bank INTEGER NOT NULL, -- 0 or 1: the bank was opened that session
     bank_read_at INTEGER,      -- when the bank was last read while open
     has_profession_list INTEGER NOT NULL DEFAULT 0, -- 0 or 1: the client said which
+    budget INTEGER,            -- copper: the Market's Budget as set then; NULL for none
     UNIQUE (era, realm, character, read_at)
 );
 
@@ -339,6 +340,7 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     _add_column(conn, "listing", "item_name", "TEXT")  # #17
     _add_column(conn, "character_read", "has_profession_list", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "auction_mail", "deposit", "INTEGER")  # #78
+    _add_column(conn, "character_read", "budget", "INTEGER")  # #86
     return conn
 
 
@@ -711,12 +713,16 @@ def _import_character_read(
     has_bank = isinstance(bank, list)
     profession_ids = _profession_ids(raw.get("professionList"))
     faction, money = raw.get("faction"), raw.get("money")
+    budget = raw.get("budget")
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 0:
+        budget = None
     if not isinstance(faction, str) or not isinstance(money, int) or isinstance(money, bool):
         # Kept, with its items, but its gold can't be pooled.
         faction = money = None
     cursor = conn.execute(
         "INSERT OR IGNORE INTO character_read (era, realm, character, read_at, faction,"
-        " money, has_bank, bank_read_at, has_profession_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " money, has_bank, bank_read_at, has_profession_list, budget)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             era.value,
             raw["realm"],
@@ -727,6 +733,7 @@ def _import_character_read(
             has_bank,
             raw.get("bankReadAt") if has_bank else None,
             profession_ids is not None,
+            budget,
         ),
     )
     if not cursor.rowcount:
@@ -1135,6 +1142,19 @@ def pooled_gold(
         (era.value, realm, faction, at, at),
     ).fetchone()
     return total
+
+
+def market_budget(
+    conn: sqlite3.Connection, era: Era, realm: str, faction: str, at: int | None = None
+) -> int | None:
+    """The Budget in copper the player set for the realm and faction, as the Market's
+    latest Character Read (up to `at`) carried it (#86). None means all the gold."""
+    row = conn.execute(
+        "SELECT budget FROM character_read WHERE era = ? AND realm = ? AND faction = ?"
+        " AND (? IS NULL OR read_at <= ?) ORDER BY read_at DESC, id DESC LIMIT 1",
+        (era.value, realm, faction, at, at),
+    ).fetchone()
+    return row[0] if row else None
 
 
 def character_markets(conn: sqlite3.Connection) -> dict[Market, list[str]]:

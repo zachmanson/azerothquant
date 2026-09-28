@@ -1,4 +1,5 @@
--- Formats copper amounts for display, e.g. 123456 -> "12g 34s 56c".
+-- Formats copper amounts for display, e.g. 123456 -> "12g 34s 56c", and reads gold typed
+-- by the player back as copper.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. In game, WoW passes
 -- (addonName, namespace) as the file's varargs; under require() the namespace
@@ -31,6 +32,28 @@ function Money.format(copper)
   end
 
   return sign .. table.concat(parts, " ")
+end
+
+-- What the player typed in a gold box, e.g. "250", "250g" or "12.5", as whole copper.
+-- A blank box is nil (no amount) and still ok; anything else is nil and not ok.
+function Money.parseGold(text)
+  local trimmed = text:match("^%s*(.-)%s*$")
+  if trimmed == "" then
+    return nil, true
+  end
+  local number = trimmed:match("^(%d+%.?%d*)g?$") or trimmed:match("^(%.%d+)g?$")
+  if not number then
+    return nil, false
+  end
+  return math.floor(tonumber(number) * COPPER_PER_GOLD + 0.5), true
+end
+
+-- Copper as the gold a player would type, e.g. 125000 -> "12.5"; "" for nil.
+function Money.goldText(copper)
+  if not copper then
+    return ""
+  end
+  return (string.format("%.4f", copper / COPPER_PER_GOLD):gsub("0+$", ""):gsub("%.$", ""))
 end
 
 ns.Money = Money

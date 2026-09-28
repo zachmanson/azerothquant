@@ -101,6 +101,7 @@ def character_read(
     merchant_costs=None,
     professions=(TAILORING,),
     bank=None,
+    budget=None,
 ):
     read = {
         "readAt": at,
@@ -121,6 +122,8 @@ def character_read(
         read["merchantCosts"] = merchant_costs
     if bank is not None:
         read |= {"bankReadAt": at, "bank": list(bank)}
+    if budget is not None:
+        read["budget"] = budget
     return read
 
 
@@ -245,9 +248,10 @@ def test_held_units_are_never_sold_above_the_dearest_sale(db):
     assert sell.profit == pytest.approx(100 * 0.95)
 
 
-def test_held_units_undercut_what_is_left_once_the_flips_are_bought(db):
-    # #64: the two 700s are a Flip to Sell, so they aren't there to undercut. Held units
-    # are posted with the Flip at 999, under the 1000s, not at Fair Value's 800.
+def test_held_units_are_valued_with_nothing_on_the_shopping_list_bought(db):
+    # #86: the two 700s are a Flip to Sell, posted at 999 under the 1000s once bought. But
+    # the Shopping List's options are alternatives, so held units undercut the 700s still
+    # there (#64), not what's left if the Flip is bought (ADR-0010, superseded).
     result = run(
         db,
         selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
@@ -255,15 +259,14 @@ def test_held_units_undercut_what_is_left_once_the_flips_are_bought(db):
     )
 
     [sell] = result[MARKET].holdings
-    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 3, 999)
+    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 3, 699)
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at) == (2, 999)
 
 
 def test_a_flip_the_gold_cant_buy_whole_buys_the_best_run_that_fits(db):
     # #68, ADR-0011: all 5 would post under the 3g wall, but the gold buys only the 3 at
-    # 1g, which still clear the margin under the 1g 50s. The Flip and the held unit post
-    # at 1g 49s 99c.
+    # 1g, which still clear the margin under the 1g 50s. The Flip posts at 1g 49s 99c.
     result = run(
         db,
         selling_two_linen_an_hour(
@@ -275,14 +278,11 @@ def test_a_flip_the_gold_cant_buy_whole_buys_the_best_run_that_fits(db):
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at) == (3, 14999)
     assert flip.profit == pytest.approx(3 * (14999 * 0.95 - 10000))
-    [sell] = result[MARKET].holdings
-    assert (sell.action, sell.price) == (Action.SELL, 14999)
 
 
 def test_a_flip_with_no_run_the_gold_covers_that_clears_the_margin_is_skipped(db):
     # #68, ADR-0011: all 5 clear the margin under the 3g wall, but the gold buys only the
-    # 3 at 1g, and posted under the 1g 10s they'd make 4s 49c each, short of the 20%. The
-    # Flip is skipped and spends nothing, so the held unit posts under the 1g Listings.
+    # 3 at 1g, and posted under the 1g 10s they'd make 4s 49c each, short of the 20%.
     result = run(
         db,
         selling_two_linen_an_hour(
@@ -292,9 +292,6 @@ def test_a_flip_with_no_run_the_gold_covers_that_clears_the_margin_is_skipped(db
     )
 
     assert result[MARKET].shopping_list == []
-    assert result[MARKET].shopping_cost == 0
-    [sell] = result[MARKET].holdings
-    assert (sell.action, sell.price) == (Action.SELL, 9999)
 
 
 def test_a_flip_to_sell_is_ranked_whole_so_one_the_gold_cant_finish_leaves_it_to_others(db):
@@ -467,7 +464,6 @@ def test_listings_under_the_vendor_price_are_bought_to_vendor(db):
     assert result[MARKET].shopping_list == [
         Row(ORE_KEY, Action.VENDOR, 4, price=6, profit=3 * 5 + 4, cost=3 * 5 + 6)
     ]
-    assert result[MARKET].shopping_cost == 21
 
 
 def test_resale_is_priced_without_the_units_being_bought(db):
@@ -720,24 +716,87 @@ def test_a_unit_a_vendor_pays_more_for_than_it_resells_for_is_bought_to_vendor(d
     ]
 
 
-def test_pooled_gold_is_spent_on_the_most_profit_per_gold_first(db):
+def test_each_option_is_sized_on_its_own_and_ranked_by_profit(db):
+    # #86: 40 copper between them. All the Ore (2 x 5 profit) costs 40 and all the Tin
+    # (3 x 5 profit) 15, 55 together: each is shown whole, as if the only buy, and the
+    # player picks. Most profit first, not most profit per gold.
     tin = "item:2771::::::::20:1490"
     result = run(
         db,
         [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
         [
-            # 35 copper between them: all the Tin (1 profit per copper spent) is 15, which
-            # leaves enough for one of the Ore (0.25 per copper).
-            character_read(money=20, vendor_prices={2770: 25, 2771: 10}),
+            character_read(money=25, vendor_prices={2770: 25, 2771: 10}),
             character_read(money=15, character="Alt-One"),
         ],
     )
 
     assert result[MARKET].shopping_list == [
         Row("2771", Action.VENDOR, 3, price=5, profit=15, cost=15),
+        Row(ORE_KEY, Action.VENDOR, 2, price=20, profit=10, cost=40),
+    ]
+
+
+def test_an_option_the_gold_cant_buy_whole_buys_what_fits(db):
+    # #86: 35 copper buys 1 of the 2 Ore, even though the Tin would fit beside it.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
+        [character_read(money=35, vendor_prices={2770: 25, 2771: 10})],
+    )
+
+    assert result[MARKET].shopping_list == [
+        Row("2771", Action.VENDOR, 3, price=5, profit=15, cost=15),
         Row(ORE_KEY, Action.VENDOR, 1, price=20, profit=5, cost=20),
     ]
-    assert result[MARKET].shopping_cost == 35
+
+
+def test_the_shopping_list_shows_only_the_most_profitable_options(db):
+    # #86: config shopping_list_rows cuts the list after the top options by profit.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
+        [character_read(money=GOLD, vendor_prices={2770: 25, 2771: 10})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert [r.item_key for r in result[MARKET].shopping_list] == ["2771"]
+
+
+def test_a_budget_caps_what_each_option_spends(db):
+    # #86: the latest Character Read in the Market carries the Budget the player set: 20
+    # copper of the 1g held. Each option spends no more than it.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
+        [
+            character_read(money=GOLD, vendor_prices={2770: 25, 2771: 10}, budget=100),
+            character_read(money=GOLD, character="Alt-One", at=T0 + 1, budget=20),
+        ],
+    )
+
+    assert result[MARKET].budget == 20
+    assert result[MARKET].shopping_list == [
+        Row("2771", Action.VENDOR, 3, price=5, profit=15, cost=15),
+        Row(ORE_KEY, Action.VENDOR, 1, price=20, profit=5, cost=20),
+    ]
+
+
+def test_no_budget_in_the_latest_character_read_means_all_the_gold(db):
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=20))],
+        [
+            character_read(money=GOLD, vendor_prices={2770: 25}, budget=20),
+            character_read(money=GOLD, character="Alt-One", at=T0 + 1),
+        ],
+    )
+
+    assert result[MARKET].budget is None
+    [ore] = result[MARKET].shopping_list
+    assert ore.quantity == 2
 
 
 def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
@@ -1571,12 +1630,11 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
             uses=(ReagentUse(LINEN_KEY, 1),),
         )
     ]
-    assert result[MARKET].shopping_cost == 1100
 
 
-def test_a_held_reagent_a_flip_to_craft_uses_gets_no_holdings_row(db):
-    # #69: 3 Linen held. The Craft Action uses 2, the Flip to Craft the 3rd (buying 9),
-    # so no Linen is left to Sell.
+def test_a_held_reagent_a_flip_to_craft_would_use_keeps_its_holdings_row(db):
+    # #86 (was #69): 3 Linen held. The Craft Action uses 2 and the Flip to Craft would
+    # use the 3rd (buying 9), but it's only an option, so the 3rd is still up for Sell.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -1584,23 +1642,7 @@ def test_a_held_reagent_a_flip_to_craft_uses_gets_no_holdings_row(db):
     )
 
     [craft] = result[MARKET].shopping_list
-    assert craft.uses == (ReagentUse(LINEN_KEY, 1),)
-    assert [r.item_key for r in result[MARKET].holdings] == [BOLT_KEY, BOLT_KEY]
-
-
-def test_a_held_reagent_keeps_its_holdings_row_if_its_flip_to_craft_is_not_bought(db):
-    # #69: as above, but the 1 silver held goes on 100 Ore at 1 to Vendor for 50 (more
-    # profit per gold), so the Flip to Craft is left out and the 3rd Linen is still held.
-    scans = linen_and_bolts_selling()
-    scans[1]["listings"].append(row(ORE, quantity=100, unit=1))
-    result = run(
-        db,
-        scans,
-        [character_read(item(count=3), money=100, vendor_prices={2770: 50}, recipes=[recipe()])],
-    )
-
-    [vendor] = result[MARKET].shopping_list
-    assert (vendor.item_key, vendor.action) == (ORE_KEY, Action.VENDOR)
+    assert (craft.quantity, craft.uses) == (5, (ReagentUse(LINEN_KEY, 1),))
     assert [(r.item_key, r.action, r.quantity) for r in result[MARKET].holdings] == [
         (BOLT_KEY, Action.SELL, 1),
         (BOLT_KEY, Action.CRAFT, 1),
@@ -1634,32 +1676,34 @@ def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
     assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 100),)
 
 
-def test_asks_a_plain_flip_takes_are_not_bought_to_craft(db):
-    # The 2 Linen at 10 are a Flip to Sell (resold at 285). The Bolts buy the 300s instead.
+def test_a_flip_to_craft_buys_the_cheapest_asks_even_where_a_plain_flip_would(db):
+    # #86: the 2 Linen at 10 are a Flip to Sell, resold at 299 under the 300s. The Bolts
+    # are another option, so they buy the 10s too, then 10 at 300.
     scans = linen_and_bolts_selling(linen=300)
     scans[1]["listings"].append(row(quantity=2, unit=10))
     result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
 
-    [flip, craft] = result[MARKET].shopping_list
-    assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 2, 10)
-    assert (craft.action, craft.cost) == (Action.CRAFT, 6 * 2 * 300)
+    [craft, flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.post_at) == (Action.SELL, 2, 299)
+    assert (craft.action, craft.cost) == (Action.CRAFT, 2 * 10 + 10 * 300)
 
 
-def test_a_flip_to_sell_posts_after_what_flips_to_craft_buy_of_it(db):
-    # #68: the 2 Linen at 10 are a Flip to Sell and the Bolts buy all 12 at 250, so the
-    # Flip posts under the 300s, not under the 250s.
+def test_a_flip_to_sell_posts_as_if_no_flip_to_craft_bought_of_it(db):
+    # #86 (was #68): the Bolts would buy all 12 Linen at 250, but they're an option, so the
+    # 2 at 10 post under the 250s.
     scans = linen_and_bolts_selling(linen=300)
     scans[1]["listings"] += [row(quantity=12, unit=250), row(quantity=2, unit=10)]
     result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
 
-    [flip, craft] = result[MARKET].shopping_list
-    assert (flip.action, flip.quantity, flip.post_at) == (Action.SELL, 2, 299)
+    [craft, flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.post_at) == (Action.SELL, 2, 249)
     assert craft.buys == (ReagentBuy(LINEN_KEY, 12, 250),)
 
 
-def test_a_flip_to_crafts_sell_room_is_net_of_held_and_flipped_output(db):
-    # 6 Bolts sell within the horizon: 2 are held and 1 is a Flip to Sell at 500, so 3
-    # crafted ones Sell. A 4th would Vendor for 15, less than its 2 Linen cost.
+def test_a_flip_to_crafts_sell_room_is_net_of_held_output_only(db):
+    # 6 Bolts sell within the horizon and 2 are held, so 4 crafted ones Sell, posted under
+    # the Bolt at 500 that's a Flip to Sell: that's another option, not bought (#86). A
+    # 5th would Vendor for 15, less than its 2 Linen cost.
     scans = linen_and_bolts_selling()
     scans[1]["listings"].append(row(BOLT, unit=500))
     result = run(
@@ -1677,7 +1721,8 @@ def test_a_flip_to_crafts_sell_room_is_net_of_held_and_flipped_output(db):
 
     [craft, flip] = result[MARKET].shopping_list
     assert (flip.item_key, flip.action, flip.quantity) == (BOLT_KEY, Action.SELL, 1)
-    assert (craft.action, craft.quantity) == (Action.CRAFT, 3)
+    assert (craft.action, craft.quantity) == (Action.CRAFT, 4)
+    assert craft.profit == pytest.approx(4 * 499 * 0.95 - 4 * 200)
 
 
 def test_crafted_output_takes_the_sale_horizon_before_a_flip_to_sell(db):
@@ -1738,10 +1783,9 @@ def test_a_flip_to_crafts_output_sells_only_on_the_minimum_of_sale_events(db, sa
     assert sum(made) == crafts
 
 
-def test_flips_to_craft_and_plain_flips_share_gold_by_profit_per_gold(db):
-    # 15 copper. The Ore Flip to Vendor makes 1 per 5 copper (0.2 per gold); a Bolt from
-    # 2 Linen at 5 sells for 950 (94 per gold) and is bought first. The 5 left fit 1 Ore,
-    # and the Prediction on Tin gets nothing.
+def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db):
+    # #86: 15 copper. A Bolt from 2 Linen at 5 (10 copper) and all 3 Ore to Vendor (15)
+    # are both shown, and so is the Tin to Hold under its Prediction.
     tin = "item:2771::::::::20:1490"
     scans = linen_and_bolts_selling()
     scans[1]["listings"] += [row(quantity=2, unit=5), row(ORE, quantity=3, unit=5)]
@@ -1755,10 +1799,9 @@ def test_flips_to_craft_and_plain_flips_share_gold_by_profit_per_gold(db):
 
     assert [(r.item_key, r.action, r.quantity) for r in result[MARKET].shopping_list] == [
         (BOLT_KEY, Action.CRAFT, 1),
-        (ORE_KEY, Action.VENDOR, 1),
+        (ORE_KEY, Action.VENDOR, 3),
     ]
-    assert result[MARKET].shopping_cost == 15
-    assert result[MARKET].prediction_buys == []
+    assert [(r.item_key, r.quantity) for r in result[MARKET].prediction_buys] == [("2771", 1)]
 
 
 def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
@@ -1813,8 +1856,8 @@ def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
     )
 
 
-def test_held_reagents_a_flip_to_craft_leaves_keep_their_holdings_row(db):
-    # #69: 20 Thread held; the 6 Bolts use 6, so the other 14 are still Holdings.
+def test_held_reagents_a_flip_to_craft_would_use_all_keep_their_holdings_row(db):
+    # #86 (was #69): 20 Thread held; the 6 Bolts would use 6, but they're only an option.
     result = run(
         db,
         linen_and_bolts_selling(),
@@ -1830,7 +1873,7 @@ def test_held_reagents_a_flip_to_craft_leaves_keep_their_holdings_row(db):
 
     [craft] = result[MARKET].shopping_list
     assert craft.uses == (ReagentUse(THREAD_KEY, 6),)
-    assert result[MARKET].holdings == [Row(THREAD_KEY, None, 14, note="no data")]
+    assert result[MARKET].holdings == [Row(THREAD_KEY, None, 20, note="no data")]
 
 
 @pytest.mark.parametrize(
@@ -2064,8 +2107,9 @@ def test_a_sub_crafts_leftover_joins_the_crafted_holdings(db):
     )
 
 
-def test_a_flip_to_crafts_sub_craft_leftovers_join_the_crafted_holdings(db):
+def test_a_flip_to_crafts_sub_craft_leftovers_are_no_holdings(db):
     # Bars have no market data, so each Bolt smelts 1 Ore bought at 100 and leaves a Bar.
+    # Those Bars are only made if the option is taken, so they're no Holdings (#86).
     result = run(
         db,
         selling((ORE, 100), (BOLT, 1000)),
@@ -2075,7 +2119,7 @@ def test_a_flip_to_crafts_sub_craft_leftovers_join_the_crafted_holdings(db):
     [craft] = result[MARKET].shopping_list
     assert (craft.quantity, craft.via) == (6, (SubCraft(BAR_KEY, 6, "Kash-Patel"),))
     assert craft.buys == (ReagentBuy(ORE_KEY, 6, 100),)
-    assert result[MARKET].holdings == [Row(BAR_KEY, None, 6, note="no data, incl. 6 crafted")]
+    assert result[MARKET].holdings == []
 
 
 @pytest.mark.parametrize(
@@ -2397,19 +2441,19 @@ def test_prediction_buys_go_lowest_max_loss_first_within_the_total_cap(db):
     ]
 
 
-def test_flips_are_bought_first_and_predictions_get_the_gold_left(db):
-    # Of 10s, the Ore Flip to Vendor takes 9s. The Prediction's cap is 1s 50c, but only 1s
-    # is left: 5 Linen at 20c.
+@pytest.mark.parametrize(("budget", "units"), [(None, 7), (100, 5)])
+def test_prediction_buys_get_the_budget_whatever_the_shopping_list_shows(db, budget, units):
+    # #86: of 10s, the Ore Flip to Vendor would take 9s, but it's an option. The
+    # Prediction's cap is 1s 50c, so 7 Linen at 20c, or 5 within a 1s Budget.
     result = run(
         db,
         [scan(T0, row(ORE, quantity=9, unit=100), row(quantity=20, unit=20))],
-        [character_read(money=1000, vendor_prices={2589: 19, 2770: 200})],
+        [character_read(money=1000, vendor_prices={2589: 19, 2770: 200}, budget=budget)],
         predictions=[prediction(LINEN_KEY)],
     )
 
-    assert result[MARKET].shopping_cost == 900
     [buy] = result[MARKET].prediction_buys
-    assert (buy.quantity, buy.cost) == (5, 100)
+    assert (buy.quantity, buy.cost) == (units, units * 20)
 
 
 # --- Unlinked Sold Outcomes (#27) ---
@@ -2468,10 +2512,10 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
     ]
 
 
-def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(db):
-    # #64: on the written day the two 700s were a Flip to Sell (6 sell within the horizon
-    # and 4 are held, #67), so the 4 are posted under the 1000s at 999, 949.05 after the
-    # cut, not under the 700s. The later Scans at 500 must not count.
+def test_a_best_exit_is_valued_with_nothing_on_that_scans_shopping_list_bought(db):
+    # #86: on the written day the two 700s were a Flip to Sell, but as held units are now,
+    # the 4 are posted under the 700s at 699, 664.05 after the cut, not under the 1000s.
+    # The later Scans at 500 must not count.
     written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
     later = T0 + 3 * DAY
     run(
@@ -2485,30 +2529,7 @@ def test_a_best_exit_undercuts_what_was_left_once_that_scans_flips_were_bought(d
     )
 
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
-        Held("Linen spike", LINEN_KEY, units=4, cost=3796)  # 4 * 949.05
-    ]
-
-
-def test_a_best_exit_counts_only_the_flips_the_gold_held_then_would_buy(db):
-    # #68: on the written day the gold bought 1 of the two 700s, and resold under the
-    # other one it clears no margin, so nothing is bought and the 6 that Sell post at 699,
-    # 664.05 after the cut. The gold read later must not count.
-    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
-    later = T0 + 3 * DAY
-    run(
-        db,
-        [
-            *selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
-            scan(later, row(quantity=20, unit=500)),
-        ],
-        [
-            character_read(item(count=10), money=700, vendor_prices={2589: 10}),
-            character_read(item(count=10), money=GOLD, at=later),
-        ],
-    )
-
-    assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
-        Held("Linen spike", LINEN_KEY, units=10, cost=4024)  # 6 * 664.05 + 4 * 10
+        Held("Linen spike", LINEN_KEY, units=4, cost=2656)  # 4 * 664.05
     ]
 
 

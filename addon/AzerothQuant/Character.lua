@@ -13,6 +13,7 @@
 -- Nothing that moves, uses or deletes items.
 local _, ns = ...
 local CharacterRead = ns.CharacterRead
+local RecommendationTable = ns.RecommendationTable
 local Prune = ns.Prune
 local Professions = ns.Professions
 local Merchant = ns.Merchant
@@ -167,12 +168,14 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if not carried then
       return
     end
+    local realm, faction = GetRealmName(), UnitFactionGroup("player")
     local read = CharacterRead.build({
       readAt = time(),
-      realm = GetRealmName(),
+      realm = realm,
       character = table.concat({ UnitFullName("player") }, "-"),
-      faction = UnitFactionGroup("player"),
+      faction = faction,
       money = carried.money,
+      budget = faction and db.budgets and db.budgets[RecommendationTable.budgetKey(realm, faction)],
     }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs())
     table.insert(db.characterReads, read)
   end

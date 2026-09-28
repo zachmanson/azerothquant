@@ -6,8 +6,16 @@ local function noNames()
   return nil
 end
 
-local function build(recommendations, now, nameOf, character)
-  return RecommendationTable.build(recommendations, REALM, FACTION, now or 0, nameOf or noNames, character)
+local function build(recommendations, now, nameOf, character, budget)
+  return RecommendationTable.build(
+    recommendations,
+    REALM,
+    FACTION,
+    now or 0,
+    nameOf or noNames,
+    character,
+    budget
+  )
 end
 
 local AS_OF = 1790524206
@@ -18,7 +26,6 @@ local function entry(fields)
     asOf = AS_OF,
     gold = 175471,
     windowHours = 0.2975,
-    shoppingCost = 126793,
     predictionCost = 0,
     holdings = {},
     shoppingList = {},
@@ -305,8 +312,48 @@ describe("RecommendationTable.build", function()
 
     assert.are.equal("Classic Beta PvP Alliance", view.title)
     assert.matches("^as of %d%d:%d%d, 12 min ago, Observation Window 0.3 h$", view.header[1])
-    assert.are.equal("Gold 17g 54s 71c, Shopping List 12g 67s 93c, Prediction buys 0c", view.header[2])
+    assert.are.equal("Gold 17g 54s 71c, Budget all, Prediction buys 0c", view.header[2])
     assert.are.equal(2, #view.header)
+  end)
+
+  it("heads the table with the Budget the player set, and asks for a Reload when the Brain sized for another", function()
+    assert.are.equal(
+      "Gold 17g 54s 71c, Budget 5g, Prediction buys 0c",
+      build(entry({ budget = 50000 }), AS_OF, nil, nil, 50000).header[2]
+    )
+    assert.are.equal(
+      "Gold 17g 54s 71c, Budget 5g (Reload to re-size), Prediction buys 0c",
+      build(entry(), AS_OF, nil, nil, 50000).header[2]
+    )
+    assert.are.equal(
+      "Gold 17g 54s 71c, Budget all (Reload to re-size), Prediction buys 0c",
+      build(entry({ budget = 50000 }), AS_OF).header[2]
+    )
+  end)
+
+  it("keys the saved Budgets by Market, since gold pools per realm and faction", function()
+    assert.are.equal("Classic Beta PvP-Alliance", RecommendationTable.budgetKey(REALM, FACTION))
+  end)
+
+  it("folds Shopping List options that cost more than the Budget into a count (#86)", function()
+    local view = build(
+      entry({
+        shoppingList = {
+          { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 3000 },
+          { itemKey = "2589", action = "Vendor", quantity = 2, price = 100, profit = 20.0, cost = 200 },
+        },
+      }),
+      AS_OF,
+      nil,
+      nil,
+      2000
+    )
+
+    local shopping = view.sections[2]
+    assert.are.equal(1, #shopping.rows)
+    assert.are.equal("item:2589", shopping.rows[1].itemString)
+    assert.are.equal("1 over the Budget (Reload to re-size)", shopping.more)
+    assert.are.equal("Shopping List (1)", shopping.tab)
   end)
 
   it("formats the time with WoW's global date, since the client has no os library", function()

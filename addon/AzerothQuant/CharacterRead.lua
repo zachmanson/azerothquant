@@ -50,7 +50,8 @@ local function vendorPrices(slotLists)
   return prices, missing
 end
 
--- who: { readAt, realm, character, faction, money }.
+-- who: { readAt, realm, character, faction, money, budget }, where budget is the copper the
+-- player will spend in this Character's Market (#86), or nil for all its gold.
 -- bagSlots: one per slot, { bag, slot, info, sellPrice }, where info is what
 -- C_Container.GetContainerItemInfo returns (nil for an empty slot) and sellPrice is
 -- the item's Vendor Price, read along with it (nil if the client hadn't loaded it).
@@ -70,6 +71,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList, m
     character = who.character,
     faction = who.faction,
     money = who.money,
+    budget = who.budget,
     bags = items(bagSlots),
     bankReadAt = bank and bank.readAt,
     bank = bank and items(bank.slots),

@@ -44,6 +44,7 @@ from brain.recommend import (
     BOUND_ON_CRAFT,
     Action,
     MarketRecommendations,
+    Row,
     auction_cut,
     cheapest,
     deposit_of,
@@ -258,20 +259,30 @@ def _realized(
 
 def _brain(m: MarketRecommendations, vendor: Mapping[int, int]) -> _Moves:
     """The Brain's Recommendations as moves: Sell rows posted, Vendor rows vendored (for
-    nothing without a Vendor Price), no-data and Hold units held on to, and what the
-    Shopping List and Prediction buys spend. A Flip to Craft's output is posted and
-    vendored as it was valued; a Craft Action's is in the Holdings rows."""
+    nothing without a Vendor Price), no-data and Hold units held on to, and the Shopping
+    List options and Prediction buys the player would take (`_taken`). A Flip to Craft's
+    output is posted and vendored as it was valued; a Craft Action's is in the Holdings
+    rows. Held units a taken Flip to Craft uses come off the least profitable Holdings
+    rows of their Item Key."""
     moves = _Moves()
-    for r in m.holdings:
+    shopping, prediction_buys = _taken(m)
+    used: Counter[str] = Counter()
+    for r in shopping:
+        for use in r.uses:
+            used[use.item_key] += use.quantity
+    for r in reversed(m.holdings):
+        taken = min(used[r.item_key], r.quantity)
+        used[r.item_key] -= taken
+        quantity = r.quantity - taken
         if r.action is Action.SELL:
-            moves.posts.append(_Post(r.item_key, r.quantity, r.price))
+            moves.posts.append(_Post(r.item_key, quantity, r.price))
         elif r.action is Action.VENDOR:
-            moves.vendored += r.quantity * (r.price or 0)
+            moves.vendored += quantity * (r.price or 0)
         elif r.action in (None, Action.HOLD):
-            moves.kept[r.item_key] += r.quantity
+            moves.kept[r.item_key] += quantity
         elif r.action is Action.CRAFT:
             moves.spent += r.merchant_gold
-    for r in m.shopping_list:
+    for r in shopping:
         moves.spent += r.cost
         if r.action is Action.SELL:
             moves.posts.append(_Post(r.item_key, r.quantity, r.post_at))
@@ -282,10 +293,33 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int]) -> _Moves:
                 moves.posts.append(_Post(r.item_key, r.made.selling, r.made.post_at))
             vendor_price = vendor.get(item_id_of(r.item_key), 0)
             moves.vendored += (r.made.units - r.made.selling) * vendor_price
-    for r in m.prediction_buys:
+    for r in prediction_buys:
         moves.spent += r.cost
         moves.kept[r.item_key] += r.quantity
     return moves
+
+
+def _taken(m: MarketRecommendations) -> tuple[list[Row], list[Row]]:
+    """The Shopping List options and Prediction buys a player would take, since each option
+    was sized as if the only buy (#86): most profit first while the gold (or the Budget)
+    lasts, skipping any that buys, uses or makes an Item Key one already taken does. The
+    Prediction buys then get what's left, in order."""
+    gold = m.gold if m.budget is None else min(m.gold, m.budget)
+    shopping: list[Row] = []
+    keys: set[str] = set()
+    for r in m.shopping_list:
+        touched = {r.item_key, *(b.item_key for b in r.buys), *(u.item_key for u in r.uses)}
+        if r.cost is None or r.cost > gold or touched & keys:
+            continue
+        shopping.append(r)
+        keys |= touched
+        gold -= r.cost
+    prediction_buys = []
+    for r in m.prediction_buys:
+        if r.cost is not None and r.cost <= gold:
+            prediction_buys.append(r)
+            gold -= r.cost
+    return shopping, prediction_buys
 
 
 def _exit(

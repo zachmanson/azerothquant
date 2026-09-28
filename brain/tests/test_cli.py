@@ -488,10 +488,11 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert "Classic Beta PvP Alliance (beta)" in text
     # The one Observation Window every Sell Rate here rests on.
     assert "Sell Rate observed for 1.0 h in the last 14 days" in text
-    # The Flip buys the two 700s, so it and the 3 held are posted at 999 under the 1000s
-    # (#64), for 949.05 each after the cut, 939.05 more than a vendor pays.
-    assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
-    assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
+    # Held units are valued with nothing on the Shopping List bought (#86), so they're
+    # posted at 699 under the Flip's two 700s, for 664.05 each after the cut, 654.05 more
+    # than a vendor pays.
+    assert ["2589", "Sell", "3", "6s 99c", "19s 92c", "6s 54c", "1"] in lines
+    assert "Shopping List, options each sized on its own within 12g 34s 56c\n" in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one 6c deposit (60% of the 10c Vendor Price) first (#78).
     assert ["2589", "Sell", "2", "7s 00c", "4s 92c", "14s 00c", "1"] in lines
@@ -545,7 +546,8 @@ def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"] in lines
-    assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1", "+89.8% * on 2 of 3"] in lines
+    # Posted at 699 with nothing bought (#86): 664.05 after the cut on 500 paid.
+    assert ["2589", "Sell", "3", "6s 99c", "19s 92c", "6s 54c", "1", "+32.8% * on 2 of 3"] in lines
 
 
 def _bolts_and_linen(tmp_path, money=0):

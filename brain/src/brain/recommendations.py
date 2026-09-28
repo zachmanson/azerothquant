@@ -44,7 +44,9 @@ _HEADER = (
     "-- lastMailboxRead[realm][character] is when the latest imported Mailbox Read of\n"
     "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
-    "-- recommendations[realm][faction] is that Market's Recommendations, in copper. A\n"
+    "-- recommendations[realm][faction] is that Market's Recommendations, in copper.\n"
+    "-- budget is the Budget the Brain sized them within (nil for all the gold), and each\n"
+    "-- shoppingList row is an option sized as if it were the only buy. A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
@@ -91,7 +93,6 @@ def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict
             "asOf": m.as_of,
             "gold": m.gold,
             "windowHours": m.window_hours,
-            "shoppingCost": m.shopping_cost,
             "predictionCost": m.prediction_cost,
             "holdings": [_row(r) for r in m.holdings],
             "shoppingList": [_row(r) for r in m.shopping_list],
@@ -104,6 +105,8 @@ def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict
                 for item_key, whose in m.held.items()
             },
         }
+        if m.budget is not None:  # a Lua table can't hold nil
+            by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
     return by_realm
 
 

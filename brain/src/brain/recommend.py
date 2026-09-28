@@ -28,6 +28,7 @@ from brain.history import (
     holdings,
     known_recipes,
     listings,
+    market_budget,
     merchant_costs,
     outcomes,
     pooled_gold,
@@ -137,8 +138,6 @@ class Row:
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
     blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
     via: tuple[SubCraft, ...] = ()  # a Craft's Sub-crafts, deepest first (#33)
-    # A Craft's Sub-craft surplus, which joins the crafted Holdings (#33).
-    leftovers: tuple[tuple[str, Holding], ...] = ()
     # A Craft Action's gold spent at merchants, and a Flip to Craft's output, for the
     # replay (#80). Plumbing, not part of the Recommendation: not written to
     # Recommendations.lua, nor compared.
@@ -264,13 +263,16 @@ class CharacterHolding:
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
-    gold: int  # the Market's pooled gold, what the Shopping List can spend
+    gold: int  # the Market's pooled gold
+    # The most the player will spend, set in game (#86); None for all the gold. Each
+    # Shopping List option and the Prediction buys spend up to the lesser of the two.
+    budget: int | None = None
     # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
     holdings: list[Row] = field(default_factory=list)
+    # Options, each sized as if it were the only buy, most profit first (#86).
     shopping_list: list[Row] = field(default_factory=list)
-    shopping_cost: int = 0
     # The Shopping List's own section for buying to Hold under a Prediction, whose upside
     # is unknown (ADR-0006).
     prediction_buys: list[Row] = field(default_factory=list)
@@ -315,8 +317,10 @@ def recommend_market(
     under = {k: p.name for p in active for k in p.item_keys}
     by_character = _by_character(conn, market, characters, as_of)
     holdings = _pooled(by_character)
-    # The Craft Actions value outputs after the Flips, sized with what's held now.
+    # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
+    # options are alternatives, so none is assumed (#86).
     valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings))
+    valuer = valuer.after({})
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
     plans = _plans(known_recipes(conn, market), now)
@@ -324,7 +328,10 @@ def recommend_market(
     held = crafting.after
     # The crafts change what's held, so the Flips are sized again after them (#67).
     valuer, buys = valuer.flips(set(under), _unbound_units(held))
+    valuer = valuer.after({})
     gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
+    budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
+    spend = gold if budget is None else min(gold, budget)
     hold_buys = [
         buy
         for item_key, offers in sorted(for_sale.items())
@@ -343,8 +350,9 @@ def recommend_market(
             config,
         )
     ]
-    outlets = {
-        plan.output: _outlet(
+
+    def outlet(plan: _Plan) -> _Outlet:
+        return _outlet(
             plan.recipe.bind_type in BOUND_ON_CRAFT,
             supply.get(plan.output, []),
             for_sale.get(plan.output, []),
@@ -352,47 +360,48 @@ def recommend_market(
             vendor.get(item_id_of(plan.output)),
             merchant.get(plan.output),
             _unbound(held.get(plan.output, Holding())),
-            valuer.flipped.get(plan.output, []),
+            [],
             valuer.effort(plan.output),
             valuer.queue(plan.output, flips=True),
             cut,
             config,
         )
-        for plan in plans
-    }
-    asks = {key: without(offers, valuer.flipped.get(key, [])) for key, offers in for_sale.items()}
+
     crafts = (
-        _flips_to_craft(plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config)
+        [
+            _flips_to_craft(
+                plans, crafting, for_sale, merchant, valuer, outlet, set(under), spend, config, plan
+            )
+            for plan in plans
+        ]
         if config.flips_to_craft
         else []
     )
-    shopping, valuer = _buy_what_fits(valuer, buys, crafts, gold, config)
-    bought = crafting.with_shopping(shopping)
-    left, crafted = bought.after, bought.counts
+    shopping = _options(buys, crafts, spend, config.shopping_list_rows)
+    crafted = crafting.counts
     rows = [
         _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
-        for item_key, holding in left.items()
+        for item_key, holding in held.items()
         for row in valuer.rows(item_key, holding)
     ] + crafting.rows
     graded = grades(conn, config, market, predictions, now)
     pooled = pooled_return(graded)
     caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
-    bound = {k: h.bags_bound + h.bank_bound for k, h in left.items()}
+    bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
     rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
     rows = _with_roi(rows, _market_lots(conn, config, market, predictions), cut, config)
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
-    shopping_cost = round(sum(r.cost for r in shopping))
-    prediction_buys = _spend_on_predictions(hold_buys, gold - shopping_cost, caps)
+    prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
     linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
     return MarketRecommendations(
         market,
         now,
         gold,
+        budget=budget,
         window_hours=observation_window_hours(conn, market, config, now),
         holdings=rows,
         shopping_list=shopping,
-        shopping_cost=shopping_cost,
         prediction_buys=prediction_buys,
         prediction_cost=sum(r.cost for r in prediction_buys),
         unlinked_sales=sum(o.kind is MailKind.SOLD and o.item_key is None for o in linked),
@@ -530,9 +539,8 @@ def exit_values(
     `_exit_value` values them, all at once."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
-    valuer, buys = _valuer(conn, config, market, scan, unbound=_unbound_units(dict(held)))
-    gold = pooled_gold(conn, market.era, market.realm, market.faction, scan)
-    _, valuer = _buy_what_fits(valuer, buys, [], gold, config)
+    valuer, _ = _valuer(conn, config, market, scan, unbound=_unbound_units(dict(held)))
+    valuer = valuer.after({})
     return {item_key: valuer.worth(item_key, h) for item_key, h in held.items()}
 
 
@@ -867,7 +875,6 @@ class _Plan:
     # The Sub-crafts by (Item Key, Character), with the deepest each was made at.
     via: dict[tuple[str, str], SubCraft] = field(default_factory=dict)
     via_depth: Counter[tuple[str, str]] = field(default_factory=Counter)
-    leftovers: dict[str, Holding] = field(default_factory=dict)
 
     @property
     def output(self) -> str:
@@ -892,8 +899,6 @@ class _Plan:
             had = self.via.get(at)
             self.via[at] = sub if had is None else replace(had, crafts=had.crafts + sub.crafts)
             self.via_depth[at] = max(self.via_depth[at], depth)
-        for key, h in chain.leftovers.items():
-            self.leftovers[key] = _plus(self.leftovers.get(key, Holding()), h)
 
     def row(self) -> Row:
         uses = ", ".join(
@@ -921,7 +926,6 @@ class _Plan:
                 if n > self.bought[key]
             ),
             via=via,
-            leftovers=tuple(self.leftovers.items()),
             merchant_gold=self.gold,
         )
 
@@ -968,19 +972,6 @@ class _Crafting:
         for key, h in self.crafted.items():
             after[key] = _plus(after.get(key, Holding()), h)
         return dict(sorted(after.items()))
-
-    def with_shopping(self, shopping: Sequence[Row]) -> "_Crafting":
-        """This once the Shopping List's Flips to Craft are made too: a held unit a Flip to
-        Craft uses is recommended only there (#69), and its Sub-crafts' leftovers are
-        crafted Holdings (#33)."""
-        held, crafted = dict(self.held), dict(self.crafted)
-        for row in shopping:
-            if row.action is Action.CRAFT:
-                for use in row.uses:
-                    held[use.item_key] = _take(held[use.item_key], use.quantity)
-                for key, h in row.leftovers:
-                    crafted[key] = _plus(crafted.get(key, Holding()), h)
-        return replace(self, held=held, crafted=crafted)
 
     @property
     def counts(self) -> Counter[str]:
@@ -1057,7 +1048,7 @@ def _crafts(
         sources.commit(plan, chain)
         crafted[plan.output] = _crafted(plan, crafted.get(plan.output, Holding()))
     rows = [p.row() for p in craftable if p.crafts]
-    return _Crafting([replace(r, leftovers=()) for r in rows] + blocked, held, crafted, spent)
+    return _Crafting(rows + blocked, held, crafted, spent)
 
 
 def _blocked(plan: _Plan, sources: "_Sources") -> Blocked | None:
@@ -1361,19 +1352,26 @@ def _flips_to_craft(
     asks: dict[str, Supply],
     merchant: dict[str, float],
     valuer: _Valuer,
-    outlets: dict[str, _Outlet],
+    outlet: Callable[[_Plan], _Outlet],
     under: set[str],
     gold: float,
     config: Config,
+    recipe: _Plan,
 ) -> list[_CraftBuy]:
-    """The Flips to Craft worth making once the held-only crafts are (ADR-0009), in the
-    order chosen.
+    """The Flips to Craft of `recipe` worth making once the held-only crafts are
+    (ADR-0009), as if they were the only buy (#86), in the order chosen.
 
-    Greedy like the Craft Action: each step takes the craft that profits most among those
-    clearing the Flip margin against the gold they spend, until none does or the gold
-    runs out. Its reagents are sourced like a Craft Action's, but what's still short can
-    be bought at the cheapest `asks` left (_Sources).
+    Greedy like the Craft Action: each step takes one more craft if it clears the Flip
+    margin against the gold it spends, until none does or the gold runs out. Its reagents
+    are sourced like a Craft Action's, from any of the `plans`, but what's still short
+    can be bought at the cheapest `asks` left (_Sources).
     """
+    if (
+        recipe.recipe.bind_type is None
+        or recipe.output in under
+        or any(key in under for key in recipe.needs)
+    ):
+        return []
     sources = _Sources(
         held=dict(crafting.held),
         crafted=dict(crafting.crafted),
@@ -1385,35 +1383,21 @@ def _flips_to_craft(
         spent=Counter(crafting.spent),
         config=config,
     )
-    # A recipe on cooldown for every Character has a limit of 0.
-    candidates = [
-        p
-        for p in plans
-        if p.recipe.bind_type is not None
-        and p.output not in under
-        and not any(key in under for key in p.needs)
-    ]
+    out = outlet(recipe)
     result = []
-    while True:
-        best = None
-        for plan in candidates:
-            if plan.limit is not None and sources.spent[plan.recipe.recipe_id] >= plan.limit:
-                continue
-            step = _flip_step(plan, sources, outlets[plan.output])
-            if step is None or step.gold > gold:
-                continue
-            if step.profit < max(
-                step.gold * config.flip_min_margin_share, config.flip_min_margin_copper
-            ):
-                continue
-            if best is None or step.profit > best.profit:
-                best = step
-        if best is None:
+    # A recipe on cooldown for every Character has a limit of 0.
+    while recipe.limit is None or sources.spent[recipe.recipe.recipe_id] < recipe.limit:
+        step = _flip_step(recipe, sources, out)
+        if step is None or step.gold > gold:
             break
-        result.append(best)
-        gold -= best.gold
-        sources.commit(best.plan, best.chain)
-        outlets[best.plan.output].take(best.selling)
+        if step.profit < max(
+            step.gold * config.flip_min_margin_share, config.flip_min_margin_copper
+        ):
+            break
+        result.append(step)
+        gold -= step.gold
+        sources.commit(step.plan, step.chain)
+        out.take(step.selling)
     return result
 
 
@@ -1966,61 +1950,19 @@ def _resells(
     return vendor_price is None or resale - effort - lost > vendor_price
 
 
-def _buy_what_fits(
-    valuer: _Valuer,
-    buys: list[_VendorBuy | _FlipToSell],
-    crafts: list[_CraftBuy],
-    gold: float,
-    config: Config,
-) -> tuple[list[Row], _Valuer]:
-    """The Shopping List `gold` buys, and the Valuer priced after only what it buys
-    (ADR-0010). `valuer`, and so the Shopping List's choice, assumed every Flip bought.
-    In one pass, each Flip to Sell is reposted under what the Shopping List leaves and
-    dropped if it no longer resells; its gold isn't spent on another Flip. Since a Flip
-    to Sell is already priced on the run it buys (ADR-0011), that drop is a safety net."""
-    chosen = _shopping_list(buys, crafts, gold)
-    after = valuer.after(_bought(chosen))
-    kept = [
-        (row, units)
-        for row, units in chosen
-        if row.action is not Action.SELL
-        or _resells(
-            _resale_of(after, row.item_key),
-            row.price,
-            valuer.vendor.get(item_id_of(row.item_key)),
-            valuer.effort(row.item_key),
-            valuer.flip_lost(row.item_key, row.quantity)[0],
-            config,
-        )
-    ]
-    after = valuer.after(_bought(kept))
-    rows = []
-    for row, _ in kept:
-        if row.action is Action.SELL:
-            resale = _resale_of(after, row.item_key)
-            _, lost = valuer.flip_lost(row.item_key, row.quantity)
-            row = replace(
-                row,
-                post_at=after.post_at(row.item_key),
-                profit=row.quantity * (resale - 2 * valuer.effort(row.item_key)) - row.cost - lost,
-            )
-        rows.append(row)
-    return rows, after
-
-
-def _resale_of(valuer: _Valuer, item_key: str) -> float | None:
-    """What one unit of an Item Key brings in after the cut, posted at `post_at`."""
-    post_at = valuer.post_at(item_key)
-    return None if post_at is None else post_at * (1 - valuer.cut)
-
-
-def _bought(chosen: list[tuple[Row, dict[str, Supply]]]) -> dict[str, Supply]:
-    """The Auction House units the chosen Shopping List rows buy, by Item Key."""
-    bought: dict[str, Supply] = {}
-    for _, units in chosen:
-        for key, supply in units.items():
-            bought.setdefault(key, []).extend(supply)
-    return bought
+def _options(
+    buys: list[_VendorBuy | _FlipToSell], crafts: list[list[_CraftBuy]], gold: float, rows: int
+) -> list[Row]:
+    """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
+    recipe's Flips to Craft, sized as if it were the only buy within `gold`, the `rows`
+    most profitable first. A Flip to Sell is priced on the run it buys (ADR-0011)."""
+    groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
+    for buy in buys:
+        groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
+    options = [row for group in groups.values() for row, _ in _shopping_list(group, [], gold)]
+    options += [row for recipe in crafts if recipe for row, _ in _shopping_list([], recipe, gold)]
+    options.sort(key=lambda r: -r.profit)
+    return options[:rows]
 
 
 def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[ReagentBuy, ...]:

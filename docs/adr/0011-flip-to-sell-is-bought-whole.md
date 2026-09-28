@@ -16,3 +16,5 @@ ADR-0010's one-pass repricing stands. Since a kept Flip to Sell is already price
 
 - Greedy by ratio over indivisible picks is not the best possible fill (a knapsack); a big run can still be skipped for smaller ones that together profit less. Same trade as ADR-0008: one step, explainable, close enough.
 - A shorter run is ranked by its whole run's ratio, not its own.
+
+Superseded in part by ADR-0017 (#86): the run choice stands (the most profitable run that fits, now within the Budget), but there's no greedy fill by profit per gold: each Flip to Sell is its own option.

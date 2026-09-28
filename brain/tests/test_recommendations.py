@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from brain.config import Era
-from brain.history import Holding, Market
+from brain.history import Market
 from brain.recommend import (
     Action,
     Blocked,
@@ -97,7 +97,7 @@ def test_a_real_lua_reads_a_markets_recommendations(tmp_path, lua):
                             sale_events=41,
                         )
                     ],
-                    shopping_cost=0,
+                    budget=100000,
                     prediction_cost=0,
                 )
             ],
@@ -110,12 +110,12 @@ def test_a_real_lua_reads_a_markets_recommendations(tmp_path, lua):
         file,
         'local m = r.recommendations["Quel\'Thalas"].Horde '
         "local h = m.holdings[1] "
-        "print(m.asOf, m.gold, m.windowHours, m.shoppingCost, m.predictionCost, #m.holdings) "
+        "print(m.asOf, m.gold, m.windowHours, m.budget, m.predictionCost, #m.holdings) "
         "print(h.itemKey, h.action, h.quantity, h.price, h.profit, h.margin, h.saleEvents)",
     )
 
     assert out.splitlines() == [
-        "1790000000	123456	2.5	0	0	1",
+        "1790000000	123456	2.5	100000	0	1",
         "4359	Sell	32	169	5139	149	41",
     ]
 
@@ -159,7 +159,6 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
                             sale_events=12,
                         )
                     ],
-                    shopping_cost=300,
                     prediction_buys=[
                         Row(
                             item_key="12359",
@@ -230,7 +229,6 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
                             uses=(ReagentUse("2320", 1),),
                         )
                     ],
-                    shopping_cost=1250,
                 )
             ],
         ),
@@ -322,7 +320,7 @@ def test_a_real_lua_reads_why_a_craft_is_blocked(tmp_path, lua):
 
 
 def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
-    # #33: deepest first, as the Brain lists them. Leftovers stay in the Brain.
+    # #33: deepest first, as the Brain lists them.
     file = tmp_path / FILE_NAME
     craft = Row(
         "5762",
@@ -333,7 +331,6 @@ def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
         character="Kash-Patel",
         uses=(ReagentUse("2770", 2),),
         via=(SubCraft("2840", 2, "Alt-One"), SubCraft("2996", 1, "Kash-Patel")),
-        leftovers=(("2840", Holding(bags=1)),),
     )
     file.write_text(
         render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[craft])]),
@@ -344,14 +341,12 @@ def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
         lua,
         file,
         'local row = r.recommendations["Quel\'Thalas"].Horde.holdings[1] '
-        "for _, v in ipairs(row.via) do print(v.itemKey, v.crafts, v.character) end "
-        "print(tostring(row.leftovers))",
+        "for _, v in ipairs(row.via) do print(v.itemKey, v.crafts, v.character) end",
     )
 
     assert out.splitlines() == [
         "2840	2	Alt-One",
         "2996	1	Kash-Patel",
-        "nil",
     ]
 
 

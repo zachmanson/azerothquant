@@ -23,6 +23,16 @@ describe("CharacterRead.build", function()
     assert.are.same({}, read.bags)
   end)
 
+  it("carries the Market's Budget when the player set one (#86)", function()
+    local who = { budget = 2500000 }
+    for k, v in pairs(WHO) do
+      who[k] = v
+    end
+
+    assert.are.equal(2500000, CharacterRead.build(who, {}).budget)
+    assert.is_nil(CharacterRead.build(WHO, {}).budget)
+  end)
+
   it("keeps each filled slot's link, count and whether it's bound, and skips empty slots", function()
     local read = CharacterRead.build(WHO, {
       { bag = 0, slot = 1, info = { hyperlink = LINEN, stackCount = 20, isBound = false, iconFileID = 132889 } },

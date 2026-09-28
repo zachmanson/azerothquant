@@ -31,12 +31,15 @@ local function formatTime(t)
   return (date or os.date)("%H:%M", t)
 end
 
-local function header(entry, now)
+-- budget: the one the player set in the box, nil for all the gold. entry.budget is the one
+-- the Brain sized the options within, which lags it until the next reload.
+local function header(entry, now, budget)
+  local stale = budget ~= entry.budget and " (Reload to re-size)" or ""
   return {
     "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf)
       .. string.format(", Observation Window %.1f h", entry.windowHours),
     "Gold " .. Money.format(entry.gold)
-      .. ", Shopping List " .. Money.format(entry.shoppingCost)
+      .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale
       .. ", Prediction buys " .. Money.format(entry.predictionCost),
   }
 end
@@ -356,14 +359,17 @@ function RecommendationTable.nextSort(section, state, column)
 end
 
 -- holdersOf is the entry's held: which Characters hold each Item Key. inBags(itemKey), given
--- for Holdings only, says whether the logged-in Character has it in its bags.
-local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags)
+-- for Holdings only, says whether the logged-in Character has it in its bags. budget, given
+-- for the Shopping List only, folds away the options that cost more (#86).
+local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget)
   local held = RecommendationTable.heldUnits(rows)
   local out = { title = title, columns = columns, rows = {}, sort = default }
-  local folded = 0
+  local folded, over = 0, 0
   for _, r in ipairs(rows) do
     if RecommendationTable.lowValue(r) then
       folded = folded + 1
+    elseif budget and (r.cost or 0) > budget then
+      over = over + 1
     else
       local name = nameFor(r.itemKey, nameOf)
       local rowCells = cells(r, name, nameOf)
@@ -385,9 +391,14 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
   if #out.rows == 0 then
     out.empty = NOTHING[title]
   end
+  local more = {}
   if folded > 0 then
-    out.more = folded .. " more (worth 0c or no data)"
+    more[#more + 1] = folded .. " more (worth 0c or no data)"
   end
+  if over > 0 then
+    more[#more + 1] = over .. " over the Budget (Reload to re-size)"
+  end
+  out.more = #more > 0 and table.concat(more, ", ") or nil
   return out
 end
 
@@ -416,8 +427,15 @@ function RecommendationTable.waitingNote(unsaved, unimported)
   return scans .. " waiting: " .. step
 end
 
--- character: the logged-in Character, as the Brain names it ("Name-Realm").
-function RecommendationTable.build(recommendations, realm, faction, now, nameOf, character)
+-- The key of a Market's Budget in AzerothQuantDB.budgets (#86): gold pools per realm and
+-- faction, so that's what a Budget covers.
+function RecommendationTable.budgetKey(realm, faction)
+  return realm .. "-" .. faction
+end
+
+-- character: the logged-in Character, as the Brain names it ("Name-Realm"). budget: the
+-- copper the player set in the Budget box, nil for all the gold (#86).
+function RecommendationTable.build(recommendations, realm, faction, now, nameOf, character, budget)
   local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
   if not entry then
     return { empty = EMPTY }
@@ -434,7 +452,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
   end
   return {
     title = realm .. " " .. faction,
-    header = header(entry, now),
+    header = header(entry, now, budget),
     sections = {
       section(
         "Holdings",
@@ -455,7 +473,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         shoppingKeys,
         { column = 6, descending = true },
         nameOf,
-        holdersOf
+        holdersOf,
+        nil,
+        budget
       ),
       section(
         "Prediction buys",

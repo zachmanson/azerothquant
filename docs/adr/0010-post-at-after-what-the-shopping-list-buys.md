@@ -21,3 +21,5 @@ At a past Scan (Best Exit Value for Grades and for units held when a Prediction 
 - A Flip cut short by gold now posts under the first Listing it didn't buy, not the one the full Flip would have reached.
 
 Superseded in part by ADR-0011: a Flip to Sell is no longer cut short by gold, since the Shopping List buys it whole or as the best run the gold covers.
+
+Superseded by ADR-0017 (#86): the Shopping List is options, each priced after only its own buys, and everything else is priced with nothing on it bought, so there is no basket to reprice against.
