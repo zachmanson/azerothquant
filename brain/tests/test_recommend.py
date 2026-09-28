@@ -1286,6 +1286,40 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
     assert result[MARKET].shopping_cost == 1100
 
 
+def test_a_held_reagent_a_flip_to_craft_uses_gets_no_holdings_row(db):
+    # #69: 3 Linen held. The Craft Action uses 2, the Flip to Craft the 3rd (buying 9),
+    # so no Linen is left to Sell.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=3), money=GOLD, recipes=[recipe()])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert craft.uses == (ReagentUse(LINEN_KEY, 1),)
+    assert [r.item_key for r in result[MARKET].holdings] == [BOLT_KEY, BOLT_KEY]
+
+
+def test_a_held_reagent_keeps_its_holdings_row_if_its_flip_to_craft_is_not_bought(db):
+    # #69: as above, but the 1 silver held goes on 100 Ore at 1 to Vendor for 50 (more
+    # profit per gold), so the Flip to Craft is left out and the 3rd Linen is still held.
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"].append(row(ORE, quantity=100, unit=1))
+    result = run(
+        db,
+        scans,
+        [character_read(item(count=3), money=100, vendor_prices={2770: 50}, recipes=[recipe()])],
+    )
+
+    [vendor] = result[MARKET].shopping_list
+    assert (vendor.item_key, vendor.action) == (ORE_KEY, Action.VENDOR)
+    assert [(r.item_key, r.action, r.quantity) for r in result[MARKET].holdings] == [
+        (BOLT_KEY, Action.SELL, 1),
+        (BOLT_KEY, Action.CRAFT, 1),
+        (LINEN_KEY, Action.SELL, 1),
+    ]
+
+
 def test_a_flip_to_crafts_output_is_never_resold_above_what_a_merchant_charges(db):
     # #63: as above, but a merchant sells Bolts for 500, so they resell for 475.
     result = run(
@@ -1460,6 +1494,26 @@ def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
         ReagentBuy(LINEN_KEY, 12, 100),
         ReagentBuy(THREAD_KEY, 5, 10, merchant=True),
     )
+
+
+def test_held_reagents_a_flip_to_craft_leaves_keep_their_holdings_row(db):
+    # #69: 20 Thread held; the 6 Bolts use 6, so the other 14 are still Holdings.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(THREAD_LINK, count=20),
+                money=GOLD,
+                recipes=[recipe(reagents=LINEN_AND_THREAD)],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert craft.uses == (ReagentUse(THREAD_KEY, 6),)
+    assert result[MARKET].holdings == [Row(THREAD_KEY, None, 14, note="no data")]
 
 
 @pytest.mark.parametrize(

@@ -281,15 +281,16 @@ def recommend(
             plans, crafting, asks, merchant, valuer, outlets, set(under), gold, config
         )
         shopping, valuer = _buy_what_fits(valuer, buys, crafts, gold, config)
+        left = crafting.left(shopping)
         rows = [
             _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
-            for item_key, holding in held.items()
+            for item_key, holding in left.items()
             for row in valuer.rows(item_key, holding)
         ] + crafting.rows
         graded = grades(conn, config, market, predictions, now)
         pooled = pooled_return(graded)
         caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
-        bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
+        bound = {k: h.bags_bound + h.bank_bound for k, h in left.items()}
         rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
         rows = _with_roi(rows, _market_lots(conn, config, market, predictions), cut, config)
         # Most expected profit first; rows without a number to rank by go last.
@@ -703,6 +704,16 @@ class _Crafting:
         for key, h in self.crafted.items():
             after[key] = _plus(after.get(key, Holding()), h)
         return dict(sorted(after.items()))
+
+    def left(self, shopping: Sequence[Row]) -> dict[str, Holding]:
+        """The Holdings once the crafts and the Shopping List's Flips to Craft are made: a
+        held unit a Flip to Craft uses is recommended only there (#69)."""
+        held = dict(self.held)
+        for row in shopping:
+            if row.action is Action.CRAFT:
+                for use in row.uses:
+                    held[use.item_key] = _take(held[use.item_key], use.quantity)
+        return replace(self, held=held).after
 
     @property
     def counts(self) -> Counter[str]:
