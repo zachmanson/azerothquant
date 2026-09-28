@@ -36,7 +36,7 @@ from brain.history import (
 from brain.lots import Held, Lot, ended_at, link_sales, lots, settle, start_of
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
-from brain.sell_rate import SellRate, observation_window_hours, sell_rates
+from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
 
 
 class Action(StrEnum):
@@ -272,6 +272,7 @@ def recommend(
                 merchant.get(plan.output),
                 _unbound(held.get(plan.output, Holding())),
                 valuer.flipped.get(plan.output, []),
+                valuer.effort(plan.output),
                 cut,
                 config,
             )
@@ -435,13 +436,15 @@ def _valuer(
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = _cut(market, config)
-    valuer = _Valuer(supply, others, {}, rates, vendor, merchant, cut, config)
+    singles = non_stacking(conn, market)
+    valuer = _Valuer(supply, others, {}, rates, vendor, merchant, cut, singles, config)
     return valuer.flips(under, unbound)
 
 
 class _Valuer:
     """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
-    on sale, `others` other players' Listings, and `flipped` the ones the Flips buy."""
+    on sale, `others` other players' Listings, and `flipped` the ones the Flips buy.
+    `singles` are the Item Keys that don't stack (#73)."""
 
     def __init__(
         self,
@@ -452,11 +455,12 @@ class _Valuer:
         vendor: dict[int, int],
         merchant: dict[str, float],
         cut: float,
+        singles: frozenset[str],
         config: Config,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
-        self.cut, self._config = cut, config
+        self.cut, self.singles, self._config = cut, singles, config
 
     def after(self, bought: dict[str, Supply]) -> "_Valuer":
         """This Valuer with `bought` as the units taken off other players' Listings."""
@@ -468,8 +472,14 @@ class _Valuer:
             self.vendor,
             self.merchant,
             self.cut,
+            self.singles,
             self._config,
         )
+
+    def effort(self, item_key: str) -> int:
+        """What a Flip is charged for each unit of an Item Key it buys, and again for each
+        it posts: nothing unless it doesn't stack (#73)."""
+        return self._config.non_stacking_effort_copper if item_key in self.singles else 0
 
     def flips(
         self, under: set[str], unbound: Mapping[str, int]
@@ -489,6 +499,7 @@ class _Valuer:
                 self.vendor.get(_item_id(item_key)),
                 self.merchant.get(item_key),
                 unbound.get(item_key, 0),
+                self.effort(item_key),
                 self.cut,
                 self._config,
             )
@@ -842,19 +853,21 @@ def _step(
 @dataclass
 class _Outlet:
     """Where a Flip to Craft's output goes: `room` more units Sell for `resale` each
-    after the cut, and the rest are Vendored."""
+    after the cut, less the `effort` of posting each (#73), and the rest are Vendored."""
 
     room: int
     resale: float | None
     vendor_price: int
     bound: bool
+    effort: int = 0
 
     def value(self, units: int) -> tuple[float, int]:
         """What `units` more would bring, and how many of them Sell."""
-        if self.bound or self.resale is None or self.resale <= self.vendor_price:
+        if self.bound or self.resale is None or self.resale - self.effort <= self.vendor_price:
             return units * self.vendor_price, 0
         selling = min(units, self.room)
-        return selling * self.resale + (units - selling) * self.vendor_price, selling
+        sold = selling * (self.resale - self.effort)
+        return sold + (units - selling) * self.vendor_price, selling
 
 
 def _outlet(
@@ -866,6 +879,7 @@ def _outlet(
     merchant_cost: float | None,
     held: int,
     flipped: Supply,
+    effort: int,
     cut: float,
     config: Config,
 ) -> _Outlet:
@@ -878,7 +892,7 @@ def _outlet(
         room = max(0, room - held - sum(n for _, n in flipped))
         cap = _ceiling(rate.max_sale_price, merchant_cost)
         resale = _resale(supply, others, flipped, cut, config, cap)
-    return _Outlet(room, resale, vendor_price or 0, bound)
+    return _Outlet(room, resale, vendor_price or 0, bound, effort)
 
 
 @dataclass(frozen=True)
@@ -970,7 +984,8 @@ def _flip_step(
 ) -> _CraftBuy | None:
     """One more Flip to Craft of `plan`; None if the reagents can't be had, or if nothing
     needs buying, since that's a Craft Action. A held reagent is only used if there's
-    market data to value it by, and crafted units never are."""
+    market data to value it by, and crafted units never are. A reagent bought on the
+    Auction House costs the effort of buying each unit that doesn't stack (#73)."""
     cost = gold = 0.0
     takes, bought, buys = {}, {}, []
     for key, n in plan.needs.items():
@@ -990,7 +1005,7 @@ def _flip_step(
                 if cheapest is None:
                     return None
                 paid = sum(unit * q for unit, q in cheapest)
-                cost += paid
+                cost += paid + (n - take) * valuer.effort(key)
                 gold += paid
                 bought[key] = cheapest
                 buys.append(ReagentBuy(key, n - take, max(unit for unit, _ in cheapest)))
@@ -1203,6 +1218,7 @@ def _flips(
     vendor_price: int | None,
     merchant_cost: float | None,
     held: int,
+    effort: int,
     cut: float,
     config: Config,
 ) -> list[_VendorBuy | _FlipToSell]:
@@ -1219,7 +1235,9 @@ def _flips(
     dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
     taken at its word (#41), nor above what a merchant charges for it (#63). Nothing is
     bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
-    (#57). Anything else under the Vendor Price is bought to Vendor.
+    (#57). Anything else under the Vendor Price is bought to Vendor. Each unit bought
+    costs the `effort` of buying it, and one bought to Sell the effort of posting it too
+    (#73).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -1235,9 +1253,10 @@ def _flips(
         post_at = _post_at(supply, offers, prefix, config, cap)
         resale = None if post_at is None else post_at * (1 - cut)
         # Offers are cheapest first, so if the dearest unit clears the margin, all do.
-        if not _resells(resale, unit, vendor_price, config):
+        if not _resells(resale, unit, vendor_price, effort, config):
             continue
-        runs.append(_SellRun(prefix, post_at, sum((resale - u) * n for u, n in prefix)))
+        profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
+        runs.append(_SellRun(prefix, post_at, profit))
     buys: list[_VendorBuy | _FlipToSell] = []
     to_sell: Supply = []
     if runs:
@@ -1246,9 +1265,9 @@ def _flips(
         to_sell = flip.whole.units
     if vendor_price is not None:
         buys += [
-            _VendorBuy(item_key, unit, quantity, vendor_price - unit)
+            _VendorBuy(item_key, unit, quantity, vendor_price - effort - unit)
             for unit, quantity in _without(offers, to_sell)
-            if unit < vendor_price
+            if vendor_price - effort - unit > 0
         ]
     return buys
 
@@ -1493,14 +1512,17 @@ def _shopping_list(
     return [(r, taken.get(key, {})) for key, r in rows.items()]
 
 
-def _resells(resale: float | None, unit: float, vendor_price: int | None, config: Config) -> bool:
+def _resells(
+    resale: float | None, unit: float, vendor_price: int | None, effort: int, config: Config
+) -> bool:
     """Whether a unit bought at `unit` and resold for `resale` after the cut is a Flip to
-    Sell: it clears the Flip margin, and no vendor pays as much (that's a Flip to Vendor)."""
-    if resale is None or resale - unit < max(
+    Sell: less the `effort` of buying and of posting it (#73), it clears the Flip margin,
+    and no vendor pays as much (that's a Flip to Vendor, which isn't posted)."""
+    if resale is None or resale - 2 * effort - unit < max(
         unit * config.flip_min_margin_share, config.flip_min_margin_copper
     ):
         return False
-    return vendor_price is None or resale > vendor_price
+    return vendor_price is None or resale - effort > vendor_price
 
 
 def _buy_what_fits(
@@ -1525,6 +1547,7 @@ def _buy_what_fits(
             _resale_of(after, row.item_key),
             row.price,
             valuer.vendor.get(_item_id(row.item_key)),
+            valuer.effort(row.item_key),
             config,
         )
     ]
@@ -1536,7 +1559,7 @@ def _buy_what_fits(
             row = replace(
                 row,
                 post_at=after.post_at(row.item_key),
-                profit=row.quantity * resale - row.cost,
+                profit=row.quantity * (resale - 2 * valuer.effort(row.item_key)) - row.cost,
             )
         rows.append(row)
     return rows, after

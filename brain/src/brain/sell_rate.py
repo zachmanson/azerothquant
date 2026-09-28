@@ -70,6 +70,15 @@ def sell_rates(
     }
 
 
+def non_stacking(conn: sqlite3.Connection, market: Market) -> frozenset[str]:
+    """Item Keys that don't stack: no Listing of them ever seen in the Market had more
+    than one unit (#73). The same test Sell Rate's usual Sale Event size uses."""
+    most: dict[str, int] = {}
+    for listing in listings(conn, market):
+        most[listing.item_key] = max(most.get(listing.item_key, 0), listing.quantity)
+    return frozenset(item_key for item_key, q in most.items() if q == 1)
+
+
 def _typical_sale_size(market_size: float | None, quantities: list[int]) -> float:
     """What the Sale Size Prior shrinks an Item Key's average Sale Event size toward: the
     smaller of the Market's usual Sale Event size among Item Keys that stack and the Item

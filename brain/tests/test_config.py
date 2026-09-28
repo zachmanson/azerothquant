@@ -268,6 +268,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.post_undercut_copper == 1
     assert config.craft_min_gain == 0
     assert config.roi_hint == 0.2
+    assert config.non_stacking_effort_copper == 500
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -285,6 +286,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "post_undercut_copper = 0\n"
         "craft_min_gain = 50\n"
         "roi_hint = 0.5\n"
+        "non_stacking_effort_copper = 0\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -301,6 +303,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.post_undercut_copper == 0
     assert config.craft_min_gain == 50
     assert config.roi_hint == 0.5
+    assert config.non_stacking_effort_copper == 0
 
 
 @pytest.mark.parametrize(
@@ -333,6 +336,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("roi_hint", '"0.2"'),
         ("roi_hint", "true"),
         ("roi_hint", "-0.1"),
+        ("non_stacking_effort_copper", "-1"),
+        ("non_stacking_effort_copper", "0.5"),  # whole copper
+        ("non_stacking_effort_copper", "true"),
     ],
 )
 def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):

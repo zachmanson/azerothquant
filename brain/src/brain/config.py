@@ -88,6 +88,9 @@ DEFAULT_CRAFT_MIN_GAIN = 0
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
+# The hassle of an Item Key that doesn't stack (#73): each unit is its own buy and its own
+# post, so every unit a Flip buys, and every one it posts, costs this many copper.
+DEFAULT_NON_STACKING_EFFORT_COPPER = 500
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -149,6 +152,9 @@ class Config:
     craft_min_gain: float = DEFAULT_CRAFT_MIN_GAIN
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
+    # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
+    # doesn't stack.
+    non_stacking_effort_copper: int = DEFAULT_NON_STACKING_EFFORT_COPPER
 
 
 def load_config(path: Path) -> Config:
@@ -282,6 +288,12 @@ def load_config(path: Path) -> Config:
             f"{path}: post_undercut_copper must be a whole number of copper of at least 0, "
             f"got {undercut!r}"
         )
+    effort = raw.get("non_stacking_effort_copper", DEFAULT_NON_STACKING_EFFORT_COPPER)
+    if isinstance(effort, bool) or not isinstance(effort, int) or effort < 0:
+        raise ConfigError(
+            f"{path}: non_stacking_effort_copper must be a whole number of copper of at least 0, "
+            f"got {effort!r}"
+        )
     max_loss_share, cap_share, total_cap_share = (
         _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
         for key, default in (
@@ -328,6 +340,7 @@ def load_config(path: Path) -> Config:
         predictions_cap_share=total_cap_share,
         craft_min_gain=craft_min_gain,
         roi_hint=roi_hint,
+        non_stacking_effort_copper=effort,
     )
 
 

@@ -98,6 +98,14 @@
 # first [[installs]].
 # roi_hint = 0.20
 
+# Optional: the hassle of an Item Key that doesn't stack (#73), one no Listing was ever
+# seen with more than one unit of. Each unit is its own buy and its own post, so `brain
+# recommend` charges a Flip this many copper for every such unit it buys on the Auction
+# House and again for every one it posts: a Flip to Sell of 90 pays 180 times it, and a
+# buy to Vendor pays only for the buy. What held units are worth isn't changed. 0 turns
+# it off. Defaults to 500 (5 silver). Must come before the first [[installs]].
+# non_stacking_effort_copper = 500
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

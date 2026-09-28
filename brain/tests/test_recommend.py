@@ -737,6 +737,93 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
     ]
 
 
+# --- Non-stacking effort (#73) ---
+
+BELT = "item:6539::::::::20:1490"
+BELT_KEY = "6539"
+
+
+def selling_two_an_hour(item, *latest_rows, stacks):
+    """2 of `item` sell in an hour at 1000 each, out of 10 listed one at a time or, if it
+    `stacks`, as one stack of 10: 6 sell within the 3 h horizon. `latest_rows` come 2 h
+    later, beside the 8 left, after a gap too long for an Observation Window."""
+
+    def wall(n):
+        return [row(item, quantity=n, unit=1000)] if stacks else [row(item, unit=1000)] * n
+
+    return [
+        scan(T0, *wall(10)),
+        scan(T0 + HOUR, *wall(8)),
+        scan(T0 + 3 * HOUR, *wall(8), *latest_rows),
+    ]
+
+
+@pytest.mark.parametrize(("stacks", "flipped"), [(True, True), (False, False)])
+def test_a_flip_to_sell_of_units_that_dont_stack_pays_to_buy_and_post_each(db, stacks, flipped):
+    # 3 bought at 600 and posted at 999 make 349.05 each after the cut, well over the Flip
+    # margin. But units that never stack cost 5s to buy and 5s to post each, a loss.
+    result = run(
+        db,
+        selling_two_an_hour(BELT, *[row(BELT, unit=600)] * 3, stacks=stacks),
+        [character_read(money=GOLD)],
+    )
+
+    flip = Row(
+        BELT_KEY,
+        Action.SELL,
+        3,
+        price=600,
+        profit=pytest.approx(3 * (999 * 0.95 - 600)),
+        post_at=999,
+        sale_events=1,
+        cost=1800,
+    )
+    assert result[MARKET].shopping_list == ([flip] if flipped else [])
+
+
+@pytest.mark.parametrize(("vendor_price", "bought"), [(1100, False), (1101, True)])
+def test_a_unit_that_doesnt_stack_is_bought_to_vendor_only_if_it_pays_for_the_buy(
+    db, vendor_price, bought
+):
+    # Vendoring isn't a Listing, so only the buy costs 5s.
+    result = run(
+        db,
+        [scan(T0, row(BELT, unit=600))],
+        [character_read(money=GOLD, vendor_prices={6539: vendor_price})],
+    )
+
+    vendor = Row(BELT_KEY, Action.VENDOR, 1, price=600, profit=1, cost=600)
+    assert result[MARKET].shopping_list == ([vendor] if bought else [])
+
+
+@pytest.mark.parametrize(("stacks", "effort"), [(True, 0), (False, 500)])
+def test_a_flip_to_craft_pays_to_post_each_output_that_doesnt_stack(db, stacks, effort):
+    # 6 Belts sell within the horizon, posted at 999 for 949.05 after the cut, each made
+    # from 2 Linen bought at 100. Each Belt that doesn't stack costs 5s to post.
+    linen = row(quantity=20, unit=100)
+    result = run(
+        db,
+        selling_two_an_hour(BELT, linen, stacks=stacks),
+        [character_read(money=GOLD, recipes=[recipe(output=6539)])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.item_key, craft.action, craft.quantity) == (BELT_KEY, Action.CRAFT, 6)
+    assert craft.profit == pytest.approx(6 * (949.05 - effort - 200))
+
+
+@pytest.mark.parametrize(("stacks", "effort"), [(True, 0), (False, 500)])
+def test_a_flip_to_craft_pays_to_buy_each_reagent_that_doesnt_stack(db, stacks, effort):
+    # 6 Bolts, each from a Belt bought at 100. Each Belt that doesn't stack costs 5s to buy.
+    scans = linen_and_bolts_selling()
+    scans[1]["listings"] += [row(BELT, quantity=6, unit=100)] if stacks else [row(BELT)] * 6
+    result = run(db, scans, [character_read(money=GOLD, recipes=[recipe(reagents=((6539, 1),))])])
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.item_key, craft.action, craft.quantity) == (BOLT_KEY, Action.CRAFT, 6)
+    assert craft.profit == pytest.approx(6 * (949.05 - effort - 100))
+
+
 # --- The Sell Rate Prior (#25) ---
 
 
