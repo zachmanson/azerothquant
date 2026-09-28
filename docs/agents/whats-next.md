@@ -1,3 +1,13 @@
+2026-09-28 (later 7): #67, #73, #75 and #71 LANDED on main (fast-forward to e5f3745) and closed. The user couldn't get in game, so these are parked for when they're back at the PC:
+- Restart `brain watch` (stop all 3 brain.exe/python processes), then /reload. No new Addon files, so no client restart.
+- #75: a blocked Craft row's Note and tooltips say `no market data for <Name>` (not an item ID).
+- #71: after a Scan + reload, about 10 s later the chat line `The Brain should be done: Reload to see the new Scan.` prints and the Reload button pulses (with the table open). Read a few `Import took Xs` lines in the `brain watch` window and tune `Nudge.RELOAD_READY_AFTER` (Xs + 3 s settle + up to 1 s poll).
+- Optionally set `non_stacking_effort_copper` in config.toml (#73, default 500).
+
+Next, in order (none need the game):
+1. Triage #78, then #66 (low priority). /code-review + commit after each.
+2. Then needs-info: #33, #19, #38, #44, #45, #15, #14.
+
 2026-09-28 (later 6): #71 BUILT on branch claude/zen-mccarthy-xaqoze (not on main yet, issue still open), on top of #67 + #73 + #75. `brain watch` logs `Import took Xs` after each import (from noticing the file settled to Recommendations.lua written; not logged when every file failed; `cli.watch_step` takes an injected clock). Addon: `Nudge.whenReloadReady(unimported, after, ready, say)` waits `Nudge.RELOAD_READY_AFTER` (10 s) after a load with unimported Scans, then sets `Scanner.reloadReady()` and prints `The Brain should be done: Reload to see the new Scan.` once. The Reload button pulses (the Scan button's glow, now `Scanner.addPulse`/`setPulsing`) while reloadReady and no Scan is in flight; it only pulses while the Recommendation frame is shown. The spec's `(wrote Recommendations.lua)` suffix was dropped: installs without the Addon get no file (they get their own warning). Review leftovers (judgement calls, not done): the glow helpers live in Scanner.lua rather than a shared UI module (a new file needs a .toc change + client restart); the pytest feeds the clock exactly 3 values, so an extra `clock()` call breaks it. User to do: merge to main, close #67, #73, #75 and #71, restart `brain watch`, /reload (no new files, so no client restart). Then read a few real `Import took Xs` lines and tune RELOAD_READY_AFTER (add the 3 s settle + up to 1 s poll).
 
 Next, in order (none need the game):
