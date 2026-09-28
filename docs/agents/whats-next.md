@@ -1,3 +1,13 @@
+2026-09-28 (later 21): FILED #87 and #88 from the user's feedback on #86 (both needs-triage).
+- #87: Flips to Craft get their own Shopping List section and cap. In the one top-50 list sorted by profit, small craft options lose to big Flips to Sell.
+- #88 Buy Under: the Brain computes the most a reagent (per Known Recipe) or a Disenchant source (quality, item-level band, armor or weapon) is worth. A target shows only if past Scans saw Listings under it. The Addon flags Auction House results at or under a target live, since Scans every 15 minutes miss short-lived Listings. The user's example is the Beta Greater Magic Wand loop (DE item level 16-20 green weapons at about 21s or less, craft wands, vendor them). The reagent half doesn't need #76; the Disenchant half does. A comment on #76 links them. "Buy Under" is a proposed CONTEXT.md term (snipe is banned).
+
+Next, in order (none need the PC):
+1. /grilling #88 together with #76's open questions. Grill #87 too (small; it could land before #86 closes).
+2. #84 build (/tdd), then /code-review + commit.
+3. #77 build (/tdd), then /code-review + commit.
+4. The needs-triage queue: #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 20): #86 BUILT on branch claude/zen-mccarthy-xaqoze (issue still open). This came from the user's in-game feedback: the Shopping List spent all their gold as one greedy basket, where one big Flip crowded out other good options and a tail of copper Flips filled the rest. ADR-0017, and CONTEXT.md gets **Budget** plus updates to **Shopping List**, **Sell**, **Flip**, **Holdings**, **Sub-craft**, **Deposit** and **Best Exit Value**. ADR-0010 is superseded, and ADR-0011 and ADR-0009 (#69) are superseded in part.
 - Brain:
   - The Shopping List is **options**: one per Item Key's Flip to Sell or Flip to Vendor, and one per recipe's Flips to Craft (`_flips_to_craft(..., plan)`, fresh sources and outlet).
