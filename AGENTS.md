@@ -4,6 +4,8 @@ Read `docs/agents/whats-next.md` at the start of every session: it has the work 
 
 Global rules (workflow, sessions, handoff format) live in `~/.codex/AGENTS.md`.
 
+Committing and pushing straight to `main` is fine in this repo; no branch or PR needed.
+
 ## Agent skills
 
 ### Issue tracker
