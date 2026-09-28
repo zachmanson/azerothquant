@@ -261,7 +261,8 @@ def _realized(
 
 def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) -> _Moves:
     """The Brain's Recommendations as moves: Sell rows posted, Vendor rows vendored (for
-    nothing without a Vendor Price), no-data and Hold units held on to, and the Shopping
+    nothing without a Vendor Price), no-data and Hold units held on to, Disenchant units
+    held too (their Best Exit Value at the horizon is their mats', #76), and the Shopping
     List options and Prediction buys the player would take (`_taken`). A Flip to Craft's
     output is posted and vendored as it was valued; a Craft Action's is in the Holdings
     rows. Held units a taken Flip to Craft uses come off the least profitable Holdings
@@ -281,7 +282,7 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
             moves.posts.append(_Post(r.item_key, quantity, r.price))
         elif r.action is Action.VENDOR:
             moves.vendored += quantity * (r.price or 0)
-        elif r.action in (None, Action.HOLD):
+        elif r.action in (None, Action.HOLD, Action.DISENCHANT):
             moves.kept[r.item_key] += quantity
         elif r.action is Action.CRAFT:
             moves.spent += r.merchant_gold

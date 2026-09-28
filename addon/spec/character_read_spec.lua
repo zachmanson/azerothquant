@@ -91,6 +91,25 @@ describe("CharacterRead.build", function()
     assert.are.equal(1, read.vendorPricesMissing)
   end)
 
+  it("records the Item Info of held armor and weapons, which may never be on the Auction House", function()
+    -- #76: a bound green is only ever seen in the bags, and it can still be Disenchanted.
+    local GREEN = "|cff1eff00|Hitem:9999::::::::20:1490:::::::::|h[Green Chest]|h|r"
+    local chest = { quality = 2, itemLevel = 18, classID = 4, equipLoc = "INVTYPE_CHEST" }
+    local bags = {
+      { bag = 0, slot = 1, itemInfo = chest, info = { hyperlink = GREEN, stackCount = 1, isBound = true } },
+      {
+        bag = 0,
+        slot = 2,
+        itemInfo = { quality = 1, itemLevel = 5, classID = 7, equipLoc = "" },
+        info = { hyperlink = LINEN, stackCount = 20, isBound = false },
+      },
+    }
+
+    local read = CharacterRead.build(WHO, bags)
+
+    assert.are.same({ [9999] = chest }, read.itemInfo)
+  end)
+
   it("includes the Known Recipes of each profession read this session, and the profession list", function()
     local tailoring = { readAt = 1790449500, professionID = 197, professionName = "Tailoring", recipes = {} }
     local list = {

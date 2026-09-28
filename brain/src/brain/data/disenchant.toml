@@ -1,0 +1,358 @@
+# What Disenchanting an item yields, by Disenchant source group: quality (2 uncommon,
+# 3 rare, 4 epic), armor (classID 4) or weapon (classID 2), and item level (ADR-0018).
+#
+# Re-derived by hand from the WoWWiki tables, CC BY-SA:
+#   https://wowwiki-archive.fandom.com/wiki/Disenchanting_tables
+#   https://wowwiki-archive.fandom.com/wiki/Disenchanting (required skill, exclusions)
+# read from the Wayback Machine copies of 2025-01-21 and 2025-12-08. Only the Classic item
+# levels are kept. The wiki says it's outdated, and Forever may differ (e.g. its "Arcane
+# Salvager"): `brain disenchants` checks these against the player's own Disenchant
+# Results. A mismatch is fixed by editing this file, never automatically.
+#
+# Each mat: `chance` of getting it at all, then an even pick of `min_qty`..`max_qty`
+# ("80% 1-2x" is 40% 1x, 40% 2x). Expected qty per Disenchant: chance × (min + max) / 2.
+# Gaps: nothing listed for epic item levels 81+ (e.g. Naxxramas), so those have no
+# Disenchant way until a row is added.
+
+# The Enchanting skill needed, by the highest item level each value covers. Confirmed on
+# the Disenchanting page: 225 for item levels 61-99 (uncommon, rare) and 61-89 (epic),
+# 300 for epics of 90-92.
+required_skill = [
+  [20, 1], [25, 25], [30, 50], [35, 75], [40, 100], [45, 125], [50, 150], [55, 175],
+  [60, 200], [89, 225], [92, 300],
+]
+
+# Enchanter-made wands: green weapons that can't be Disenchanted.
+excluded_item_ids = [11287, 11288, 11289, 11290]
+# Shirts and tabards can't be Disenchanted. Neither can anything that can't be equipped
+# (an empty equip slot), whatever its class.
+excluded_equip_locs = ["INVTYPE_BODY", "INVTYPE_TABARD", "INVTYPE_NON_EQUIP_IGNORE"]
+
+# Mat item IDs: 10940 Strange Dust, 11083 Soul Dust, 11137 Vision Dust, 11176 Dream Dust,
+# 16204 Illusion Dust; 10938/10939 Lesser/Greater Magic Essence, 10998/11082 Astral,
+# 11134/11135 Mystic, 11174/11175 Nether, 16202/16203 Eternal; 10978/11084 Small/Large
+# Glimmering Shard, 11138/11139 Glowing, 11177/11178 Radiant, 14343/14344 Brilliant;
+# 20725 Nexus Crystal.
+
+# --- Uncommon armor: mostly dust. Uncommon shards are always 1x.
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [5, 15]
+mats = [
+  { item_id = 10940, chance = 0.80, min_qty = 1, max_qty = 2 },
+  { item_id = 10938, chance = 0.20, min_qty = 1, max_qty = 2 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [16, 20]
+mats = [
+  { item_id = 10940, chance = 0.75, min_qty = 2, max_qty = 3 },
+  { item_id = 10939, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 10978, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [21, 25]
+mats = [
+  { item_id = 10940, chance = 0.75, min_qty = 4, max_qty = 6 },
+  { item_id = 10998, chance = 0.15, min_qty = 1, max_qty = 2 },
+  { item_id = 10978, chance = 0.10, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [26, 30]
+mats = [
+  { item_id = 11083, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11082, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11084, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [31, 35]
+mats = [
+  { item_id = 11083, chance = 0.75, min_qty = 2, max_qty = 5 },
+  { item_id = 11134, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11138, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [36, 40]
+mats = [
+  { item_id = 11137, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11135, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11139, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [41, 45]
+mats = [
+  { item_id = 11137, chance = 0.75, min_qty = 2, max_qty = 5 },
+  { item_id = 11174, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11177, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [46, 50]
+mats = [
+  { item_id = 11176, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11175, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11178, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [51, 55]
+mats = [
+  { item_id = 11176, chance = 0.75, min_qty = 2, max_qty = 5 },
+  { item_id = 16202, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 14343, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [56, 60]
+mats = [
+  { item_id = 16204, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 16203, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 14344, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["armor"]
+levels = [61, 65]
+mats = [
+  { item_id = 16204, chance = 0.75, min_qty = 2, max_qty = 5 },
+  { item_id = 16203, chance = 0.20, min_qty = 2, max_qty = 3 },
+  { item_id = 14344, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+# --- Uncommon weapons: mostly essence.
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [6, 15]
+mats = [
+  { item_id = 10940, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 10938, chance = 0.80, min_qty = 1, max_qty = 2 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [16, 20]
+mats = [
+  { item_id = 10940, chance = 0.20, min_qty = 2, max_qty = 3 },
+  { item_id = 10939, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 10978, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [21, 25]
+mats = [
+  { item_id = 10940, chance = 0.15, min_qty = 4, max_qty = 6 },
+  { item_id = 10998, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 10978, chance = 0.10, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [26, 30]
+mats = [
+  { item_id = 11083, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11082, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11084, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [31, 35]
+mats = [
+  { item_id = 11083, chance = 0.20, min_qty = 2, max_qty = 5 },
+  { item_id = 11134, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11138, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [36, 40]
+mats = [
+  { item_id = 11137, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11135, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11139, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [41, 45]
+mats = [
+  { item_id = 11137, chance = 0.20, min_qty = 2, max_qty = 5 },
+  { item_id = 11174, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11177, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [46, 50]
+mats = [
+  { item_id = 11176, chance = 0.20, min_qty = 1, max_qty = 2 },
+  { item_id = 11175, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 11178, chance = 0.05, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [51, 55]
+mats = [
+  { item_id = 11176, chance = 0.22, min_qty = 2, max_qty = 5 },
+  { item_id = 16202, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 14343, chance = 0.03, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [56, 60]
+mats = [
+  { item_id = 16204, chance = 0.22, min_qty = 1, max_qty = 2 },
+  { item_id = 16203, chance = 0.75, min_qty = 1, max_qty = 2 },
+  { item_id = 14344, chance = 0.03, min_qty = 1, max_qty = 1 },
+]
+
+[[band]]
+quality = 2
+kinds = ["weapon"]
+levels = [61, 65]
+mats = [
+  { item_id = 16204, chance = 0.22, min_qty = 2, max_qty = 5 },
+  { item_id = 16203, chance = 0.75, min_qty = 2, max_qty = 3 },
+  { item_id = 14344, chance = 0.03, min_qty = 1, max_qty = 1 },
+]
+
+# --- Rare: one shard, armor and weapons alike.
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [1, 25]
+mats = [{ item_id = 10978, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [26, 30]
+mats = [{ item_id = 11084, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [31, 35]
+mats = [{ item_id = 11138, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [36, 40]
+mats = [{ item_id = 11139, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [41, 45]
+mats = [{ item_id = 11177, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [46, 50]
+mats = [{ item_id = 11178, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [51, 55]
+mats = [{ item_id = 14343, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 3
+kinds = ["armor", "weapon"]
+levels = [56, 65]
+mats = [
+  { item_id = 14344, chance = 0.995, min_qty = 1, max_qty = 1 },
+  { item_id = 20725, chance = 0.005, min_qty = 1, max_qty = 1 },
+]
+
+# --- Epic: shards up to item level 55, then Nexus Crystals.
+
+[[band]]
+quality = 4
+kinds = ["armor", "weapon"]
+levels = [40, 45]
+mats = [{ item_id = 11177, chance = 1.0, min_qty = 2, max_qty = 4 }]
+
+[[band]]
+quality = 4
+kinds = ["armor", "weapon"]
+levels = [46, 50]
+mats = [{ item_id = 11178, chance = 1.0, min_qty = 2, max_qty = 4 }]
+
+[[band]]
+quality = 4
+kinds = ["armor", "weapon"]
+levels = [51, 55]
+mats = [{ item_id = 14343, chance = 1.0, min_qty = 2, max_qty = 4 }]
+
+[[band]]
+quality = 4
+kinds = ["armor", "weapon"]
+levels = [56, 60]
+mats = [{ item_id = 20725, chance = 1.0, min_qty = 1, max_qty = 1 }]
+
+[[band]]
+quality = 4
+kinds = ["armor"]
+levels = [61, 80]
+mats = [{ item_id = 20725, chance = 1.0, min_qty = 1, max_qty = 2 }]
+
+[[band]]
+quality = 4
+kinds = ["weapon"]
+levels = [61, 75]
+mats = [{ item_id = 20725, chance = 1.0, min_qty = 1, max_qty = 2 }]
+
+# The wiki: item level 76-80 weapons give 1x 33% and 2x 67%.
+[[band]]
+quality = 4
+kinds = ["weapon"]
+levels = [76, 80]
+mats = [
+  { item_id = 20725, chance = 0.33, min_qty = 1, max_qty = 1 },
+  { item_id = 20725, chance = 0.67, min_qty = 2, max_qty = 2 },
+]

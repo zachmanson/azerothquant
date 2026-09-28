@@ -13,6 +13,7 @@
 -- Nothing that moves, uses or deletes items.
 local _, ns = ...
 local CharacterRead = ns.CharacterRead
+local Scan = ns.Scan
 local RecommendationTable = ns.RecommendationTable
 local Prune = ns.Prune
 local Chat = ns.Chat
@@ -63,7 +64,9 @@ local function readContainers(bags, into)
       -- The Vendor Price is read now, with the item, rather than at logout. GetItemInfo's
       -- 11th return; nil until the client has loaded the item.
       local sellPrice = info and select(11, getItemInfo(info.hyperlink))
-      into[#into + 1] = { bag = bag, slot = slot, info = info, sellPrice = sellPrice }
+      -- For its Disenchant source group (#76): a bound item never shows up in a Scan.
+      local disenchant = info and Scan.fromGetItemInfo(getItemInfo(info.hyperlink))
+      into[#into + 1] = { bag = bag, slot = slot, info = info, sellPrice = sellPrice, itemInfo = disenchant }
     end
   end
   return into

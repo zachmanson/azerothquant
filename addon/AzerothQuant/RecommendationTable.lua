@@ -141,6 +141,16 @@ function RecommendationTable.reagentLines(r, nameOf, holdersOf)
   return lines
 end
 
+-- A Disenchant's expected mats by name (#76). They're expected quantities, so they come
+-- in fractions.
+function RecommendationTable.matLines(r, nameOf)
+  local lines = {}
+  for _, mat in ipairs(r.mats or {}) do
+    lines[#lines + 1] = string.format("Expect %.2f %s", mat.quantity, nameFor(mat.itemKey, nameOf))
+  end
+  return lines
+end
+
 -- Which Characters hold an Item Key (#38), one line each in the Brain's order (by name),
 -- e.g. "On Kash-Patel: 12 bags, 30 bank (5 bound)". holders is the entry's held[itemKey].
 function RecommendationTable.holderLines(holders)
@@ -252,6 +262,9 @@ local function details(r, nameOf, held, holdersOf)
   if r.uses or r.buys then
     return RecommendationTable.reagentLines(r, nameOf, holdersOf)
   end
+  if r.mats then
+    return RecommendationTable.matLines(r, nameOf)
+  end
   local lines = RecommendationTable.roiLines(r, held[r.itemKey])
   if r.listings then
     lines[#lines + 1] = clicksLine(r)
@@ -300,11 +313,12 @@ local function craftNote(r)
 end
 
 -- A Hold only pays off if its Prediction comes true, so its profit isn't known (ADR-0006).
--- A Craft that can't be made (it uses nothing) says why.
+-- A Craft that can't be made (it uses nothing) says why. A Disenchant's note names mats by
+-- ID, so the summary keeps its Character and leaves the mats to the tooltip.
 local function holdingCells(r, name, nameOf)
   local profit = r.action == "Hold" and "unknown" or money(r.profit)
   local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r))
-    or RecommendationTable.note(r, nameOf) or ""
+    or (r.mats and ("on " .. r.character)) or RecommendationTable.note(r, nameOf) or ""
   return { name, r.action, tostring(r.quantity), money(r.price), profit, roiCell(r), note }
 end
 

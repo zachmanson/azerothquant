@@ -20,6 +20,7 @@ from pathlib import Path
 
 from brain.archive import Archive
 from brain.config import Config, Era
+from brain.disenchant import ItemInfo
 from brain.mailbox import (
     OUTCOME_KINDS,
     AuctionMail,
@@ -158,12 +159,27 @@ CREATE TABLE IF NOT EXISTS vendor_price (
     PRIMARY KEY (era, item_id)
 );
 
+-- What the client says about an itemID, from Scans and Character Reads: a Disenchant
+-- source group's inputs, kept only for armor and weapons that could be Disenchanted.
+CREATE TABLE IF NOT EXISTS item_info (
+    era TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    item_level INTEGER NOT NULL,
+    quality INTEGER NOT NULL,
+    class_id INTEGER NOT NULL,
+    equip_loc TEXT NOT NULL,   -- empty when it can't be equipped
+    seen_at INTEGER NOT NULL,  -- requestedAt or readAt of the Scan or Read it came from
+    PRIMARY KEY (era, item_id)
+);
+
 -- One row per profession window read carried on a Character Read (its professions map).
 CREATE TABLE IF NOT EXISTS known_profession (
     id INTEGER PRIMARY KEY,
     character_read_id INTEGER NOT NULL REFERENCES character_read (id),
     profession_id INTEGER NOT NULL,
-    read_at INTEGER NOT NULL   -- when the window was read; cooldowns are as of then
+    read_at INTEGER NOT NULL,  -- when the window was read; cooldowns are as of then
+    skill_level INTEGER,       -- NULL when the Read didn't say (before #76)
+    max_skill_level INTEGER
 );
 CREATE INDEX IF NOT EXISTS known_profession_by_read ON known_profession (character_read_id);
 
@@ -200,6 +216,9 @@ CREATE INDEX IF NOT EXISTS merchant_cost_by_read ON merchant_cost (character_rea
 
 # Enum.CraftingReagentType.Basic: the reagents a craft always uses up.
 _BASIC_REAGENT = 1
+
+# The Enchanting skill line's professionID.
+ENCHANTING = 333
 
 
 @dataclass(frozen=True)
@@ -341,6 +360,8 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     _add_column(conn, "character_read", "has_profession_list", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "auction_mail", "deposit", "INTEGER")  # #78
     _add_column(conn, "character_read", "budget", "INTEGER")  # #86
+    _add_column(conn, "known_profession", "skill_level", "INTEGER")  # #76
+    _add_column(conn, "known_profession", "max_skill_level", "INTEGER")  # #76
     return conn
 
 
@@ -421,9 +442,9 @@ def import_scans(
             archive.write(era, raw)
         with conn:
             _import_scan(conn, scan, era, config, report)
-            _record_vendor_prices(
-                conn, era, raw, scan.requested_at, f"Scan at {scan.requested_at}", report
-            )
+            source = f"Scan at {scan.requested_at}"
+            _record_vendor_prices(conn, era, raw, scan.requested_at, source, report)
+            _record_item_info(conn, era, raw, scan.requested_at, source, report)
     return report
 
 
@@ -698,14 +719,9 @@ def import_character_reads(
             archive.write_character_read(era, raw)
         with conn:
             _import_character_read(conn, raw, era, report)
-            _record_vendor_prices(
-                conn,
-                era,
-                raw,
-                raw["readAt"],
-                f"Character Read at {raw['readAt']} for {raw['character']}",
-                report,
-            )
+            source = f"Character Read at {raw['readAt']} for {raw['character']}"
+            _record_vendor_prices(conn, era, raw, raw["readAt"], source, report)
+            _record_item_info(conn, era, raw, raw["readAt"], source, report)
     return report
 
 
@@ -815,10 +831,17 @@ def _import_known_recipes(
         if not _whole(profession_id):
             report.warn(f"{source}: skipped a profession with no professionID.")
             continue
+        skill, max_skill = entry.get("skillLevel"), entry.get("maxSkillLevel")
         cursor = conn.execute(
-            "INSERT INTO known_profession (character_read_id, profession_id, read_at)"
-            " VALUES (?, ?, ?)",
-            (read_id, profession_id, read_at if _whole(read_at) else raw["readAt"]),
+            "INSERT INTO known_profession (character_read_id, profession_id, read_at,"
+            " skill_level, max_skill_level) VALUES (?, ?, ?, ?, ?)",
+            (
+                read_id,
+                profession_id,
+                read_at if _whole(read_at) else raw["readAt"],
+                skill if _whole(skill) else None,
+                max_skill if _whole(max_skill) else None,
+            ),
         )
         profession_row = cursor.lastrowid
         recipes = entry.get("recipes")
@@ -947,6 +970,47 @@ def _vendor_prices(raw: dict) -> tuple[dict[int, int], int]:
             continue
         prices[item_id] = price
     return prices, len(entries) - len(prices)
+
+
+def _record_item_info(
+    conn: sqlite3.Connection, era: Era, raw: dict, seen_at: int, source: str, report: ImportReport
+) -> None:
+    infos, unreadable = _item_info(raw)
+    if unreadable:
+        report.warn(f"{source}: skipped {unreadable} Item Info entries the Brain can't read.")
+    conn.executemany(
+        # The newest one wins, like Vendor Prices.
+        "INSERT INTO item_info (era, item_id, item_level, quality, class_id, equip_loc, seen_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (era, item_id) DO UPDATE SET"
+        " item_level = excluded.item_level, quality = excluded.quality,"
+        " class_id = excluded.class_id, equip_loc = excluded.equip_loc,"
+        " seen_at = excluded.seen_at WHERE excluded.seen_at >= item_info.seen_at",
+        [
+            (era.value, item_id, i.item_level, i.quality, i.class_id, i.equip_loc, seen_at)
+            for item_id, i in infos.items()
+        ],
+    )
+
+
+def _item_info(raw: dict) -> tuple[dict[int, ItemInfo], int]:
+    """The Scan's or Read's itemID -> ItemInfo map, keyed however it arrived (see _vendor_prices),
+    and how many entries in it couldn't be read."""
+    entries = raw.get("itemInfo", {})  # Scans from before #76 have none
+    if isinstance(entries, list):
+        entries = dict(enumerate(entries, start=1))
+    if not isinstance(entries, dict):
+        return {}, 1
+    infos = {}
+    for item_id, entry in entries.items():
+        if isinstance(item_id, str) and item_id.isdigit():
+            item_id = int(item_id)
+        if not _whole(item_id) or not isinstance(entry, dict):
+            continue
+        fields = [entry.get(k) for k in ("itemLevel", "quality", "classID")]
+        equip_loc = entry.get("equipLoc", "")
+        if all(_whole(f) for f in fields) and isinstance(equip_loc, str):
+            infos[item_id] = ItemInfo(*fields, equip_loc)
+    return infos, len(entries) - len(infos)
 
 
 def _whole_copper(value: object) -> bool:
@@ -1181,6 +1245,15 @@ def vendor_prices(conn: sqlite3.Connection, era: Era) -> dict[int, int]:
     return dict(rows)
 
 
+def item_info(conn: sqlite3.Connection, era: Era) -> dict[int, ItemInfo]:
+    """What the client said about each itemID, as last seen in the Era."""
+    rows = conn.execute(
+        "SELECT item_id, item_level, quality, class_id, equip_loc FROM item_info WHERE era = ?",
+        (era.value,),
+    )
+    return {item_id: ItemInfo(*fields) for item_id, *fields in rows}
+
+
 def _market_characters(conn: sqlite3.Connection, market: Market) -> set[str]:
     """The Characters in the Market, by the faction of each one's latest Character Read."""
     rows = conn.execute(
@@ -1210,12 +1283,29 @@ def merchant_costs(conn: sqlite3.Connection, market: Market) -> dict[int, float]
     return lowest
 
 
-def known_recipes(conn: sqlite3.Connection, market: Market) -> list[KnownRecipe]:
-    """The current Known Recipes of every Character in the Market: for each profession,
-    the ones in the latest Character Read that has that profession's window read. Only
-    the professions the Character has as of its latest Read that could say count, so a
-    dropped profession's recipes don't come back."""
+def enchanting_skills(conn: sqlite3.Connection, market: Market) -> dict[str, int]:
+    """The Enchanting skill of each of the Market's Characters that still has Enchanting,
+    from its latest Character Read with an Enchanting window that says it."""
+    has = _professions(conn, market)
     characters = _market_characters(conn, market)
+    latest: dict[str, tuple[int, int]] = {}
+    for character, read_at, skill in conn.execute(
+        "SELECT r.character, r.read_at, p.skill_level"
+        " FROM known_profession p JOIN character_read r ON p.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.era = ? AND p.profession_id = ? AND p.skill_level IS NOT NULL",
+        (market.realm, market.era.value, ENCHANTING),
+    ):
+        if character not in latest or read_at > latest[character][0]:
+            latest[character] = (read_at, skill)
+    return {
+        character: skill
+        for character, (_, skill) in sorted(latest.items())
+        if character in characters and ENCHANTING in has.get(character, ())
+    }
+
+
+def _professions(conn: sqlite3.Connection, market: Market) -> dict[str, set[int]]:
+    """The professionIDs each Character has, as of its latest Read that could say."""
     has: dict[str, set[int]] = {}
     for character, profession_id in conn.execute(
         "SELECT r.character, c.profession_id FROM character_read r"
@@ -1226,6 +1316,16 @@ def known_recipes(conn: sqlite3.Connection, market: Market) -> list[KnownRecipe]
         (market.realm, market.era.value),
     ):
         has.setdefault(character, set()).add(profession_id)
+    return has
+
+
+def known_recipes(conn: sqlite3.Connection, market: Market) -> list[KnownRecipe]:
+    """The current Known Recipes of every Character in the Market: for each profession,
+    the ones in the latest Character Read that has that profession's window read. Only
+    the professions the Character has as of its latest Read that could say count, so a
+    dropped profession's recipes don't come back."""
+    characters = _market_characters(conn, market)
+    has = _professions(conn, market)
     current: dict[tuple[str, int], tuple[int, int, int]] = {}
     for character, profession_id, row, read_at, character_read_at in conn.execute(
         "SELECT r.character, p.profession_id, p.id, p.read_at, r.read_at"

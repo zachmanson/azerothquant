@@ -60,11 +60,13 @@ local function itemKey(link)
 end
 
 -- A Craft has no price of its own: it names its Character, and its reagents follow as
--- lines of their own. One that can't be made says why. A Hold's worth hangs on its
--- Prediction (ADR-0006).
+-- lines of their own. One that can't be made says why. A Disenchant is the same, with its
+-- expected mats (#76). A Hold's worth hangs on its Prediction (ADR-0006).
 local function holdingLine(r, nameOf)
   local head = "AQ: " .. r.action .. " " .. r.quantity
-  if r.action == "Craft" then
+  if r.action == "Disenchant" then
+    return head .. " on " .. r.character
+  elseif r.action == "Craft" then
     return r.uses and (head .. " on " .. r.character)
       or (head .. " (" .. RecommendationTable.note(r, nameOf) .. ")")
   elseif r.action == "Hold" then
@@ -97,6 +99,7 @@ local function linesFor(entry, keys, nameOf)
       if keys[r.itemKey] and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r, nameOf)
         local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf, holdersOf)
+          or r.mats and RecommendationTable.matLines(r, nameOf)
           or RecommendationTable.roiLines(r, held[r.itemKey])
         for _, line in ipairs(details) do
           lines[#lines + 1] = line

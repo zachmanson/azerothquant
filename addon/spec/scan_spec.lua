@@ -190,6 +190,46 @@ describe("Scan.build", function()
     assert.are.equal(1, scan.vendorPricesMissing)
   end)
 
+  it("records the Item Info of each distinct armor or weapon that could be Disenchanted", function()
+    -- #76: GetItemInfo's quality, itemLevel, classID and equipLoc, by itemID.
+    local infos = {
+      [9768] = { quality = 2, itemLevel = 18, classID = 4, equipLoc = "INVTYPE_WAIST" },
+      [2680] = { quality = 1, itemLevel = 5, classID = 0, equipLoc = "" }, -- food: left out
+      [4306] = { quality = 2, itemLevel = 25, classID = 7, equipLoc = "" }, -- a green trade good
+    }
+    local lookups = 0
+    local function itemInfo(itemID)
+      lookups = lookups + 1
+      return infos[itemID]
+    end
+    local rows = {
+      row({ link = NATURE_PROT }),
+      row({ link = NATURE_PROT, buyout = 900 }),
+      row(),
+      row({ link = "|cnIQ2:|Hitem:4306::::::::20:1490:::::::::|h[Silk Cloth]|h|r" }),
+      row({ link = "|cnIQ2:|Hitem:1234::::::::20:1490:::::::::|h[Not Loaded]|h|r" }),
+    }
+
+    local scan = Scan.build(REQUEST, rows, "Kash", nil, itemInfo)
+
+    assert.are.same({
+      [9768] = { itemLevel = 18, quality = 2, classID = 4, equipLoc = "INVTYPE_WAIST" },
+    }, scan.itemInfo)
+    assert.are.equal(4, lookups) -- once per itemID
+    -- Retried on a later Scan, like a missing Vendor Price.
+    assert.are.equal(1, scan.itemInfoMissing)
+  end)
+
+  it("reads an item's Item Info from GetItemInfo's returns", function()
+    -- name, link, quality, itemLevel, minLevel, type, subType, stackCount, equipLoc,
+    -- texture, sellPrice, classID
+    assert.are.same(
+      { quality = 2, itemLevel = 18, classID = 4, equipLoc = "INVTYPE_WAIST" },
+      Scan.fromGetItemInfo("Belt", "link", 2, 18, 13, "Armor", "Leather", 1, "INVTYPE_WAIST", 1, 245, 4)
+    )
+    assert.is_nil(Scan.fromGetItemInfo()) -- not loaded yet
+  end)
+
   it("stores no seller or bid fields", function()
     local rows = {
       row({ owner = "Kash", ownerFullName = "Kash Patel", bidAmount = 250, minBid = 200, minIncrement = 5 }),

@@ -116,6 +116,23 @@ describe("RecommendationTable.reagentLines", function()
   end)
 end)
 
+describe("RecommendationTable.matLines", function()
+  it("names a Disenchant's expected mats, which come in fractions", function()
+    local disenchant = {
+      itemKey = "9999",
+      action = "Disenchant",
+      quantity = 2,
+      character = "Kash-Patel",
+      mats = { { itemKey = "2589", quantity = 3.75 }, { itemKey = "10939", quantity = 0.6 } },
+    }
+
+    assert.are.same({
+      "Expect 3.75 Linen Cloth",
+      "Expect 0.60 item:10939",
+    }, RecommendationTable.matLines(disenchant, names))
+  end)
+end)
+
 describe("RecommendationTable.reagentLines' mail lines", function()
   local craft = {
     itemKey = "2997",

@@ -10,6 +10,7 @@ from brain.recommend import (
     BlockReason,
     CharacterHolding,
     MarketRecommendations,
+    MatYield,
     ReagentBuy,
     ReagentUse,
     Row,
@@ -377,6 +378,38 @@ def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
     assert out.splitlines() == [
         "2840	2	Alt-One",
         "2996	1	Kash-Patel",
+    ]
+
+
+def test_a_real_lua_reads_a_disenchants_expected_mats(tmp_path, lua):
+    # #76: fractions, since they're expected quantities.
+    file = tmp_path / FILE_NAME
+    disenchant = Row(
+        "9999",
+        Action.DISENCHANT,
+        2,
+        profit=535.0,
+        note="on Kash-Patel: expect 3.75 of 10940, 0.60 of 10939",
+        character="Kash-Patel",
+        mats=(MatYield("10940", 3.75), MatYield("10939", 0.6)),
+    )
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[disenchant])]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local row = r.recommendations["Quel\'Thalas"].Horde.holdings[1] '
+        "print(row.action, row.character) "
+        "for _, m in ipairs(row.mats) do print(m.itemKey, m.quantity) end",
+    )
+
+    assert out.splitlines() == [
+        "Disenchant	Kash-Patel",
+        "10940	3.75",
+        "10939	0.6",
     ]
 
 

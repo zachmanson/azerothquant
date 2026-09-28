@@ -31,6 +31,29 @@ local NEUTRAL_AUCTIONEERS = {
   [15681] = true, -- Auctioneer O'reely, Booty Bay
 }
 
+-- GetItemInfo's classID for weapons and armor: the only items that can be Disenchanted.
+local DISENCHANTABLE_CLASSES = { [2] = true, [4] = true }
+
+-- An item's { quality, itemLevel, classID, equipLoc } from GetItemInfo's returns, or nil
+-- when the client hasn't loaded the item yet.
+function Scan.fromGetItemInfo(...)
+  local _, _, quality, itemLevel, _, _, _, _, equipLoc, _, _, classID = ...
+  if quality == nil then
+    return nil
+  end
+  return { quality = quality, itemLevel = itemLevel, classID = classID, equipLoc = equipLoc }
+end
+
+-- What the Brain needs to put an item in a Disenchant source group (#76), from
+-- { quality, itemLevel, classID, equipLoc }, or nil for anything but an uncommon to epic
+-- weapon or armor piece, which are left out to keep Scans and Reads small.
+function Scan.disenchantInfo(info)
+  if not (DISENCHANTABLE_CLASSES[info.classID] and info.quality >= 2 and info.quality <= 4) then
+    return nil
+  end
+  return { itemLevel = info.itemLevel, quality = info.quality, classID = info.classID, equipLoc = info.equipLoc }
+end
+
 -- The Market's faction is the Auction House's, not the player's: a Horde player at
 -- Booty Bay is trading in the Neutral Market. npcGUID is UnitGUID("npc") at the AH.
 function Scan.marketFaction(npcGUID, playerFaction)
@@ -50,15 +73,19 @@ end
 -- playerName: UnitName("player"), to recognize the player's own Listings.
 -- sellPrice(itemID): the item's Vendor Price in copper (GetItemInfo's sellPrice), or nil
 -- when the client hasn't loaded the item yet.
+-- itemInfo(itemID): { quality, itemLevel, classID, equipLoc } from GetItemInfo, or nil
+-- when the client hasn't loaded the item yet.
 -- Returns the Scan as stored in SavedVariables. buyout stays whole-auction; the Brain
 -- divides by quantity for the unit buyout.
-function Scan.build(request, rows, playerName, sellPrice)
+function Scan.build(request, rows, playerName, sellPrice, itemInfo)
   local listings = {}
   local droppedRows = 0
   -- Vendor Price belongs to the itemID, so every suffix of an item shares one entry.
   -- 0 means a vendor won't buy it; the Brain decides what that means.
   local vendorPrices, looked = {}, {}
   local vendorPricesMissing = 0
+  local infos, infoLooked = {}, {}
+  local itemInfoMissing = 0
   for _, r in ipairs(rows) do
     local item = itemString(r.link)
     local itemID = item and tonumber(item:match("^item:(%d+)"))
@@ -67,6 +94,15 @@ function Scan.build(request, rows, playerName, sellPrice)
       vendorPrices[itemID] = sellPrice(itemID)
       if vendorPrices[itemID] == nil then
         vendorPricesMissing = vendorPricesMissing + 1
+      end
+    end
+    if itemID and itemInfo and not infoLooked[itemID] then
+      infoLooked[itemID] = true
+      local info = itemInfo(itemID)
+      if info == nil then
+        itemInfoMissing = itemInfoMissing + 1
+      else
+        infos[itemID] = Scan.disenchantInfo(info)
       end
     end
     if not item then
@@ -101,6 +137,8 @@ function Scan.build(request, rows, playerName, sellPrice)
     listings = listings,
     vendorPrices = vendorPrices,
     vendorPricesMissing = vendorPricesMissing,
+    itemInfo = infos,
+    itemInfoMissing = itemInfoMissing,
   }
 end
 

@@ -8,6 +8,8 @@
 local _, ns = ...
 ns = ns or {}
 
+local Scan = ns.Scan or require("Scan")
+
 local CharacterRead = {}
 
 -- Filled slots only, each as { bag, slot, link, count, isBound }.
@@ -50,11 +52,27 @@ local function vendorPrices(slotLists)
   return prices, missing
 end
 
+-- The Item Info of every held item that could be Disenchanted, by itemID (#76). A bound
+-- one never shows up in a Scan.
+local function itemInfo(slotLists)
+  local infos = {}
+  for _, slots in ipairs(slotLists) do
+    for _, s in ipairs(slots) do
+      local itemID = s.info and tonumber(s.info.hyperlink:match("|Hitem:(%d+)"))
+      if itemID and s.itemInfo then
+        infos[itemID] = Scan.disenchantInfo(s.itemInfo)
+      end
+    end
+  end
+  return infos
+end
+
 -- who: { readAt, realm, character, faction, money, budget }, where budget is the copper the
 -- player will spend in this Character's Market (#86), or nil for all its gold.
--- bagSlots: one per slot, { bag, slot, info, sellPrice }, where info is what
--- C_Container.GetContainerItemInfo returns (nil for an empty slot) and sellPrice is
--- the item's Vendor Price, read along with it (nil if the client hadn't loaded it).
+-- bagSlots: one per slot, { bag, slot, info, sellPrice, itemInfo }, where info is what
+-- C_Container.GetContainerItemInfo returns (nil for an empty slot), sellPrice is the
+-- item's Vendor Price and itemInfo its { quality, itemLevel, classID, equipLoc }, both
+-- read along with it (nil if the client hadn't loaded it).
 -- bank: { readAt, slots } from the last time the bank was read while open this
 -- session, or nil if it wasn't opened. Stale bank contents are never carried forward.
 -- professions: KnownRecipes entries by professionID, the latest read of each profession
@@ -64,7 +82,8 @@ end
 -- merchantCosts: MerchantCosts read from every merchant visited this session. Left out of
 -- the Read when there are none.
 function CharacterRead.build(who, bagSlots, bank, professions, professionList, merchantCosts)
-  local prices, missing = vendorPrices({ bagSlots, bank and bank.slots or {} })
+  local slotLists = { bagSlots, bank and bank.slots or {} }
+  local prices, missing = vendorPrices(slotLists)
   return {
     readAt = who.readAt,
     realm = who.realm,
@@ -77,6 +96,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList, m
     bank = bank and items(bank.slots),
     vendorPrices = prices,
     vendorPricesMissing = missing,
+    itemInfo = itemInfo(slotLists),
     professions = professions and next(professions) and professions or nil,
     professionList = professionList,
     merchantCosts = merchantCosts and next(merchantCosts) and merchantCosts or nil,

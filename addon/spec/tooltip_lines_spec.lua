@@ -101,6 +101,24 @@ describe("TooltipLines.forLink", function()
     )
   end)
 
+  it("gives a Disenchant its Character and a line per expected mat, since it has no price", function()
+    local r = recs({
+      holdings = {
+        {
+          itemKey = "9999",
+          action = "Disenchant",
+          quantity = 2,
+          profit = 535,
+          note = "on Kash-Patel: expect 3.75 of 2589",
+          character = "Kash-Patel",
+          mats = { { itemKey = "2589", quantity = 3.75 } },
+        },
+      },
+    })
+
+    assert.are.same({ "AQ: Disenchant 2 on Kash-Patel", "Expect 3.75 Linen Cloth" }, linesFor(r, "item:9999"))
+  end)
+
   it("follows a Craft's reagents with what to mail its crafter", function()
     local r = recs({
       holdings = {

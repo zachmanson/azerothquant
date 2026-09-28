@@ -119,10 +119,15 @@ local function sellPrice(itemID)
   return (select(11, getItemInfo(itemID)))
 end
 
+-- The Item Info a Disenchant source group needs (#76). nil until the client has loaded it.
+local function itemInfo(itemID)
+  return Scan.fromGetItemInfo(getItemInfo(itemID))
+end
+
 local function finish(rows)
   cancel(noResponseTimer)
   pending.readAt = time()
-  local scan = Scan.build(pending, rows, UnitName("player"), sellPrice)
+  local scan = Scan.build(pending, rows, UnitName("player"), sellPrice, itemInfo)
   table.insert(db.scans, scan)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false

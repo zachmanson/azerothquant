@@ -152,6 +152,8 @@ def _row(row: Row) -> dict[str, object]:
         out["uses"] = [{"itemKey": u.item_key, "quantity": u.quantity} for u in row.uses]
     if row.blocked:
         out["blocked"] = _blocked(row.blocked)
+    if row.mats:
+        out["mats"] = [{"itemKey": m.item_key, "quantity": m.quantity} for m in row.mats]
     if row.via:
         out["via"] = [
             {"itemKey": v.item_key, "crafts": v.crafts, "character": v.character} for v in row.via

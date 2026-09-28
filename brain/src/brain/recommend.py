@@ -13,11 +13,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from functools import cached_property
+from functools import cache, cached_property
 from itertools import groupby
 from types import MappingProxyType
 
 from brain.config import Config
+from brain.disenchant import DisenchantTable, ItemInfo, load_table
 from brain.fair_value import Supply, fair_value
 from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
 from brain.history import (
@@ -25,7 +26,9 @@ from brain.history import (
     KnownRecipe,
     Market,
     character_markets,
+    enchanting_skills,
     holdings,
+    item_info,
     known_recipes,
     listings,
     market_budget,
@@ -49,7 +52,17 @@ class Action(StrEnum):
     # From held reagents (ADR-0008), or on the Shopping List a Flip to Craft that buys the
     # missing ones (ADR-0009). A short reagent can be Sub-crafted first (ADR-0014).
     CRAFT = "Craft"
+    # A held unit into its expected mats, by a Character with the Enchanting skill (#76).
+    DISENCHANT = "Disenchant"
     HOLD = "Hold"  # only ever under a Prediction (ADR-0006)
+
+
+@dataclass(frozen=True)
+class MatYield:
+    """A Disenchant row's expected `quantity` of one mat (ADR-0018)."""
+
+    item_key: str
+    quantity: float
 
 
 @dataclass(frozen=True)
@@ -134,7 +147,10 @@ class Row:
     # wrong and the units are let go at today's prices.
     max_loss: float | None = None
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
-    character: str = ""  # a Craft's Character, the one that knows the recipe
+    # A Craft's Character, the one that knows the recipe, or a Disenchant's, the one with
+    # the Enchanting skill.
+    character: str = ""
+    mats: tuple[MatYield, ...] = ()  # a Disenchant's expected mats
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
     blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
     via: tuple[SubCraft, ...] = ()  # a Craft's Sub-crafts, deepest first (#33)
@@ -398,11 +414,16 @@ def recommend_market(
     )
     shopping = _options(buys, crafts, spend, config.shopping_list_rows, config.craft_list_rows)
     crafted = crafting.counts
-    rows = [
-        _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
-        for item_key, holding in held.items()
-        for row in valuer.rows(item_key, holding)
-    ] + crafting.rows
+    disenchanted, left = _disenchants(held, valuer, set(under))
+    rows = (
+        [
+            _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
+            for item_key, holding in left.items()
+            for row in valuer.rows(item_key, holding)
+        ]
+        + disenchanted
+        + crafting.rows
+    )
     graded = grades(conn, config, market, predictions, now)
     pooled = pooled_return(graded)
     caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
@@ -559,7 +580,7 @@ def exit_values(
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
     valuer, _ = _valuer(conn, config, market, scan, unbound=_unbound_units(dict(held)))
-    return {item_key: valuer.worth(item_key, h) for item_key, h in held.items()}
+    return {item_key: valuer.best_exit(item_key, h) for item_key, h in held.items()}
 
 
 def deposit_of(conn: sqlite3.Connection, config: Config, market: Market) -> Callable[[str], float]:
@@ -599,8 +620,38 @@ def _valuer(
         non_stacking(conn, market),
         deposits(linked),
         config,
+        disenchanting=_Disenchanting(
+            _disenchant_table(), item_info(conn, market.era), enchanting_skills(conn, market)
+        ),
     )
     return valuer.flips(under, unbound)
+
+
+@cache
+def _disenchant_table() -> DisenchantTable:
+    return load_table()
+
+
+@dataclass(frozen=True)
+class _Disenchanting:
+    """Who in a Market can Disenchant what (#76): an item's Disenchant source group from
+    its Item Info, gated by the Characters' Enchanting skill like a Known Recipe."""
+
+    table: DisenchantTable
+    info: Mapping[int, ItemInfo]
+    skills: Mapping[str, int]  # Enchanting skill by Character
+
+    def way(self, item_key: str) -> tuple[str, dict[str, float]] | None:
+        """The Character to Disenchant an Item Key, and the expected mats of one
+        Disenchant by Item Key, or None if nobody can."""
+        item_id = item_id_of(item_key)
+        info = self.info.get(item_id)
+        group = self.table.group(item_id, info) if info else None
+        need = self.table.required_skill(info.item_level) if group else None
+        able = sorted(c for c, skill in self.skills.items() if need is not None and skill >= need)
+        if not able:
+            return None
+        return able[0], {str(mat): q for mat, q in group.expected.items()}
 
 
 class _Valuer:
@@ -621,11 +672,13 @@ class _Valuer:
         deposits: dict[str, float],
         config: Config,
         held: Mapping[str, int] = MappingProxyType({}),
+        disenchanting: _Disenchanting | None = None,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
+        self.disenchanting = disenchanting
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
@@ -643,6 +696,7 @@ class _Valuer:
             self.deposits,
             self._config,
             self.held if held is None else held,
+            self.disenchanting,
         )
 
     def deposit(self, item_key: str) -> float:
@@ -754,6 +808,81 @@ class _Valuer:
                 for r in self.rows(item_key, holding)
             )
         return self._worth[item_key, holding]
+
+    def best_exit(self, item_key: str, holding: Holding) -> float:
+        """`worth`, with the Disenchant way too: Best Exit Value (#76)."""
+        rows, left = _disenchants({item_key: holding}, self)
+        return sum(r.profit for r in rows) + self.worth(item_key, left[item_key])
+
+    def worth_with(self, item_key: str, holding: Holding, extra: float) -> float:
+        """`worth` of `holding` plus `extra` unbound units, a fraction of a unit counting
+        that fraction of the next whole unit's worth (expected Disenchant mats, #76)."""
+        whole = math.floor(extra)
+        below = self.worth(item_key, _plus(holding, Holding(bags=whole)))
+        if extra == whole:
+            return below
+        above = self.worth(item_key, _plus(holding, Holding(bags=whole + 1)))
+        return below + (extra - whole) * (above - below)
+
+
+def _disenchants(
+    held: Mapping[str, Holding], valuer: _Valuer, under: set[str] = frozenset()
+) -> tuple[list[Row], dict[str, Holding]]:
+    """The Disenchant Actions (#76) and what's left of `held` after them. Item Keys
+    `under` a Prediction are Held instead.
+
+    The same marginal rule as Craft (ADR-0008): each step Disenchants the one unit that
+    gains the most, its expected mats' worth less what the unit would bring by Sell or
+    Vendor, until no unit gains. A mat's worth is that of its Holdings with the expected
+    mats added, on top of the ones earlier steps are expected to yield, a fraction of a unit
+    counting that fraction of the next whole unit. Bound units go first, since they'd only
+    be Vendored.
+    """
+    left = dict(held)
+    ways = {
+        key: way
+        for key in held
+        if key not in under
+        and valuer.disenchanting
+        and (way := valuer.disenchanting.way(key)) is not None
+    }
+    added: Counter[str] = Counter()  # expected mats from the steps so far, in fractions
+    done: Counter[str] = Counter()
+    proceeds: Counter[str] = Counter()
+    while True:
+        best = None
+        for key, (_, mats) in ways.items():
+            if not _units(left[key]):
+                continue
+            value = sum(
+                valuer.worth_with(mat, held.get(mat, Holding()), added[mat] + q)
+                - valuer.worth_with(mat, held.get(mat, Holding()), added[mat])
+                for mat, q in mats.items()
+            )
+            gain = value - (valuer.worth(key, left[key]) - valuer.worth(key, _take(left[key], 1)))
+            if gain > 0 and (best is None or gain > best[0]):
+                best = (gain, key, value)
+        if best is None:
+            break
+        _, key, value = best
+        left[key] = _take(left[key], 1)
+        added.update(ways[key][1])
+        done[key] += 1
+        proceeds[key] += value
+    rows = [
+        Row(
+            key,
+            Action.DISENCHANT,
+            n,
+            profit=proceeds[key],
+            note=f"on {ways[key][0]}: expect "
+            + ", ".join(f"{q * n:.2f} of {mat}" for mat, q in ways[key][1].items()),
+            character=ways[key][0],
+            mats=tuple(MatYield(mat, q * n) for mat, q in ways[key][1].items()),
+        )
+        for key, n in done.items()
+    ]
+    return rows, left
 
 
 def _merchant(conn: sqlite3.Connection, market: Market) -> dict[str, float]:
