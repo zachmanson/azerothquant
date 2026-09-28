@@ -1,3 +1,11 @@
+2026-09-28 (later 31): #98 GRILLED (the spec is on the issue), ready-for-agent, `core`. The Shopping List tab only (Flips to Sell and Flips to Vendor; the Flips to Craft tab is unchanged). Each row gets `listings`, `posts` and `days`. Per click = Profit ÷ (Listings bought + stacks posted at the usual Sale Event size); Per day = Profit ÷ days until the run's last unit sells, held units queued ahead (a Flip to Vendor shows "now"); ROI = Profit ÷ Cost. The cut keeps a row in the top 50 on ANY of Profit/Per click/Per day/ROI. The buying order, Budgets, Sale Horizon and replay are unchanged. Addon: sortable columns, opens on Profit, tooltip `12 Listings + 3 posts, sells in ~2.5 days`. Gotcha: `_without` merges same-price Listings, so count Listings before merging.
+Mix-up this session (now undone): I took the user's #98 answers as answers about #90/#91, and posted and then withdrew specs there. #90 and #91 are still needs-triage/`later`, and #99 was closed as not planned. #90 still has its Nov 4 deadline: ask the user.
+
+Next, in order:
+1. #98 build (/tdd), then /code-review + commit. This is the last core item that needs no PC.
+2. At the PC: the (later 30) list, the (later 27) client restart and the #85 checklist, plus #86, #18 and #51.
+3. Once `core` is empty: ask whether #90 or #97 move to `core`.
+
 2026-09-28 (later 30): #95 and #96 BUILT here (no PC), both labelled needs-pc for the in-game checks.
 - #95 (d832a11): time-left buckets now default to Classic's <30m, 30m-2h, 2-8h, 8-24h. Matching and expiry read these at import, so a `brain rebuild` is needed. Also check that brain/config.toml doesn't set `time_left_max_minutes`.
 - #96: when a tooltip's link finds no lines, `TooltipLines.forItemName` matches the Market's Item Keys of that itemID by the row's name. The name comes from `owner.rowData.itemKey` via `C_AuctionHouse.GetItemKeyInfo`, else the tooltip's title line. That owner shape is a guess from retail's AH UI. The fallback covers it if the title shows the suffixed name.
