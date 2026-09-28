@@ -3,7 +3,7 @@ from pathlib import Path
 
 from brain.config import Era
 from brain.history import Market
-from brain.recommend import Action, MarketRecommendations, ReagentBuy, ReagentUse, Row
+from brain.recommend import Action, Blocked, MarketRecommendations, ReagentBuy, ReagentUse, Row
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
@@ -268,4 +268,44 @@ def test_a_real_lua_reads_a_holdings_paid_and_roi(tmp_path, lua):
     assert out.splitlines() == [
         "Sell	50	5	0.881	true",
         "Vendor	50	5	-0.8	nil",
+    ]
+
+
+def test_a_real_lua_reads_why_a_craft_is_blocked(tmp_path, lua):
+    # The Addon names the reagent (#75), so the reason goes as fields, not text.
+    file = tmp_path / FILE_NAME
+    no_data = Row(
+        "2996",
+        Action.CRAFT,
+        0,
+        note="on Kash-Patel: no data for 2770",
+        character="Kash-Patel",
+        blocked=Blocked("noData", "2770"),
+    )
+    unknown = Row(
+        "2997",
+        Action.CRAFT,
+        0,
+        note="on Kash-Patel: unknown bind type",
+        character="Kash-Patel",
+        blocked=Blocked("unknownBindType"),
+    )
+    file.write_text(
+        render(
+            {}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[no_data, unknown])]
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, row in ipairs(r.recommendations["Quel\'Thalas"].Horde.holdings) do '
+        "  print(row.blocked.reason, tostring(row.blocked.itemKey)) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "noData	2770",
+        "unknownBindType	nil",
     ]

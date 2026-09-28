@@ -68,6 +68,18 @@ class ReagentUse:
 
 
 @dataclass(frozen=True)
+class Blocked:
+    """Why a recipe can't be valued (#75): "noData" for `item_key`, a reagent with neither
+    market data nor a Merchant Cost, or "unknownBindType" for its output."""
+
+    reason: str
+    item_key: str = ""
+
+    def __str__(self) -> str:
+        return f"no data for {self.item_key}" if self.reason == "noData" else "unknown bind type"
+
+
+@dataclass(frozen=True)
 class Row:
     """One line of the table: what to do with `quantity` units of an Item Key."""
 
@@ -94,6 +106,7 @@ class Row:
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
     character: str = ""  # a Craft's Character, the one that knows the recipe
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
+    blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
     # Purchase Lots cover cost, and how many units that is. Split rows share it.
     paid: float | None = None
@@ -769,7 +782,8 @@ def _crafts(
     for plan in plans:
         if plan.output in under:
             continue  # its Held units would include ones not made yet
-        reason = _blocked(plan, merchant, valuer)
+        why = _blocked(plan, merchant, valuer)
+        reason = str(why) if why else None
         if reason is None and plan.until is not None:
             reason = f"on cooldown until {datetime.fromtimestamp(plan.until):%Y-%m-%d %H:%M}"
         if reason is None:
@@ -783,6 +797,7 @@ def _crafts(
                     0,
                     note=f"on {plan.character}: {reason}",
                     character=plan.character,
+                    blocked=why,
                 )
             )
     while True:
@@ -806,14 +821,14 @@ def _crafts(
     return _Crafting([p.row() for p in craftable if p.crafts] + blocked, held, crafted)
 
 
-def _blocked(plan: _Plan, merchant: dict[str, float], valuer: _Valuer) -> str | None:
+def _blocked(plan: _Plan, merchant: dict[str, float], valuer: _Valuer) -> Blocked | None:
     """Why the recipe can't be valued, if it can't. The guesses lean toward crafting less:
     a reagent with no market data would be undervalued at its Vendor Price."""
     if plan.recipe.bind_type is None:
-        return "unknown bind type"
+        return Blocked("unknownBindType")
     for key in plan.needs:
         if key not in merchant and not valuer.has_data(key):
-            return f"no data for {key}"
+            return Blocked("noData", key)
     return None
 
 

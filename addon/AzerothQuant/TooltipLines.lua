@@ -59,12 +59,13 @@ local function itemKey(link)
 end
 
 -- A Craft has no price of its own: it names its Character, and its reagents follow as
--- lines of their own. One that can't be made keeps the note saying why. A Hold's worth
--- hangs on its Prediction (ADR-0006).
-local function holdingLine(r)
+-- lines of their own. One that can't be made says why. A Hold's worth hangs on its
+-- Prediction (ADR-0006).
+local function holdingLine(r, nameOf)
   local head = "AQ: " .. r.action .. " " .. r.quantity
   if r.action == "Craft" then
-    return r.uses and (head .. " on " .. r.character) or (head .. " (" .. r.note .. ")")
+    return r.uses and (head .. " on " .. r.character)
+      or (head .. " (" .. (RecommendationTable.blockedNote(r, nameOf) or r.note) .. ")")
   elseif r.action == "Hold" then
     return head .. " under " .. r.prediction
   end
@@ -96,7 +97,7 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
   local function add(rows, lineOf)
     for _, r in ipairs(rows) do
       if r.itemKey == key and not RecommendationTable.lowValue(r) then
-        lines[#lines + 1] = lineOf(r)
+        lines[#lines + 1] = lineOf(r, nameOf)
         local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf)
           or RecommendationTable.roiLines(r, held)
         for _, line in ipairs(details) do

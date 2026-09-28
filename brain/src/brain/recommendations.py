@@ -48,7 +48,8 @@ _HEADER = (
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
-    "-- uses = { { itemKey, quantity } }.\n"
+    "-- uses = { { itemKey, quantity } }. One that can't be made says why as\n"
+    '-- blocked = { reason = "noData", itemKey } or { reason = "unknownBindType" }.\n'
     "-- A Holdings Sell or Vendor row whose units were bought on the Auction House has\n"
     "-- paid (per unit), paidUnits (how many units that covers), roi (a share, after\n"
     "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
@@ -130,6 +131,9 @@ def _row(row: Row) -> dict[str, object]:
         out["buys"] = [_buy(b) for b in row.buys]
     if row.uses:
         out["uses"] = [{"itemKey": u.item_key, "quantity": u.quantity} for u in row.uses]
+    if row.blocked:
+        blocked = {"reason": row.blocked.reason, "itemKey": row.blocked.item_key}
+        out["blocked"] = {k: v for k, v in blocked.items() if v}
     return out
 
 

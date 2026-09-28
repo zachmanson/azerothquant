@@ -87,6 +87,17 @@ function RecommendationTable.reagentLines(r, nameOf)
   return lines
 end
 
+-- Why a Craft can't be made, e.g. "on Kash-Patel: no market data for Copper Ore", or nil
+-- when it can. The Brain writes the reason as fields, so the reagent can go by name (#75).
+function RecommendationTable.blockedNote(r, nameOf)
+  if not r.blocked then
+    return nil
+  end
+  local why = r.blocked.reason == "noData" and ("no market data for " .. nameFor(r.blocked.itemKey, nameOf))
+    or "unknown bind type"
+  return "on " .. r.character .. ": " .. why
+end
+
 -- The hint that it's a good time to sell (#50): the raid-target star tinted to the hint's
 -- green (its last three numbers), since the game's fonts may not have a star glyph.
 RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0:0:0:0:64:64:0:64:0:64:128:255:128|t"
@@ -156,8 +167,9 @@ local function tooltip(r, nameOf, held)
   if r.saleEvents then
     lines[#lines + 1] = "Sales " .. r.saleEvents
   end
-  if r.note then
-    lines[#lines + 1] = r.note
+  local note = RecommendationTable.blockedNote(r, nameOf) or r.note
+  if note then
+    lines[#lines + 1] = note
   end
   return lines
 end
@@ -184,10 +196,11 @@ local function craftNote(r)
 end
 
 -- A Hold only pays off if its Prediction comes true, so its profit isn't known (ADR-0006).
--- A Craft that can't be made (it uses nothing) keeps the note saying why.
-local function holdingCells(r, name)
+-- A Craft that can't be made (it uses nothing) says why.
+local function holdingCells(r, name, nameOf)
   local profit = r.action == "Hold" and "unknown" or money(r.profit)
-  local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r)) or r.note or ""
+  local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r))
+    or RecommendationTable.blockedNote(r, nameOf) or r.note or ""
   return { name, r.action, tostring(r.quantity), money(r.price), profit, roiCell(r), note }
 end
 
@@ -270,7 +283,7 @@ local function section(title, columns, rows, cells, keys, default, nameOf)
       folded = folded + 1
     else
       local name = nameFor(r.itemKey, nameOf)
-      local rowCells = cells(r, name)
+      local rowCells = cells(r, name, nameOf)
       out.rows[#out.rows + 1] = {
         itemString = itemString(r.itemKey),
         cells = rowCells,

@@ -101,18 +101,50 @@ describe("TooltipLines.forLink", function()
     )
   end)
 
-  it("gives a Craft that can't be made the note saying why", function()
+  it("gives a Craft on cooldown the note saying so", function()
     local r = recs({
       holdings = {
         {
           itemKey = "2996",
           action = "Craft",
           quantity = 0,
-          note = "on Kash-Patel: unknown bind type",
+          note = "on Kash-Patel: on cooldown until 2026-09-28 12:00",
           character = "Kash-Patel",
         },
       },
     })
+
+    assert.are.same({ "AQ: Craft 0 (on Kash-Patel: on cooldown until 2026-09-28 12:00)" }, linesFor(r, "item:2996"))
+  end)
+
+  -- As the Brain writes a Craft it couldn't value (#75).
+  local function blockedCraft(blocked)
+    return recs({
+      holdings = {
+        {
+          itemKey = "2996",
+          action = "Craft",
+          quantity = 0,
+          note = "on Kash-Patel: no data for 2589",
+          character = "Kash-Patel",
+          blocked = blocked,
+        },
+      },
+    })
+  end
+
+  it("gives a Craft that can't be made the reason why, naming the reagent it has no market data for", function()
+    local r = blockedCraft({ reason = "noData", itemKey = "2589" })
+
+    assert.are.same({ "AQ: Craft 0 (on Kash-Patel: no market data for Linen Cloth)" }, linesFor(r, "item:2996"))
+    assert.are.same(
+      { "AQ: Craft 0 (on Kash-Patel: no market data for item:2589)" },
+      TooltipLines.forLink(r, REALM, FACTION, link("item:2996"), function() end)
+    )
+  end)
+
+  it("gives a Craft whose output bind type isn't known the reason why", function()
+    local r = blockedCraft({ reason = "unknownBindType" })
 
     assert.are.same({ "AQ: Craft 0 (on Kash-Patel: unknown bind type)" }, linesFor(r, "item:2996"))
   end)

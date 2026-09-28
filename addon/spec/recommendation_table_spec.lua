@@ -61,7 +61,24 @@ local function holdingsCraft()
   }
 end
 
-local NAMES = { ["item:2589"] = "Linen Cloth", ["item:2320"] = "Coarse Thread", ["item:2592"] = "Wool Cloth" }
+-- A Holdings Craft the Brain couldn't value, as it writes one (#75).
+local function blockedCraft(blocked)
+  return {
+    itemKey = "2996",
+    action = "Craft",
+    quantity = 0,
+    note = "on Kash-Patel: no data for 2770",
+    character = "Kash-Patel",
+    blocked = blocked,
+  }
+end
+
+local NAMES = {
+  ["item:2589"] = "Linen Cloth",
+  ["item:2320"] = "Coarse Thread",
+  ["item:2592"] = "Wool Cloth",
+  ["item:2770"] = "Copper Ore",
+}
 
 local function names(itemString)
   return NAMES[itemString]
@@ -74,6 +91,30 @@ describe("RecommendationTable.build", function()
     local row = view.sections[1].rows[1]
     assert.are.same({ "item:2997", "Craft", "3", "", "79c", "", "on Kash-Patel, 2 reagents" }, row.cells)
     assert.are.same({ "Use 9 Wool Cloth", "Use 3 Coarse Thread" }, row.tooltip)
+  end)
+
+  it("says why a Holdings Craft can't be made, naming the reagent it has no market data for", function()
+    local view = build(entry({ holdings = { blockedCraft({ reason = "noData", itemKey = "2770" }) } }), AS_OF, names)
+
+    local row = view.sections[1].rows[1]
+    assert.are.same({ "item:2996", "Craft", "0", "", "", "", "on Kash-Patel: no market data for Copper Ore" }, row.cells)
+    assert.are.same({ "on Kash-Patel: no market data for Copper Ore" }, row.tooltip)
+  end)
+
+  it("names a blocked Craft's reagent by its Item Key until the client has loaded it", function()
+    local view = build(entry({ holdings = { blockedCraft({ reason = "noData", itemKey = "2770" }) } }))
+
+    local row = view.sections[1].rows[1]
+    assert.are.equal("on Kash-Patel: no market data for item:2770", row.cells[7])
+    assert.are.same({ "on Kash-Patel: no market data for item:2770" }, row.tooltip)
+  end)
+
+  it("says when a Holdings Craft's output bind type isn't known", function()
+    local view = build(entry({ holdings = { blockedCraft({ reason = "unknownBindType" }) } }), AS_OF, names)
+
+    local row = view.sections[1].rows[1]
+    assert.are.equal("on Kash-Patel: unknown bind type", row.cells[7])
+    assert.are.same({ "on Kash-Patel: unknown bind type" }, row.tooltip)
   end)
 
   it("shows a Holding's ROI green, red, or brighter green and starred when it's a good time to sell", function()
