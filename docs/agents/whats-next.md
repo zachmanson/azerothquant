@@ -1,3 +1,11 @@
+2026-09-28 (later 17): #79 BUILT on branch claude/zen-mccarthy-xaqoze. MailDumpSpike.lua is deleted, along with its .toc line and the two spike comments. `/aq` in RecommendationFrame.lua no longer chains to a previous handler, and an unknown command prints the usage line. Mailbox.lua's ADDON_LOADED sets `AzerothQuantDB.mailDumpSpike = nil`. No busted test: the slash handler is WoW glue (it calls the file-local toggle/reload/say, and the file runs CreateFrame when it loads). /code-review found nothing blocking. The branch is now 6 commits ahead of main, and main hasn't moved. The user merges it when they say to.
+
+User to do at the PC (add to #85): after merging, fully restart the client (a .toc change isn't picked up by /reload). Then check that `/aq foo` prints the usage line and that `/aq recs` still toggles the table.
+
+Next, in order (none need the PC):
+1. The #77 grill, the #84 grill, #82 /research.
+2. The needs-triage queue: #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 16): CLOSED #32, #33, #38, #78 and #80 (built, with comments). Every parked in-game and real-data check is now one checklist issue, #85 (needs-pc): restart `brain watch`, `brain rebuild` (#78 deposits), `brain replay` on Beta before Oct 21 (the table goes on #83), and the hover checks for #38/#33/#75/#50/#49/#71 plus the #78 Copper Bar deposit. It replaces the "parked" lists in the entries below. The user can't do PC checks now: don't ask until they say they're back. The branch `claude/zen-mccarthy-xaqoze` is 4 commits ahead of main (#80, #38), and main hasn't moved, so it fast-forwards. Merge it when the user says to.
 
 Next, in order (none need the PC):

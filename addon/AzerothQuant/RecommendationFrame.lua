@@ -527,17 +527,12 @@ events:SetScript("OnEvent", function(_, event, arg1)
   end
 end)
 
--- /aq is shared with other files (MailDumpSpike.lua, which loads first): handle "recs"
--- and pass anything else to the handler that was there before.
-local previousSlash = SlashCmdList.AZEROTHQUANT
 SLASH_AZEROTHQUANT1 = "/aq"
 SlashCmdList.AZEROTHQUANT = function(msg)
   if msg:match("^%s*recs%s*$") then
     toggle()
   elseif msg:match("^%s*reload%s*$") then
     reload()
-  elseif previousSlash then
-    previousSlash(msg)
   else
     say("Usage: /aq recs (toggle the Recommendation Table), /aq reload")
   end

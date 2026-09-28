@@ -75,6 +75,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if arg1 == "AzerothQuant" then
       AzerothQuantDB = AzerothQuantDB or {}
       db = AzerothQuantDB
+      db.mailDumpSpike = nil -- left by the removed #15 spike
       db.mailboxReads = db.mailboxReads or {}
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
       local pruned = Prune.importedMailboxReads(db.mailboxReads, AzerothQuantRecommendations)
