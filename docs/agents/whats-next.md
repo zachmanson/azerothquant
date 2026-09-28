@@ -1,3 +1,13 @@
+2026-09-28 (later 30): #95 and #96 BUILT here (no PC), both labelled needs-pc for the in-game checks.
+- #95 (d832a11): time-left buckets now default to Classic's <30m, 30m-2h, 2-8h, 8-24h. Matching and expiry read these at import, so a `brain rebuild` is needed. Also check that brain/config.toml doesn't set `time_left_max_minutes`.
+- #96: when a tooltip's link finds no lines, `TooltipLines.forItemName` matches the Market's Item Keys of that itemID by the row's name. The name comes from `owner.rowData.itemKey` via `C_AuctionHouse.GetItemKeyInfo`, else the tooltip's title line. That owner shape is a guess from retail's AH UI. The fallback covers it if the title shows the suffixed name.
+
+Next, in order:
+1. At the PC: `/reload`, then:
+   - #95: `/run print(AUCTION_TIME_LEFT3_DETAIL, AUCTION_TIME_LEFT4_DETAIL)` should print 2-8 h / 8-24 h (otherwise, set the default to what it says). Then `brain rebuild`. Close #95.
+   - #96: hover the "Willow Belt of the Sorcerer" browse row. AQ lines should show. If not, `/run local o=GameTooltip:GetOwner() print(o and o.rowData and o.rowData.itemKey and o.rowData.itemKey.itemID, GameTooltipTextLeft1:GetText())` while hovering, and fix from that. Close #96.
+2. Once `core` is empty: ask whether #90, #97 or #98 move to `core`.
+
 2026-09-28 (later 29): FILED two user ideas as `later` + needs-triage. #97: take a Shopping List row off (or mark it, or cut its Qty) once the player buys it. The Addon never buys (ADR-0016), so it needs a PC probe of which AH buy events Forever fires and what they carry. #98: rank the Shopping List by profit for the effort and risk (Listings to click, time to sell, market depth), not by raw profit. The open questions are on each issue. No code changed.
 
 Next, in order: unchanged from (later 28): #96, then #95 (both `core`, both need the PC). Then ask whether #90, #97 or #98 move to `core`, and grill whichever does.
