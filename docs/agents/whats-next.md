@@ -1,3 +1,10 @@
+2026-09-28 (later 19): #82 RESEARCHED: docs/research/booty-bay-broker.md (commit dd41df1). The verdict is unclear, probably not usable today. It lists only (Min Buyout, Market Value, Listed Quantity) and has no sales data, so at best it's a Fair Value prior and never a Sell Rate. There's no API, the Terms ban scrapers, and the cloud proxy blocks the site, so every claim about the site is from search snippets. The likely import path is the file the desktop Companion writes on the PC (format unknown). The PC follow-up is on #85 under "Booty Bay Broker". #82 waits on it: don't decide #82 until the user has done it.
+
+Next, in order (none need the PC):
+1. #84 build (/tdd), then /code-review + commit. It's small and the Beta replay before Oct 21 wants it.
+2. #77 build (/tdd), then /code-review + commit.
+3. The needs-triage queue: #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 18): GRILLED #77 and #84. Both specs are comments on the issues, and both are labelled ready-for-agent.
 - #77 (Craft Chain panel): it no longer waits on #76, which gets a reserved `disenchant` node kind (noted on #76).
   - Brain: every Craft row (blocked ones too) gets a nested `chain` tree. Node kinds: sell/vendor/craft/use/buy/merchant/leftover. Quantities are row totals, and gold follows `_Sources.cost`. A test asserts the nodes add up to the row's `profit`. `via`/`uses`/`buys` stay.
