@@ -1,3 +1,13 @@
+2026-09-28 (later 24): FILED #91 (needs-triage) from the user's list of launch predictions: endgame potion mats, T1 reagents, Enchanting mats, and Uncommon Waylaid Supply Crates ("invest early"). Some are sold by a "black market" NPC. The issue lists the open questions. (1) Buy-and-hold Prediction vs "Hold what you farm". (2) With no Best Exit Value there's no Max Loss, so no Prediction buys at launch; the Beta Prior (#90) might fill that gap. (3) The itemIDs are unchecked, and several names look like Forever additions. (4) Limited-stock NPC items are never read as Merchant Cost. (5) The Catalyst. Grill it together with #90, since both touch launch pricing with no Live history.
+
+Next, in order (none need the PC):
+1. /grilling #90 together with #91 (Nov 4 deadline).
+2. #84 build (/tdd), then /code-review + commit.
+3. #87 build (/tdd), small, then /code-review + commit.
+4. #88 build (/tdd), then /code-review + commit.
+5. #77 build (/tdd), then #76.
+6. The needs-triage queue: #89, #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 23): FILED #90 (needs-triage) from user feedback. Beta Prior: for about the first 2 weeks of Live, show a Beta price column next to the live numbers. It's a reference only, "not gospel", and gets dropped once Live history builds up. Beta Prior exists only as a CONTEXT.md term, and no code reads Beta data in Live. The open questions are on the issue: which number, absolute vs Live/Beta-scaled, display-only vs engine nudge, the cutoff rule, and Beta->Live Market mapping. It must land before Live (Nov 4). The user's message was cut off, so ask whether they had more to add.
 
 Next, in order (none need the PC):
