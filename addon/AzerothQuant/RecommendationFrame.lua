@@ -88,10 +88,21 @@ end
 local function showTooltip(line)
   GameTooltip:SetOwner(line, "ANCHOR_RIGHT")
   GameTooltip:SetHyperlink(line.itemString)
+  -- The hyperlink's item-tooltip hook (Tooltip.lua) already added the holder and
+  -- reagent lines this row also has, so skip those (#94).
   local shown = {}
+  for i = 1, GameTooltip:NumLines() do
+    local left = _G["GameTooltipTextLeft" .. i]
+    local text = left and left:GetText()
+    if text then
+      shown[text] = true
+    end
+  end
   for _, text in ipairs(line.tooltip) do
-    GameTooltip:AddLine(text, 1, 1, 1, true)
-    shown[text] = true
+    if not shown[text] then
+      GameTooltip:AddLine(text, 1, 1, 1, true)
+      shown[text] = true
+    end
   end
   -- The first cell is the item name, which the hyperlink already shows in full.
   for c = 2, MAX_COLUMNS do
