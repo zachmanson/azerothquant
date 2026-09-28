@@ -271,7 +271,8 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int]) -> _Moves:
         for use in r.uses:
             used[use.item_key] += use.quantity
     for r in reversed(m.holdings):
-        taken = min(used[r.item_key], r.quantity)
+        # A Craft row's Item Key is its output, and its quantity crafts, not units held.
+        taken = 0 if r.action is Action.CRAFT else min(used[r.item_key], r.quantity)
         used[r.item_key] -= taken
         quantity = r.quantity - taken
         if r.action is Action.SELL:
@@ -304,7 +305,7 @@ def _taken(m: MarketRecommendations) -> tuple[list[Row], list[Row]]:
     was sized as if the only buy (#86): most profit first while the gold (or the Budget)
     lasts, skipping any that buys, uses or makes an Item Key one already taken does. The
     Prediction buys then get what's left, in order."""
-    gold = m.gold if m.budget is None else min(m.gold, m.budget)
+    gold = m.spend
     shopping: list[Row] = []
     keys: set[str] = set()
     for r in m.shopping_list:

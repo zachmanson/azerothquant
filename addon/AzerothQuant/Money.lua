@@ -37,11 +37,11 @@ end
 -- What the player typed in a gold box, e.g. "250", "250g" or "12.5", as whole copper.
 -- A blank box is nil (no amount) and still ok; anything else is nil and not ok.
 function Money.parseGold(text)
-  local trimmed = text:match("^%s*(.-)%s*$")
+  local trimmed = text:lower():match("^%s*(.-)%s*$")
   if trimmed == "" then
     return nil, true
   end
-  local number = trimmed:match("^(%d+%.?%d*)g?$") or trimmed:match("^(%.%d+)g?$")
+  local number = trimmed:match("^(%d+%.?%d*)%s*g?$") or trimmed:match("^(%.%d+)%s*g?$")
   if not number then
     return nil, false
   end

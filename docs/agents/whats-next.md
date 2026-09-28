@@ -1,3 +1,35 @@
+2026-09-28 (later 20): #86 BUILT on branch claude/zen-mccarthy-xaqoze (issue still open). This came from the user's in-game feedback: the Shopping List spent all their gold as one greedy basket, where one big Flip crowded out other good options and a tail of copper Flips filled the rest. ADR-0017, and CONTEXT.md gets **Budget** plus updates to **Shopping List**, **Sell**, **Flip**, **Holdings**, **Sub-craft**, **Deposit** and **Best Exit Value**. ADR-0010 is superseded, and ADR-0011 and ADR-0009 (#69) are superseded in part.
+- Brain:
+  - The Shopping List is **options**: one per Item Key's Flip to Sell or Flip to Vendor, and one per recipe's Flips to Craft (`_flips_to_craft(..., plan)`, fresh sources and outlet).
+  - Each option is sized alone within `spend = min(gold, Budget)` by `_option`, priced after only its own buys, sorted by profit and cut to `shopping_list_rows` (50, a config.toml key).
+  - Holdings, Craft Actions and Best Exit Value are valued with nothing bought (`_Valuer.flips` now returns a Valuer with nothing taken). `_buy_what_fits`, `with_shopping` and `Row.leftovers` are gone.
+  - Prediction buys get `spend`, under the same caps. `MarketRecommendations.budget` and `.spend` are new, and `shopping_cost` is gone.
+  - Budget: new column `character_read.budget`, read by `history.market_budget` (the Market's latest Read).
+  - Replay `_taken`: options in profit order while the gold lasts, with no shared Item Key. Held reagents a taken Flip to Craft uses come off the Holdings moves. Prediction buys get what's left.
+  - Recommendations.lua: adds `budget` (only when set) and drops `shoppingCost`.
+- Addon:
+  - A Budget box left of Reload. Enter saves `AzerothQuantDB.budgets["<realm>-<faction>"]` (`RecommendationTable.budgetKey`), and blank clears it. `Money.parseGold` and `Money.goldText` are new.
+  - Character.lua puts it in each Character Read.
+  - `RecommendationTable.build(..., budget)` folds options costing more into `N over the Budget (Reload to re-size)`. The header reads `Gold X, Budget Y|all[ (Reload to re-size)], Prediction buys Z`.
+- /code-review is done, and its fixes are in.
+
+Review leftovers (judgement calls, not done):
+- `_Valuer.flipped`/`after(bought)` and `_post_at`'s bought argument are now always empty. The whole bought-units path in `_Valuer` could go.
+- The first `_valuer()` in `recommend_market` computes Flips it throws away.
+- `_options` groups by `(item_key, is Flip to Sell)`.
+- `section()` in RecommendationTable.lua now has 10 positional parameters.
+- Replay: a taken Flip to Craft's Sub-craft leftovers aren't counted (it under-counts). Also, replay Prediction buys get only the gold the options leave, while live gives them the full spend.
+- A held unit's Sell price can sit under a Flip to Sell's Post at for the same Item Key (ADR-0017 Consequences).
+
+NOT checked on real data: `brain recommend` speed. Each recipe now runs its own greedy Flip to Craft loop.
+
+User to do at the PC (add to #85): /reload is enough (no new Addon files), and restart `brain watch`. Type a Budget (say `50`) and press Enter: options over it should fold, and the header should say `Budget 50g (Reload to re-size)`. Then /reload, wait for the Brain, and /reload again: the options should be re-sized within 50g and the note gone. Check the Shopping List shows up to 50 independent options, most profit first. Then close #86.
+
+Next, in order (none need the PC):
+1. #84 build (/tdd), then /code-review + commit.
+2. #77 build (/tdd), then /code-review + commit.
+3. The needs-triage queue: #53, #54, #55, #56, #58, #60, #61.
+
 2026-09-28 (later 19): #82 RESEARCHED: docs/research/booty-bay-broker.md (commit dd41df1). The verdict is unclear, probably not usable today. It lists only (Min Buyout, Market Value, Listed Quantity) and has no sales data, so at best it's a Fair Value prior and never a Sell Rate. There's no API, the Terms ban scrapers, and the cloud proxy blocks the site, so every claim about the site is from search snippets. The likely import path is the file the desktop Companion writes on the PC (format unknown). The PC follow-up is on #85 under "Booty Bay Broker". #82 waits on it: don't decide #82 until the user has done it.
 
 Next, in order (none need the PC):

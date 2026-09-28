@@ -58,11 +58,12 @@ local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
 end
 
--- The logged-in Character's Market's Budget in copper, or nil for all its gold.
+-- Where the logged-in Character's Market's Budget is saved in AzerothQuantDB.budgets.
 local function budgetKey()
   return RecommendationTable.budgetKey(GetRealmName(), UnitFactionGroup("player") or "")
 end
 
+-- That Budget in copper, or nil for all the gold.
 local function savedBudget()
   return db.budgets and db.budgets[budgetKey()]
 end

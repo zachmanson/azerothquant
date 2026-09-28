@@ -96,8 +96,8 @@
 # craft_chain_depth = 3
 
 # Optional: how many options the Shopping List shows, most profit first. Each is sized on
-# its own, within the Budget set in game (or all the gold), so they're alternatives, not
-# one basket (#86). Defaults to 50. Must come before the first [[installs]].
+# its own, within the Budget set in game (or all the gold), so they're alternatives to
+# pick from (#86). Defaults to 50. Must come before the first [[installs]].
 # shopping_list_rows = 50
 
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what

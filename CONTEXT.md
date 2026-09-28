@@ -107,7 +107,7 @@ The gold an NPC merchant charges for one unit of an item it sells, such as threa
 _Avoid_: vendor price, buy price
 
 **Deposit**:
-The copper the Auction House charges to post a unit, refunded when it sells and lost each time a posting expires unsold. Per unit, it's the deposit on the Item Key's latest Sold invoice divided by its count, else `ah_deposit_share` (0.60, unverified) of its Vendor Price, or nothing without one. The Decision Engine charges each unit it would post the deposits it expects that unit to lose: an Item Key's units sell in queue order (unbound held units, then Flips to Sell, then Flip to Craft outputs), and unit i of the queue waits i / (units per hour) and loses one deposit per `post_duration_hours` (48) that wait covers (ADR-0013).
+The copper the Auction House charges to post a unit, refunded when it sells and lost each time a posting expires unsold. Per unit, it's the deposit on the Item Key's latest Sold invoice divided by its count, else `ah_deposit_share` (0.60, unverified) of its Vendor Price, or nothing without one. The Decision Engine charges each unit it would post the deposits it expects that unit to lose: an Item Key's units sell in queue order (unbound held units, then the one Shopping List option's Flip to Sell or Flip to Craft outputs, each option queued as if it were the only buy, ADR-0017), and unit i of the queue waits i / (units per hour) and loses one deposit per `post_duration_hours` (48) that wait covers (ADR-0013).
 _Avoid_: posting fee, AH fee, cut
 
 ## Crafting
@@ -145,7 +145,7 @@ The Action of turning held reagents into a Known Recipe's output. A craft is wor
 _Avoid_: make, produce
 
 **Sub-craft**:
-Crafting a reagent a Craft or Flip to Craft is short of, with another Known Recipe, whose own reagents are sourced the same way, down to `craft_chain_depth` crafts deep counting the top one. Each reagent comes from held units first, then a merchant (never Sub-crafted), then one source for the rest: a Sub-craft or, in a Flip to Craft, the Auction House, whichever costs less. A Sub-craft never uses an Item Key already on its path, and its surplus output joins the crafted Holdings. It isn't a row of its own: the top Craft row lists it under `via` and carries its reagents and profit (ADR-0014).
+Crafting a reagent a Craft or Flip to Craft is short of, with another Known Recipe, whose own reagents are sourced the same way, down to `craft_chain_depth` crafts deep counting the top one. Each reagent comes from held units first, then a merchant (never Sub-crafted), then one source for the rest: a Sub-craft or, in a Flip to Craft, the Auction House, whichever costs less. A Sub-craft never uses an Item Key already on its path, and a Craft Action's Sub-craft surplus joins the crafted Holdings (a Flip to Craft's doesn't, since it's only an option, ADR-0017). It isn't a row of its own: the top Craft row lists it under `via` and carries its reagents and profit (ADR-0014).
 _Avoid_: intermediate craft, chain step
 
 **Flip**:
@@ -177,7 +177,7 @@ What a held Item Key's units cost, per unit, from its open Purchase Lots not tie
 _Avoid_: cost basis, buy price
 
 **Best Exit Value**:
-The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts (ADR-0010).
+The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts, and takes nothing on the Shopping List as bought (ADR-0017).
 _Avoid_: value, worth
 
 **Recommendation**:

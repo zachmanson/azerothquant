@@ -403,14 +403,13 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
             f"pooled return {_percent(m.pooled_return)}, caps {brake}"
         )
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
+    budget = "" if m.budget is None else f" (Budget {_money(m.budget)} of {_money(m.gold)})"
     return (
         f"{market}, as of the Scan at {as_of}\n"
         f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n"
         f"Sold Outcomes not linked to an Item Key by name: {m.unlinked_sales}\n\n"
         f"Holdings\n{holdings}\n"
-        "Shopping List, options each sized on its own within "
-        f"{_money(m.gold if m.budget is None else min(m.gold, m.budget))}"
-        f"{'' if m.budget is None else f' (Budget {_money(m.budget)} of {_money(m.gold)})'}\n"
+        f"Shopping List, options each sized on its own within {_money(m.spend)}{budget}\n"
         f"{shopping}\n"
         f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
         f"{prediction_buys}\n"
