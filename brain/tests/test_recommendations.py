@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from brain.config import Era
@@ -276,6 +277,35 @@ def test_a_real_lua_reads_a_holdings_paid_and_roi(tmp_path, lua):
     assert out.splitlines() == [
         "Sell	50	5	0.881	true",
         "Vendor	50	5	-0.8	nil",
+    ]
+
+
+def test_a_real_lua_reads_a_flips_listings_posts_and_days(tmp_path, lua):
+    # #98: a Flip to Vendor sells now, so it has no days.
+    file = tmp_path / FILE_NAME
+    sell = Row("2589", Action.SELL, 5, price=500, profit=2000, cost=2500)
+    sell = replace(sell, listings=2, posts=3, days=2.5)
+    vendor = replace(
+        Row("2770", Action.VENDOR, 4, price=5, profit=20, cost=20), listings=3, posts=0
+    )
+    file.write_text(
+        render(
+            {}, markets=[MarketRecommendations(MARKET, 1790000000, 0, shopping_list=[sell, vendor])]
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, row in ipairs(r.recommendations["Quel\'Thalas"].Horde.shoppingList) do '
+        "  print(row.action, row.listings, row.posts, tostring(row.days)) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "Sell	2	3	2.5",
+        "Vendor	3	0	nil",
     ]
 
 

@@ -825,6 +825,123 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
     ]
 
 
+# --- Per click, Per day and ROI (#98) ---
+
+
+def test_a_flip_to_sell_counts_every_listing_it_buys_even_at_the_same_price(db):
+    # Two 700s and a 750, each its own Listing: 3 Listings to click through.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=700), row(unit=700), row(unit=750), unit=1000),
+        [character_read(money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.listings) == (Action.SELL, 3, 3)
+
+
+def test_a_flip_to_vendor_counts_every_listing_it_buys_even_at_the_same_price(db):
+    # Three Ore Listings at 5, one of them a stack of 2: 3 Listings for 4 units.
+    result = run(
+        db,
+        [scan(T0, row(ORE, unit=5), row(ORE, quantity=2, unit=5), row(ORE, unit=5))],
+        [character_read(money=GOLD, vendor_prices={2770: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.listings) == (Action.VENDOR, 4, 3)
+
+
+def test_a_flip_to_sell_posts_its_units_in_stacks_of_the_usual_sale_event_size(db):
+    # Linen sells 2 at a time, so 5 bought are posted as 3 stacks: 2, 2 and 1.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=5, unit=500), unit=1000),
+        [character_read(money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.posts) == (Action.SELL, 5, 3)
+
+
+def test_a_flip_to_vendor_posts_nothing(db):
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=5))],
+        [character_read(money=GOLD, vendor_prices={2770: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.posts) == (Action.VENDOR, 0)
+
+
+def test_a_flip_to_sell_waits_for_its_last_unit_behind_the_held_ones(db):
+    # 48 Linen sell a day. The 2 held go first, then the 4 bought: the last sells in
+    # 6 / 48 of a day.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=4, unit=500), unit=1000),
+        [character_read(item(count=2), money=GOLD)],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity) == (Action.SELL, 4)
+    assert flip.days == pytest.approx(6 / 48)
+
+
+def test_a_flip_to_vendor_has_no_wait(db):
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=5))],
+        [character_read(money=GOLD, vendor_prices={2770: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.days) == (Action.VENDOR, None)
+
+
+def test_an_option_in_the_top_rows_only_by_profit_per_click_is_kept(db):
+    # shopping_list_rows = 1. The Ore makes the most profit (10 x 5 over 5 Listings, 10
+    # a click), and its ROI (50 on 50) beats the Tin's (12 on 18). But the Tin's one
+    # Listing makes 12 a click, so it's kept too. Both sell now. Most profit first.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        [scan(T0, *[row(ORE, quantity=2, unit=5)] * 5, row(tin, quantity=3, unit=6))],
+        [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert [(r.item_key, r.profit) for r in result[MARKET].shopping_list] == [
+        (ORE_KEY, 50),
+        ("2771", 12),
+    ]
+
+
+def test_a_flip_to_vendor_sells_now_so_it_is_top_by_profit_per_day(db):
+    # shopping_list_rows = 1. The Linen Flip to Sell beats the Ore on Profit, Per click
+    # and ROI, but has to wait to sell: the Ore, vendored now, is kept too.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=5, unit=500), unit=1000)[:-1]
+        + [
+            scan(
+                T0 + HOUR,
+                row(quantity=18, unit=1000),
+                row(quantity=5, unit=500),
+                *[row(ORE, quantity=2, unit=9)] * 3,
+            )
+        ],
+        [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert [(r.item_key, r.action) for r in result[MARKET].shopping_list] == [
+        (LINEN_KEY, Action.SELL),
+        (ORE_KEY, Action.VENDOR),
+    ]
+
+
 # --- Non-stacking effort (#73) ---
 
 BELT = "item:6539::::::::20:1490"

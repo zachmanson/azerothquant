@@ -46,7 +46,9 @@ _HEADER = (
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
     "-- recommendations[realm][faction] is that Market's Recommendations, in copper.\n"
     "-- budget is the Budget the Brain sized them within (nil for all the gold), and each\n"
-    "-- shoppingList row is an option sized as if it were the only buy. A\n"
+    "-- shoppingList row is an option sized as if it were the only buy. A Flip to Sell or\n"
+    "-- Flip to Vendor row has listings (bought), posts (stacks posted) and days (until\n"
+    "-- its last unit sells; nil on a Flip to Vendor, which sells now). A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
@@ -129,6 +131,9 @@ _ROW_KEYS = {
     "paid": "paid",
     "paid_units": "paidUnits",
     "roi": "roi",
+    "listings": "listings",
+    "posts": "posts",
+    "days": "days",
 }
 
 

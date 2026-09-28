@@ -379,7 +379,6 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Shopping List (1)", shopping.tab)
     assert.are.equal("1 over the Budget (Reload to re-size)", shopping.more)
     assert.are.equal("Flips to Craft", crafts.title)
-    assert.are.same(shopping.columns, crafts.columns)
     assert.are.equal("item:2996", crafts.rows[1].itemString)
     assert.are.equal("Flips to Craft (1)", crafts.tab)
     assert.are.equal("1 over the Budget (Reload to re-size)", crafts.more)
@@ -507,9 +506,59 @@ describe("RecommendationTable.build", function()
 
     local shopping = view.sections[2]
     assert.are.equal("Shopping List", shopping.title)
-    assert.are.same({ "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" }, shopping.columns)
-    assert.are.same({ "item:9749", "Buy", "3", "10s", "42s", "94s 50c", "30s", "" }, shopping.rows[1].cells)
+    assert.are.same(
+      { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Per click", "Per day", "ROI", "Cost", "Note" },
+      shopping.columns
+    )
+    assert.are.same({ "item:9749", "Buy", "3", "10s", "42s", "94s 50c", "", "", "", "30s", "" }, shopping.rows[1].cells)
     assert.are.same({ "Sales 4" }, shopping.rows[1].tooltip)
+  end)
+
+  it("shows a Flip's Profit per click and per day, and its ROI, and sums up the clicks and wait in its tooltip (#98)", function()
+    local view = build(entry({
+      shoppingList = {
+        {
+          itemKey = "9749", action = "Sell", quantity = 30, price = 1000, postAt = 4200.0, profit = 90000.0,
+          saleEvents = 4, cost = 25000, listings = 12, posts = 3, days = 2.5,
+        },
+      },
+    }))
+
+    local row = view.sections[2].rows[1]
+    -- 9g over 15 clicks, over 2.5 days, and on 2g 50s.
+    assert.are.same({ "60s", "3g 60s", "360%" }, { row.cells[7], row.cells[8], row.cells[9] })
+    assert.are.same({ "12 Listings + 3 posts, sells in ~2.5 days", "Sales 4" }, row.tooltip)
+  end)
+
+  it("shows a Flip to Vendor's Per day as now, and says it posts nothing (#98)", function()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "2770", action = "Vendor", quantity = 1, price = 5, profit = 20, cost = 5, listings = 1, posts = 0 },
+      },
+    }))
+
+    local row = view.sections[2].rows[1]
+    assert.are.same({ "20c", "now", "400%" }, { row.cells[7], row.cells[8], row.cells[9] })
+    assert.are.same({ "1 Listing, vendor now" }, row.tooltip)
+  end)
+
+  it("gives a wait under a day in hours, and one post as a post (#98)", function()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "9749", action = "Sell", quantity = 1, price = 100, profit = 50, cost = 100, listings = 1, posts = 1, days = 0.125 },
+      },
+    }))
+
+    assert.are.same({ "1 Listing + 1 post, sells in ~3 h" }, view.sections[2].rows[1].tooltip)
+  end)
+
+  it("leaves the Flips to Craft tab's columns as they were (#98)", function()
+    local view = build(entry({ shoppingList = { flipToCraft() } }))
+
+    assert.are.same(
+      { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" },
+      view.sections[3].columns
+    )
   end)
 
   it("lists a Flip to Craft's held reagents, then its reagent buys, by name in its tooltip", function()
@@ -664,6 +713,27 @@ describe("sorting the Recommendation Table", function()
 
     RecommendationTable.sort(holdings, { column = 5, descending = true })
     assert.are.same({ "item:1", "item:3", "item:2" }, itemStrings(holdings))
+  end)
+
+  it("sorts the Shopping List by Per click, Per day or ROI, with a Flip to Vendor's now first per day (#98)", function()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "1", action = "Sell", quantity = 1, price = 100, profit = 900, cost = 100, listings = 5, posts = 4, days = 1 },
+        { itemKey = "2", action = "Vendor", quantity = 1, price = 100, profit = 20, cost = 1000, listings = 1, posts = 0 },
+        { itemKey = "3", action = "Sell", quantity = 1, price = 100, profit = 500, cost = 250, listings = 1, posts = 1, days = 5 },
+      },
+    }))
+    local shopping = view.sections[2]
+
+    -- Per click: 100, 20, 250.
+    RecommendationTable.sort(shopping, { column = 7, descending = true })
+    assert.are.same({ "item:3", "item:1", "item:2" }, itemStrings(shopping))
+    -- Per day: 900, now, 100.
+    RecommendationTable.sort(shopping, { column = 8, descending = true })
+    assert.are.same({ "item:2", "item:1", "item:3" }, itemStrings(shopping))
+    -- ROI: 9, 0.02, 2.
+    RecommendationTable.sort(shopping, { column = 9, descending = true })
+    assert.are.same({ "item:1", "item:3", "item:2" }, itemStrings(shopping))
   end)
 
   it("sorts the Shopping List by Post at, with a Flip to Vendor (no Post at) last", function()

@@ -193,8 +193,16 @@ How long the player is willing to wait for held units to sell. Only the units Se
 _Avoid_: timeout, patience
 
 **Shopping List**:
-The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, and each recipe's Flips to Craft, sized as if it were the only buy within the Budget and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor up to `shopping_list_rows` (50) and Flips to Craft up to `craft_list_rows` (25), in their own tab. Taking two may need more than the Budget, and the player picks (ADR-0017).
+The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, and each recipe's Flips to Craft, sized as if it were the only buy within the Budget and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day or ROI, and Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab. Taking two may need more than the Budget, and the player picks (ADR-0017).
 _Avoid_: buy list, snipes, basket
+
+**Per click**:
+A Flip to Sell's or Flip to Vendor's Profit for each click it takes: each Listing it buys (in Era every Listing is its own buyout) and each stack it posts, at the Item Key's usual Sale Event size. A Flip to Vendor posts nothing.
+_Avoid_: profit per action, effort
+
+**Per day**:
+A Flip to Sell's Profit for each day until its last unit sells: the unbound held units ahead of it and its own units, at the Sell Rate under the Flip priors, the same queue the Deposits use. A Flip to Vendor sells now, so it comes before any Flip to Sell.
+_Avoid_: profit per hour, velocity
 
 **Budget**:
 The most gold the player will spend in a Market, set in the Recommendation Table and carried to the Brain in each Character Read. Each Shopping List option, and the Prediction buys, spend up to the lesser of it and the pooled gold. None set means all the gold. The Prediction caps stay shares of the pooled gold (ADR-0006).

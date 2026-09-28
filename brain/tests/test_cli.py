@@ -497,7 +497,34 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert "Shopping List, options each sized on its own within 12g 34s 56c\n" in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one 6c deposit (60% of the 10c Vendor Price) first (#78).
-    assert ["2589", "Sell", "2", "7s 00c", "4s 92c", "14s 00c", "1"] in lines
+    # #98: 1 Listing bought and 1 stack posted, 2s 46c a click. Behind the 3 held, the
+    # last of the 5 sells at 48 a day / 25 (the 24 h Flip prior) in 2.6 days, 1s 89c a day.
+    # 4s 92c on 14s is 35.1%.
+    assert [
+        "Item",
+        "Action",
+        "Qty",
+        "Max price",
+        "Profit",
+        "Cost",
+        "Per click",
+        "Per day",
+        "ROI",
+        "Sales",
+        "Note",
+    ] in lines
+    assert [
+        "2589",
+        "Sell",
+        "2",
+        "7s 00c",
+        "4s 92c",
+        "14s 00c",
+        "2s 46c",
+        "1s 89c",
+        "35.1%",
+        "1",
+    ] in lines
 
 
 def test_replay_prints_each_markets_policies_with_the_brains_lead_over_each(tmp_path):

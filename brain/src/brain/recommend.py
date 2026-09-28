@@ -151,11 +151,17 @@ class Row:
     # hint at (`roi_hint`). Only a hint: the Action stands either way (ADR-0003).
     roi: float | None = None
     roi_hint: bool = False
+    # A Flip to Sell's or Flip to Vendor's effort and wait (#98): the Listings it buys,
+    # the stacks it posts, and the days until its last unit sells (None for a Flip to
+    # Vendor, which sells now). Not compared, so rows are checked on them apart.
+    listings: int | None = field(default=None, compare=False)
+    posts: int | None = field(default=None, compare=False)
+    days: float | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
 class _VendorBuy:
-    """Units of one Listing worth buying to Vendor. Each pays on its own."""
+    """The units of one Listing worth buying to Vendor. Each pays on its own."""
 
     item_key: str
     unit_buyout: int
@@ -175,6 +181,7 @@ class _SellRun:
     units: Supply
     post_at: float
     profit: float
+    days: float  # until its last unit sells, behind the held units (#98)
 
     @property
     def cost(self) -> int:
@@ -189,6 +196,11 @@ class _SellRun:
         """The highest unit buyout paid, the run's last Listing."""
         return self.units[-1][0]
 
+    @property
+    def listings(self) -> int:
+        """The Listings bought: `units` has one entry per Listing (#98)."""
+        return len(self.units)
+
 
 @dataclass(frozen=True)
 class _FlipToSell:
@@ -199,6 +211,7 @@ class _FlipToSell:
     item_key: str
     runs: tuple[_SellRun, ...]
     sale_events: int
+    stack: float  # the units posted per stack: the usual Sale Event size (#98)
 
     @property
     def whole(self) -> _SellRun:
@@ -684,11 +697,19 @@ class _Valuer:
                 unbound.get(item_key, 0),
                 self.queue(item_key, flips=True),
                 self.effort(item_key),
+                self.stack(item_key),
                 self.cut,
                 self._config,
             )
         ]
         return self.after({}, unbound), buys
+
+    def stack(self, item_key: str) -> float:
+        """The units of an Item Key a Flip posts per stack (#98): its usual Sale Event
+        size under the Flip prior, or 1 if it doesn't stack."""
+        if item_key in self.non_stacking:
+            return 1.0
+        return _sale_size(self.rates.get(item_key), self._config.sale_size_prior_events_flips)
 
     def post_at(self, item_key: str) -> float | None:
         """The price to post one unit at once `flipped` is bought (`_post_at`)."""
@@ -1628,6 +1649,7 @@ def _flips(
     held: int,
     queue: _Queue,
     effort: int,
+    stack: float,
     cut: float,
     config: Config,
 ) -> list[_VendorBuy | _FlipToSell]:
@@ -1668,17 +1690,18 @@ def _flips(
         if not _resells(resale, unit, vendor_price, effort, queue.lost(held + bought - 1), config):
             continue
         profit = sum((resale - 2 * effort - u) * n for u, n in prefix) - queue.lost_by(held, bought)
-        runs.append(_SellRun(prefix, post_at, profit))
+        days = (held + bought) / (queue.units_per_hour * 24)
+        runs.append(_SellRun(prefix, post_at, profit, days))
     buys: list[_VendorBuy | _FlipToSell] = []
     to_sell: Supply = []
     if runs:
-        flip = _FlipToSell(item_key, tuple(runs), rate.sale_events)
+        flip = _FlipToSell(item_key, tuple(runs), rate.sale_events, stack)
         buys.append(flip)
         to_sell = flip.whole.units
     if vendor_price is not None:
         buys += [
             _VendorBuy(item_key, unit, quantity, vendor_price - effort - unit)
-            for unit, quantity in without(offers, to_sell)
+            for unit, quantity in _listings_left(offers, to_sell)
             if vendor_price - effort - unit > 0
         ]
     return buys
@@ -1790,16 +1813,23 @@ def _units_per_day(rate: SellRate | None, prior_hours: float, prior_events: floa
     if rate is None or not rate.sale_events:
         return 0.0
     mean_size = rate.sale_units / rate.sale_events
-    shrunk_size = (rate.sale_units + prior_events * rate.typical_sale_size) / (
-        rate.sale_events + prior_events
-    )
     # units / (hours + prior) * 24 * shrunk / mean, written so that no priors leave the
     # rate exactly as is.
     return (
         rate.units_per_day
         * rate.window_hours
         / (rate.window_hours + prior_hours)
-        * (shrunk_size / mean_size)
+        * (_sale_size(rate, prior_events) / mean_size)
+    )
+
+
+def _sale_size(rate: SellRate | None, prior_events: float) -> float:
+    """The Item Key's average Sale Event size shrunk by the Sale Size Prior (#24), or 1
+    without Sale Events."""
+    if rate is None or not rate.sale_events:
+        return 1.0
+    return (rate.sale_units + prior_events * rate.typical_sale_size) / (
+        rate.sale_events + prior_events
     )
 
 
@@ -1837,6 +1867,21 @@ def _ceiling(*caps: float | None) -> float | None:
     """The lowest of the caps on a Sell price that apply, or None if none do."""
     known = [c for c in caps if c is not None]
     return min(known) if known else None
+
+
+def _listings_left(offers: Supply, bought: Supply) -> Supply:
+    """`offers` less the units `bought`, still one entry per Listing, cheapest first:
+    unlike `without`, same-price Listings aren't merged, so they can be counted (#98)."""
+    taken = Counter()
+    for unit, quantity in bought:
+        taken[unit] += quantity
+    left = []
+    for unit, quantity in sorted(offers):
+        take = min(quantity, taken[unit])
+        taken[unit] -= take
+        if quantity > take:
+            left.append((unit, quantity - take))
+    return left
 
 
 def without(supply: Supply, bought: Supply) -> Supply:
@@ -1896,6 +1941,10 @@ def _option(
                 post_at=run.post_at,
                 sale_events=buy.sale_events,
                 cost=run.cost,
+                listings=run.listings,
+                # A hair under, so 4 units in stacks of 2.0000001 are still 2 posts.
+                posts=math.ceil(run.quantity / buy.stack - 1e-9),
+                days=run.days,
             )
             continue
         quantity = min(buy.quantity, int(gold // buy.unit_buyout))
@@ -1914,6 +1963,8 @@ def _option(
                 buy.unit_buyout,
                 profit,
                 cost=cost,
+                listings=1,
+                posts=0,
             )
         else:
             r = rows[key]
@@ -1923,6 +1974,7 @@ def _option(
                 price=max(r.price, buy.unit_buyout),
                 profit=r.profit + profit,
                 cost=r.cost + cost,
+                listings=r.listings + 1,
             )
     return list(rows.values())
 
@@ -1955,18 +2007,45 @@ def _options(
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
-    profitable first. The Flips to Sell and to Vendor are cut to `flip_rows` and the Flips
-    to Craft, apart, to `craft_rows` (#87). A Flip to Sell is priced on the run it buys
-    (ADR-0011)."""
+    profitable first. The Flips to Sell and to Vendor are cut to those in the top
+    `flip_rows` by any of Profit, Per click, Per day or ROI (#98), and the Flips to Craft,
+    apart, to the top `craft_rows` by Profit (#87). A Flip to Sell is priced on the run it
+    buys (ADR-0011)."""
     groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
     for buy in buys:
         groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
     flips = [row for group in groups.values() for row in _option(group, [], gold)]
     crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
-    flips.sort(key=lambda r: -r.profit)
+    kept = {
+        id(r)
+        for measure in (_profit, _per_click, _per_day, _roi)
+        # Ties go to the most profit.
+        for r in sorted(flips, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
+    }
     crafted.sort(key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.
-    return sorted(flips[:flip_rows] + crafted[:craft_rows], key=lambda r: -r.profit)
+    return sorted(
+        [r for r in flips if id(r) in kept] + crafted[:craft_rows], key=lambda r: -r.profit
+    )
+
+
+def _profit(row: Row) -> float:
+    return row.profit
+
+
+def _per_click(row: Row) -> float:
+    """A Flip's Profit for each Listing bought and stack posted (#98)."""
+    return row.profit / (row.listings + row.posts)
+
+
+def _per_day(row: Row) -> float:
+    """A Flip's Profit for each day until its last unit sells: a Flip to Vendor sells now,
+    before any Flip to Sell (#98)."""
+    return math.inf if row.days is None else row.profit / row.days
+
+
+def _roi(row: Row) -> float:
+    return row.profit / row.cost
 
 
 def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[ReagentBuy, ...]:

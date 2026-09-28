@@ -46,3 +46,11 @@ ADR-0010's one-pass repricing (`_buy_what_fits`) is gone.
 With one cut, Flips to Craft (often tens of silver) fell off a busy Scan's list behind big Flips to Sell, though the player wants to see them. Now the Flips to Sell and to Vendor are sorted by profit and cut to `shopping_list_rows` (50), and the Flips to Craft apart to `craft_list_rows` (25). `shopping` stays one list, the two cuts together, most profit first. The Addon shows the Flips to Craft (the rows with `buys`) in their own **Flips to Craft** tab after the Shopping List, with the same columns. Each tab folds its own options over the Budget.
 
 Replay's `_taken` is unchanged: it goes through the (now longer) list in profit order while the gold lasts, so it grades what the player is shown. Replay numbers from before this change aren't comparable to later ones, since up to 75 options can now be taken.
+
+## Amendment: the cut keeps the top options by effort and wait too (#98)
+
+The player would rather buy 2 staffs for 10g than 400 potions for 22g: the potions take far more clicks, and have to sell. Each Shopping List row (Flips to Sell and Flips to Vendor) now carries `listings` (the Listings it buys, counted before same-price Listings are merged), `posts` (stacks posted, at the usual Sale Event size; none for a Flip to Vendor) and `days` (until its last unit sells, behind the unbound held units; none for a Flip to Vendor, which sells now). From them and Profit and Cost come **Per click**, **Per day** and ROI.
+
+The cut keeps a Flip to Sell or Flip to Vendor that's in the top `shopping_list_rows` (50) on any of Profit, Per click, Per day or ROI, ties going to the most profit. The list can reach four times that, but the four usually overlap a lot. The Flips to Craft are still cut by Profit alone, and their tab is unchanged.
+
+Not changed: how each option is sized (profit per gold within the Budget), the Sale Horizon (7 days stays "how long I'll wait": risk is ranked by Per day, not by a shorter horizon), and the replay, which doesn't grade these measures. Replay's `_taken` still walks the list in profit order, so a longer list can change its numbers. The Addon shows sortable Per click, Per day and ROI columns on the Shopping List tab, opens it sorted by Profit, and sums a row up in its tooltip, e.g. `12 Listings + 3 posts, sells in ~2.5 days`.

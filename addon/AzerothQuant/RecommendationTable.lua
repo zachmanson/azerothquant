@@ -232,12 +232,30 @@ function RecommendationTable.roiLines(r, held)
   return lines
 end
 
+local function plural(n, word)
+  return n .. " " .. word .. (n == 1 and "" or "s")
+end
+
+-- A Flip's clicks and wait (#98), e.g. "12 Listings + 3 posts, sells in ~2.5 days". A Flip
+-- to Vendor posts nothing and has no wait.
+local function effortLine(r)
+  if not r.days then
+    return plural(r.listings, "Listing") .. ", vendor now"
+  end
+  local wait = r.days < 1 and string.format("~%d h", math.max(1, math.floor(r.days * 24 + 0.5)))
+    or string.format("~%.1f days", r.days)
+  return plural(r.listings, "Listing") .. " + " .. plural(r.posts, "post") .. ", sells in " .. wait
+end
+
 -- A row's details. A Craft's list its reagents, since its note only names them by ID.
 local function details(r, nameOf, held, holdersOf)
   if r.uses or r.buys then
     return RecommendationTable.reagentLines(r, nameOf, holdersOf)
   end
   local lines = RecommendationTable.roiLines(r, held[r.itemKey])
+  if r.listings then
+    lines[#lines + 1] = effortLine(r)
+  end
   if r.margin then
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)
   end
@@ -308,6 +326,38 @@ end
 
 local function shoppingKeys(r, name, cells)
   return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.postAt, r.profit, r.cost, cells[8]:lower() }
+end
+
+-- A Flip's Profit per Listing bought and stack posted, per day until its last unit sells
+-- (a Flip to Vendor's sells now, so it sorts first), and on its Cost (#98). nil each for a
+-- row the Brain wrote no counts for.
+local function measures(r)
+  if not r.listings then
+    return nil, nil, nil
+  end
+  local perDay = r.days and r.profit / r.days or math.huge
+  return r.profit / (r.listings + r.posts), perDay, r.profit / r.cost
+end
+
+-- The Shopping List tab's Flips to Sell and Flips to Vendor: the Flips to Craft's columns
+-- with Per click, Per day and ROI after Profit.
+local function flipCells(r, name)
+  local cells = shoppingCells(r, name)
+  local perClick, perDay, roi = measures(r)
+  local day = perDay == math.huge and "now" or money(perDay)
+  local share = roi and string.format("%d%%", wholePercent(roi)) or ""
+  table.insert(cells, 7, money(perClick))
+  table.insert(cells, 8, day)
+  table.insert(cells, 9, share)
+  return cells
+end
+
+local function flipKeys(r, name, cells)
+  local perClick, perDay, roi = measures(r)
+  return {
+    name:lower(), cells[2]:lower(), r.quantity, r.price, r.postAt, r.profit, perClick, perDay, roi, r.cost,
+    cells[11]:lower(),
+  }
 end
 
 local function predictionBuyCells(r, name)
@@ -460,6 +510,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
     rows[#rows + 1] = r
   end
   local shoppingColumns = { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" }
+  local flipColumns = {
+    "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Per click", "Per day", "ROI", "Cost", "Note",
+  }
   return {
     title = realm .. " " .. faction,
     header = header(entry, now, budget),
@@ -477,10 +530,10 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
       ),
       section(
         "Shopping List",
-        shoppingColumns,
+        flipColumns,
         flips,
-        shoppingCells,
-        shoppingKeys,
+        flipCells,
+        flipKeys,
         { column = 6, descending = true },
         nameOf,
         holdersOf,

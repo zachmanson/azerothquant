@@ -350,7 +350,19 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         ],
     )
     shopping = _table(
-        ["Item", "Action", "Qty", "Max price", "Profit", "Cost", "Sales", "Note"],
+        [
+            "Item",
+            "Action",
+            "Qty",
+            "Max price",
+            "Profit",
+            "Cost",
+            "Per click",
+            "Per day",
+            "ROI",
+            "Sales",
+            "Note",
+        ],
         [
             [
                 r.item_key,
@@ -359,6 +371,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
                 _money(r.price),
                 _money(r.profit),
                 _money(r.cost),
+                *_measures(r),
                 _count(r.sale_events),
                 r.note,
             ]
@@ -440,6 +453,18 @@ def _count(n: int | None) -> str:
 
 def _percent(share: float | None) -> str:
     return "" if share is None else f"{share:.1%}"
+
+
+def _measures(row: Row) -> list[str]:
+    """A Shopping List row's Per click, Per day and ROI (#98). A Flip to Craft has none."""
+    if row.listings is None:
+        return ["", "", ""]
+    per_day = "now" if row.days is None else _money(row.profit / row.days)
+    return [
+        _money(row.profit / (row.listings + row.posts)),
+        per_day,
+        _percent(row.profit / row.cost),
+    ]
 
 
 def _roi(row: Row, held: int) -> str:
