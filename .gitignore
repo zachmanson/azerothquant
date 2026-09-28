@@ -20,5 +20,8 @@ brain/archive/
 # The player's Predictions (copy from brain/predictions.example.toml)
 brain/predictions.toml
 
+# Frozen Grades and held-at-writing costs (the Brain writes them, #66)
+brain/grades.toml
+
 # Per-machine Claude Code settings
 .claude/settings.local.json

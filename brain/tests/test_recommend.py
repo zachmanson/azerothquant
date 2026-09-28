@@ -2112,6 +2112,64 @@ def test_a_best_exit_is_never_a_sale_above_what_a_merchant_charges(db):
     ]
 
 
+# --- Frozen in grades.toml (#66) ---
+
+
+def frozen(tmp_path):
+    return replace(CONFIG, grades_path=tmp_path / "grades.toml")
+
+
+def worth_nothing(*args):
+    return 0.0
+
+
+def test_a_held_at_writing_cost_is_frozen_once_its_day_has_passed(db, tmp_path, monkeypatch):
+    # The same held units as the first held-at-writing test (604). Later, the pricing
+    # changes, and the cost recorded then must stand.
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    later = T0 + 3 * DAY
+    run(
+        db,
+        [*selling_two_linen_an_hour(), scan(later, row(quantity=20, unit=500))],
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+    )
+    config = frozen(tmp_path)
+    p = prediction(LINEN_KEY, written=written)
+    assert held_at_writing(db, config, MARKET, [p]) == [Held("Linen spike", LINEN_KEY, 10, 604)]
+
+    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+
+    assert held_at_writing(db, config, MARKET, [p]) == [Held("Linen spike", LINEN_KEY, 10, 604)]
+
+
+def test_a_held_at_writing_cost_is_not_frozen_before_a_scan_after_its_day(
+    db, tmp_path, monkeypatch
+):
+    # Written the day after the last Scan: a Scan or a Read from its day may still come.
+    run(db, selling_two_linen_an_hour(), [character_read(item(count=10), vendor_prices={2589: 10})])
+    config = frozen(tmp_path)
+    p = prediction(LINEN_KEY, written=date.fromtimestamp(T0 + HOUR) + timedelta(days=1))
+    held_at_writing(db, config, MARKET, [p])
+
+    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+
+    assert held_at_writing(db, config, MARKET, [p]) == [Held("Linen spike", LINEN_KEY, 10, 0)]
+
+
+def test_a_grade_is_frozen_once_worked_out(db, tmp_path, monkeypatch):
+    run(db, selling_two_linen_an_hour(), [character_read(item(count=10), vendor_prices={2589: 10})])
+    config = frozen(tmp_path)
+    written = TODAY + timedelta(days=1)
+    p = prediction(LINEN_KEY, written=written, happened=written + timedelta(days=1))
+    now = start_of(written + timedelta(days=2)) + 3 * HOUR
+    [grade] = grades(db, config, MARKET, [p], now)
+    assert grade.open_value > 0
+
+    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+
+    assert grades(db, config, MARKET, [p], now + DAY) == [grade]
+
+
 # --- Grading (#27) ---
 
 

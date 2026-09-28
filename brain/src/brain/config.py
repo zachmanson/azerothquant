@@ -96,6 +96,7 @@ DEFAULT_NON_STACKING_EFFORT_COPPER = 500
 DEFAULT_HISTORY_FILE = "history.sqlite"
 DEFAULT_ARCHIVE_DIR = "archive"
 PREDICTIONS_FILE = "predictions.toml"
+GRADES_FILE = "grades.toml"
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,9 @@ class Config:
     post_undercut_copper: int = DEFAULT_POST_UNDERCUT_COPPER
     # The player's Predictions, always next to the config file (ADR-0006).
     predictions_path: Path = Path(PREDICTIONS_FILE)
+    # Where Grades and held-at-writing costs are frozen, next to predictions.toml (#66).
+    # A loaded config always has one; None, for tests, means nothing is frozen.
+    grades_path: Path | None = None
     # The most a unit bought under a Prediction may lose, as a share of its cost.
     prediction_max_loss_share: float = DEFAULT_PREDICTION_MAX_LOSS_SHARE
     # The most gold under one Prediction, and under all of them, as a share of pooled gold.
@@ -330,6 +334,7 @@ def load_config(path: Path) -> Config:
         flip_min_sale_events=min_sale_events,
         post_undercut_copper=undercut,
         predictions_path=path.parent / PREDICTIONS_FILE,
+        grades_path=path.parent / GRADES_FILE,
         prediction_max_loss_share=max_loss_share,
         prediction_cap_share=cap_share,
         predictions_cap_share=total_cap_share,

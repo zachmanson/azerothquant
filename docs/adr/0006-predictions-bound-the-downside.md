@@ -13,3 +13,10 @@ The player's game-knowledge calls ("these mats will spike when the raid drops") 
 - Trust comes from the realized return of graded Predictions, measured from Outcomes, never from the player's own judgment. With 5 to 15 graded a year the record is shown, not applied, except for one brake: caps are halved while the pooled realized return is negative.
 - A Prediction with no Catalyst marked by its lapse date Lapses, so a wrong call can't hold gold forever or dodge grading.
 - Predictions live in a player-edited `predictions.toml`, not only in the history database: they aren't recorded by the Addon, so they can't be rebuilt from the Archive (ADR-0005).
+
+## Amendment: Grades and held-at-writing costs are frozen in `grades.toml` (#66)
+
+Both were worked out again from history on every run, so any change to how Best Exit Value is priced (like #64) silently rewrote past Grades and the cost of units held when a Prediction was written. The Brain now records each one the first time it works it out, in a Brain-owned `grades.toml` next to `predictions.toml`, keyed by Prediction name, and reads it from there from then on. A held-at-writing cost is recorded only once the Market has a Scan after the Prediction's written day, since a Scan or Read from that day may still come in. The file is append-only: the Brain never overwrites an entry, and the player deletes one by hand to have it worked out again. An entry whose Prediction was renamed or removed is left behind and never used.
+
+- Not a table in the history database: that is rebuilt from the Archive (ADR-0005), and a Grade kept only there would be lost or recomputed on `brain rebuild`.
+- Not the pricing rule versioned by date: the code would keep every old rule forever.

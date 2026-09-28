@@ -352,6 +352,7 @@ def test_predictions_are_read_from_next_to_the_config(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
     assert config.predictions_path == tmp_path / "predictions.toml"
+    assert config.grades_path == tmp_path / "grades.toml"
 
 
 def test_prediction_guards_default_to_the_designed_values(tmp_path):

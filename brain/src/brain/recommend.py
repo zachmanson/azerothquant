@@ -11,12 +11,13 @@ import sqlite3
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from types import MappingProxyType
 
 from brain.config import Config
 from brain.fair_value import Supply, fair_value
+from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
 from brain.history import (
     Holding,
     KnownRecipe,
@@ -197,26 +198,6 @@ class _HoldBuy:
 
 
 @dataclass(frozen=True)
-class Grade:
-    """A Prediction's realized result, fixed at its grading moment (ADR-0006): its sold
-    units after the Auction House cut, plus its open units at their Best Exit Value
-    without it then, against what all of them cost."""
-
-    prediction: str
-    graded_at: int
-    proceeds: float
-    open_value: float
-    cost: int
-
-    @property
-    def return_(self) -> float | None:
-        """Gain over cost, or None if its units cost nothing."""
-        if not self.cost:
-            return None
-        return (self.proceeds + self.open_value - self.cost) / self.cost
-
-
-@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -345,19 +326,31 @@ def held_at_writing(
 ) -> list[Held]:
     """The units of each Prediction's Item Keys the Market's Characters held at the start
     of its written day, costed at what their best Action would have brought then, as of
-    the latest Scan up to that moment (ADR-0007). Bound units are never Held."""
+    the latest Scan up to that moment (ADR-0007). Bound units are never Held.
+
+    Once the Market has a Scan after its written day, a Prediction's are frozen in
+    grades.toml and read from there from then on (#66)."""
     characters = character_markets(conn).get(market, [])
+    frozen = load_frozen(config.grades_path).held
+    times = scan_times(conn, market)
     result = []
     for p in predictions:
+        if p.name in frozen:
+            result += frozen[p.name]
+            continue
         at = start_of(p.written)
         held = _market_holdings(conn, market, characters, as_of=at)
+        costed = []
         for item_key in p.item_keys:
             h = held.get(item_key)
             if h is None or not h.bags + h.bank:
                 continue
             units = h.bags + h.bank
             cost = _exit_value(conn, config, market, item_key, units, at)
-            result.append(Held(p.name, item_key, units, round(cost)))
+            costed.append(Held(p.name, item_key, units, round(cost)))
+        if config.grades_path and times and times[-1] >= start_of(p.written + timedelta(days=1)):
+            freeze_held(config.grades_path, p.name, costed)
+        result += costed
     return result
 
 
@@ -368,13 +361,21 @@ def grades(
     predictions: Sequence[Prediction],
     now: int,
 ) -> list[Grade]:
-    """The Grade of each Prediction a Sale Horizon has passed since it ended, by `now`."""
+    """The Grade of each Prediction a Sale Horizon has passed since it ended, by `now`.
+    A Grade is frozen in grades.toml the first time, and read from there from then on
+    (#66)."""
     due = [p for p in predictions if ended_at(p) + config.sale_horizon_seconds <= now]
     if not due:
         return []
+    frozen = load_frozen(config.grades_path).grades
+    if all(p.name in frozen for p in due):
+        return [frozen[p.name] for p in due]
     market_lots = _market_lots(conn, config, market, predictions)
     result = []
     for p in due:
+        if p.name in frozen:
+            result.append(frozen[p.name])
+            continue
         graded_at = ended_at(p) + config.sale_horizon_seconds
         settled = settle(p, market_lots, graded_at, _cut(market, config))
         open_value = sum(
@@ -382,7 +383,10 @@ def grades(
             for item_key, units in settled.open_units.items()
             if units
         )
-        result.append(Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost))
+        grade = Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost)
+        if config.grades_path:
+            freeze_grade(config.grades_path, grade)
+        result.append(grade)
     return result
 
 

@@ -34,7 +34,7 @@ The Brain reads `brain/config.toml`, which maps each WoW install folder to its E
 Copy-Item brain\config.example.toml brain\config.toml
 ```
 
-Predictions, your game-knowledge calls that some items will be worth much more after a raid or phase release, go in `brain/predictions.toml` next to it (see `brain/predictions.example.toml` and ADR-0006). It's optional, not committed, and can't be rebuilt from the Archive, so keep a copy of it.
+Predictions, your game-knowledge calls that some items will be worth much more after a raid or phase release, go in `brain/predictions.toml` next to it (see `brain/predictions.example.toml` and ADR-0006). It's optional, not committed, and can't be rebuilt from the Archive, so keep a copy of it. The Brain freezes each Prediction's Grade, and the cost of what you held when you wrote it, in `brain/grades.toml` beside it. That file can't be rebuilt either (a new pricing rule would grade differently), so keep a copy of it too, and delete an entry only to have it worked out again.
 
 ### Running the Brain
 

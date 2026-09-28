@@ -24,6 +24,7 @@ from pathlib import Path
 
 from brain.archive import Archive
 from brain.config import Config, ConfigError, Era, load_config
+from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
     ImportReport,
@@ -167,7 +168,7 @@ def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
     # SavedVariables.
     try:
         markets = recommend(conn, config, load_predictions(config.predictions_path))
-    except PredictionsError as e:
+    except (PredictionsError, GradesError) as e:
         log.error("No Recommendations written: %s", e)
         markets = []
     except Exception:
@@ -229,6 +230,9 @@ def _recommend(config: Config) -> int:
         return 1
     except PredictionsError as e:
         log.error("Can't load the Predictions: %s", e)
+        return 1
+    except GradesError as e:
+        log.error("Can't load the Grades: %s", e)
         return 1
     print(text, end="")
     return 0
