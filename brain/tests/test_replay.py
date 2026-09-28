@@ -225,6 +225,25 @@ def test_the_brain_takes_its_options_most_profit_first_while_the_gold_lasts(db):
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(3 * (50 - 5))
 
 
+def test_the_brain_takes_only_the_most_profitable_flips_as_before_the_other_measures(db):
+    # #98: shopping_list_rows = 1. The Tin (12 profit on one Listing) is on the Shopping
+    # List only for its Per click. The replay takes the Flips from the top rows by Profit
+    # alone, so it grades the same options as before #98: just the Ore (50 profit).
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        linen_selling_then_crashing(
+            *[row(ORE, quantity=2, unit=5)] * 5, row(tin, quantity=3, unit=6)
+        ),
+        [character_read(money=10_000, vendor_prices={2589: 10, 2770: 10, 2771: 10})],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(10 * 10 - 50)
+
+
 def test_a_held_reagent_the_brains_flip_to_craft_uses_is_not_also_sold(db):
     # #86: the held Linen is on a Holdings Sell row and the Flip to Craft uses it too
     # (buying 5 more at 100 for 3 Bolts, posted at 999). Taken, the craft has it. Held

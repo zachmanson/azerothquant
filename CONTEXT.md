@@ -193,7 +193,7 @@ How long the player is willing to wait for held units to sell. Only the units Se
 _Avoid_: timeout, patience
 
 **Shopping List**:
-The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, and each recipe's Flips to Craft, sized as if it were the only buy within the Budget and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day or ROI, and Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab. Taking two may need more than the Budget, and the player picks (ADR-0017).
+The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, and each recipe's Flips to Craft, sized as if it were the only buy within the Budget and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day (Flips to Sell only) or ROI, and Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab. Taking two may need more than the Budget, and the player picks (ADR-0017).
 _Avoid_: buy list, snipes, basket
 
 **Per click**:

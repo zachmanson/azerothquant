@@ -802,6 +802,25 @@ describe("RecommendationTable.nextSort", function()
   end)
 end)
 
+describe("RecommendationTable saved sorts", function()
+  local holdings = build(entry()).sections[1] -- Item, Action, Qty, Price, Profit, ROI, Note
+
+  it("saves a sort by its column's name, so it outlives a change of column order", function()
+    assert.are.same({ column = "Qty", descending = true },
+      RecommendationTable.savedSort(holdings, { column = 3, descending = true }))
+  end)
+
+  it("restores a saved sort to its column's place", function()
+    assert.are.same({ column = 3, descending = false },
+      RecommendationTable.restoredSort(holdings, { column = "Qty", descending = false }))
+  end)
+
+  it("restores nothing for a column the section no longer has, or with nothing saved", function()
+    assert.is_nil(RecommendationTable.restoredSort(holdings, { column = "Gone", descending = true }))
+    assert.is_nil(RecommendationTable.restoredSort(holdings, nil))
+  end)
+end)
+
 describe("RecommendationTable.waitingNote", function()
   it("says nothing when every Scan is in the table", function()
     assert.is_nil(RecommendationTable.waitingNote(0, 0))

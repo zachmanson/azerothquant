@@ -49,7 +49,6 @@ local headers = {} -- pooled column header buttons
 local tabs = {}
 local selected -- the title of the section on show
 local shown -- the section on show, as built, so a header click knows its columns
-local sorts = {} -- per section title, the sort picked by header clicks; empty on each open
 local openedByAuctionHouse = false
 local redrawQueued = false
 
@@ -205,9 +204,11 @@ end
 
 local redraw
 
--- The sort the section on show is in: the last header click, or its default.
+-- The sort the section on show is in: the last header click, saved across sessions (#98),
+-- or its default.
 local function activeSort(section)
-  return sorts[section.title] or section.sort
+  local saved = db.recommendationSorts and db.recommendationSorts[section.title]
+  return RecommendationTable.restoredSort(section, saved) or section.sort
 end
 
 -- Gold column headers over the rows. A click sorts by that column (see nextSort).
@@ -227,7 +228,9 @@ local function getHeader(c)
       return
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    sorts[shown.title] = RecommendationTable.nextSort(shown, activeSort(shown), c)
+    local sort = RecommendationTable.nextSort(shown, activeSort(shown), c)
+    db.recommendationSorts = db.recommendationSorts or {}
+    db.recommendationSorts[shown.title] = RecommendationTable.savedSort(shown, sort)
     redraw()
   end)
   headers[c] = header
@@ -549,7 +552,6 @@ local function show(byAuctionHouse)
   end
   restorePosition()
   scroll:SetVerticalScroll(0)
-  sorts = {} -- each open starts on the default sorts
   frame:Show()
 end
 

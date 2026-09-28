@@ -2008,7 +2008,8 @@ def _options(
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
     profitable first. The Flips to Sell and to Vendor are cut to those in the top
-    `flip_rows` by any of Profit, Per click, Per day or ROI (#98), and the Flips to Craft,
+    `flip_rows` by any of Profit, Per click, Per day (Flips to Sell only) or ROI (#98),
+    and the Flips to Craft,
     apart, to the top `craft_rows` by Profit (#87). A Flip to Sell is priced on the run it
     buys (ADR-0011)."""
     groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
@@ -2017,9 +2018,16 @@ def _options(
     flips = [row for group in groups.values() for row in _option(group, [], gold)]
     crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
     kept: set[int] = set()
-    for measure in (_profit, per_click, per_day, return_on_cost):
+    selling = [r for r in flips if r.action is Action.SELL]
+    for measure, rows in (
+        (_profit, flips),
+        (per_click, flips),
+        # Every Flip to Vendor ties at "now", so Per day ranks the Flips to Sell alone.
+        (per_day, selling),
+        (return_on_cost, flips),
+    ):
         # Ties go to the most profit.
-        top = sorted(flips, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
+        top = sorted(rows, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
         kept |= {id(r) for r in top}
     crafted.sort(key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.

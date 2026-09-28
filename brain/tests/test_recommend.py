@@ -918,9 +918,10 @@ def test_an_option_in_the_top_rows_only_by_profit_per_click_is_kept(db):
     ]
 
 
-def test_a_flip_to_vendor_sells_now_so_it_is_top_by_profit_per_day(db):
+def test_a_flip_to_vendor_never_takes_a_top_per_day_row(db):
     # shopping_list_rows = 1. The Linen Flip to Sell beats the Ore on Profit, Per click
-    # and ROI, but has to wait to sell: the Ore, vendored now, is kept too.
+    # and ROI. The Ore, vendored now, would top Per day, but Per day ranks only Flips to
+    # Sell: every Flip to Vendor ties there, and they'd crowd the Flips to Sell out.
     result = run(
         db,
         selling_two_linen_an_hour(row(quantity=5, unit=500), unit=1000)[:-1]
@@ -938,7 +939,6 @@ def test_a_flip_to_vendor_sells_now_so_it_is_top_by_profit_per_day(db):
 
     assert [(r.item_key, r.action) for r in result[MARKET].shopping_list] == [
         (LINEN_KEY, Action.SELL),
-        (ORE_KEY, Action.VENDOR),
     ]
 
 

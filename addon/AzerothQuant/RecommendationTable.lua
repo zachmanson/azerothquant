@@ -411,6 +411,26 @@ function RecommendationTable.nextSort(section, state, column)
   return { column = column, descending = not TEXT_COLUMNS[section.columns[column]] }
 end
 
+-- A header-click sort as saved across sessions (#98): by its column's name, not its place,
+-- so a saved sort survives a change of columns.
+function RecommendationTable.savedSort(section, sort)
+  return { column = section.columns[sort.column], descending = sort.descending }
+end
+
+-- A saved sort back in the section's column places, or nil when nothing is saved or the
+-- section no longer has that column.
+function RecommendationTable.restoredSort(section, saved)
+  if not saved then
+    return nil
+  end
+  for c, name in ipairs(section.columns) do
+    if name == saved.column then
+      return { column = c, descending = saved.descending }
+    end
+  end
+  return nil
+end
+
 -- holdersOf is the entry's held: which Characters hold each Item Key. inBags(itemKey), given
 -- for Holdings only, says whether the logged-in Character has it in its bags. budget, given
 -- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
