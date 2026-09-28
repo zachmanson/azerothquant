@@ -1,3 +1,17 @@
+2026-09-28 (later 31): #98 GRILLED (3 rounds), spec on the issue, ready-for-agent + core. The Shopping List tab only (Flips to Sell and Flips to Vendor; the Flips to Craft tab is unchanged). New per-row measures:
+- Per click = Profit / (Listings bought + stacks posted). Listings are counted exactly, so don't merge same-price Listings before counting. Posts = ceil(units / usual Sale Event size); a Flip to Vendor posts nothing.
+- Per day = Profit / days until the run's last unit sells, with held units queued ahead (the Deposit queue). A Flip to Vendor shows "now".
+- ROI = Profit / Cost.
+
+The cut keeps a row in the top `shopping_list_rows` on ANY of Profit / Per click / Per day / ROI. The buying order, the Sale Horizon and the replay are unchanged. Recommendations.lua gets `listings`, `posts` and `days`; the Addon gets sortable Per click / Per day / ROI columns (it opens on Profit and remembers the clicked sort) and the tooltip line `12 Listings + 3 posts, sells in ~2.5 days`. The CLI gets the columns too.
+
+Also this session: #90/#91 were NOT decided. A spec was posted there by mistake, then withdrawn (the comments say so), and the labels are back to needs-triage + later. #99 (black market NPC) was filed and then closed as not planned. It can be refiled when #91 is grilled.
+
+Next, in order:
+1. #98 build (/tdd), then /code-review + commit. It needs no PC.
+2. At the PC: the (later 30) and (later 27) checks.
+3. Once `core` is empty: ask whether #90 or #97 move to `core`.
+
 2026-09-28 (later 32): #98 BUILT on branch `claude/zen-mccarthy-xaqoze` (a cloud session, so not on `main` yet). Commits 582b28d + the review-fix commit after it. The issue is still open and labelled needs-pc.
 - Brain:
   - Each Flip to Sell and Flip to Vendor row gets `listings`, `posts` and `days`. `_listings_left` keeps same-price Listings apart for the Flip to Vendor count; the old `without` merged them. `_SellRun.listings` is `len(units)`.
