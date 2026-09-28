@@ -166,8 +166,8 @@ def test_bucket_that_can_last_the_gap_still_matches(db):
     assert listings(db, MARKET) == [listing(T0, T0 + 30 * MINUTE, time_left=1)]
 
 
-def test_after_more_than_48_hours_everything_is_new(db):
-    later = T0 + 48 * HOUR + 1
+def test_after_more_than_24_hours_everything_is_new(db):
+    later = T0 + 24 * HOUR + 1
     run(db, scan(T0, row(time_left=4)), scan(later, row(time_left=4)))
 
     assert sorted(listings(db, MARKET)) == [
