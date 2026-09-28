@@ -1,3 +1,16 @@
+2026-09-28 (later 37): #76 SLICE 1 DONE (e8da1ea), with /tdd then /code-review. It adds the Disenchant data file (`brain/src/brain/data/disenchant.toml`, `disenchant.py`), Item Info from Scans AND Character Reads (a bound green is never scanned), the Enchanting skill on `known_profession`, the Holdings Disenchant Action (Craft's marginal rule, with fractional mats interpolated), and Best Exit Value with the Disenchant way (`_Valuer.best_exit`; `worth` stays Sell/Vendor for Crafts). The replay treats Disenchant rows as kept. ADR-0018 is new, and CONTEXT.md gained Disenchant and Disenchant source group.
+- Scope decided with the user: the Buy Under parts of #76 moved to #88 (comment on #88 lists the hooks to build on). #76 stays open for slice 2.
+- Review follow-ups filed as #102 (needs-triage): bound units on a non-enchanter Character, Best Exit Value ignoring held mats, as-of look-ahead of skills and Item Info.
+- PC check added to #85 (the Scan `itemInfo`, `skill_level`, a bound green's Disenchant row and tooltip).
+- Gotchas:
+  - No Lua on this PC. `pip install lupa` works, and a busted stand-in lives only in the session scratchpad (describe/it/assert.are.same etc. on lupa's Lua 5.1). It's worth making a real `scripts/` tool if Lua work keeps coming; ask first.
+  - Python `open()` defaults to cp1252 here: always pass `encoding="utf-8"` when scripting edits (a `×` got double-encoded once).
+  - The review found real bugs twice: the marginal valuation for mats of 1 or more units, and `Money.format(nil)` on a priceless tooltip row. A Holdings row without `price` needs its own `holdingLine` branch.
+
+Next, in order:
+1. Not at the PC: #76 slice 2. Disenchant Results capture: Addon, plain Lua + specs, on UNIT_SPELLCAST_SUCCEEDED 13262 → LOOT_READY with a bag diff, into a `disenchantResults` list on Character Reads. Then a Brain table, `brain disenchants` (Wilson / t-interval, `disenchant_check_min_results` = 20), the CONTEXT "Disenchant Result" update and the ADR-0018 amendment. Add the event-order probe to #85. Then #101 (triage: 1 day vs Sale Horizon), #102 (triage), #88 (now with the Disenchant Buy Under), #77, #84.
+2. Next PC sitting: the #85 checks in "later 35" plus the new #76 ones.
+
 2026-09-28 (later 36): Discussion only, no code. The user asked why Kingsblood's Per day was 9g 50s on a Qty 1, 3s 71c flip. Its Sell Rate is ~250 units/day after the priors (448 units in 13 Sale Events over 7.7 h, with chunks of 124/63/54/47), so one unit clears in ~6 min, and Profit/days blows up. Filed #101 (needs-triage): floor Per day's days at 1 (or the Sale Horizon) so Per day never beats Profit, and update CONTEXT.md. Not filed: mass cancels look the same as mass buys in Sell Rate (no seller data). The user may want that filed later.
 
 Next, in order:
