@@ -8,6 +8,7 @@
 
 Next, in order:
 1. #100 (core bug, needs-triage): diagnose at the PC (the confirm steps are on the issue), then fix. It unblocks the #50 check.
+   After #100, recheck the Paid tooltip line from #50 in game. The user wants a "bought for" reminder on held flips (e.g. undercut, relist lower). The line already exists but only shows on a Holdings Sell/Vendor row. If that's not enough, file: "Tooltip: show Paid for any held item with an open Purchase Lot, whatever its row" (refs #50, #100). Paid stays a hint only (ADR-0003, sunk cost).
 2. Not at the PC: #76 Disenchant (ready-for-agent, spec on the issue), then #88, #77, #84.
 
 2026-09-28 (later 33): #98 is MERGED to main (the cloud branch landed), and the review questions are settled in 12189b8: (a) replay `_taken` grades only the profit top `shopping_list_rows` Flips (`_brain`/`_taken` take `flip_rows`); (b) a clicked sort is saved per tab in `AzerothQuantDB.recommendationSorts`, by column NAME (`RecommendationTable.savedSort`/`restoredSort`), so it survives column changes; (c) the Per day cut ranks Flips to Sell only. ADR-0017 amendment + CONTEXT.md updated. #98 stays open for its PC check (below).
