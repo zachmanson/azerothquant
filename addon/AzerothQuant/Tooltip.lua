@@ -16,18 +16,32 @@ local function nameOf(itemString)
   return (getItemInfo(itemString))
 end
 
-local function addLines(tooltip)
+-- The name an AH browse row shows, e.g. "Willow Belt of the Sorcerer": from the row's
+-- auction item key where the row has one, else the tooltip's title line.
+local function rowName(tooltip)
+  local owner = tooltip.GetOwner and tooltip:GetOwner()
+  local key = owner and owner.rowData and owner.rowData.itemKey
+  local info = key and C_AuctionHouse and C_AuctionHouse.GetItemKeyInfo(key)
+  if info and info.itemName then
+    return info.itemName
+  end
+  local title = tooltip.GetName and tooltip:GetName() and _G[tooltip:GetName() .. "TextLeft1"]
+  return title and title:GetText()
+end
+
+local function addLines(tooltip, data)
   if not tooltip.GetItem then
     return
   end
+  local recommendations = AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations
+  local realm, faction = GetRealmName(), UnitFactionGroup("player")
   local _, link = tooltip:GetItem()
-  local lines = TooltipLines.forLink(
-    AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations,
-    GetRealmName(),
-    UnitFactionGroup("player"),
-    link,
-    nameOf
-  )
+  local lines = TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
+  -- A suffixed item's AH browse row links the plain item (#96), so try the row's name.
+  local itemID = (link and tonumber(link:match("|Hitem:(%d+)"))) or (data and data.id)
+  if #lines == 0 and itemID then
+    lines = TooltipLines.forItemName(recommendations, realm, faction, itemID, rowName(tooltip), nameOf)
+  end
   for _, text in ipairs(lines) do
     tooltip:AddLine(text, R, G, B)
   end

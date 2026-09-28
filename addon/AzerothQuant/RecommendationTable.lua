@@ -60,6 +60,8 @@ local function itemString(itemKey)
     .. table.concat(ids, ":", 2)
 end
 
+RecommendationTable.itemString = itemString
+
 local function money(copper)
   return copper and Money.format(copper) or ""
 end

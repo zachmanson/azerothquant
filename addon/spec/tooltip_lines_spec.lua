@@ -260,3 +260,59 @@ describe("TooltipLines.forLink", function()
     assert.are.same({}, TooltipLines.forLink(r, REALM, FACTION, link("battlepet:1:25", "Pet")))
   end)
 end)
+
+describe("TooltipLines.forItemName", function()
+  -- An AH browse row for a suffixed item has a link without the suffix (#96), so it's found
+  -- by itemID and the row's name instead.
+  local SUFFIXED = {
+    ["item:15932"] = "Willow Belt",
+    ["item:15932::::::::::::1:1854"] = "Willow Belt of the Sorcerer",
+    ["item:15932::::::::::::1:1855"] = "Willow Belt of the Sorcerer",
+    ["item:15932::::::::::::1:1873"] = "Willow Belt of the Owl",
+  }
+
+  local function suffixedNames(itemString)
+    return SUFFIXED[itemString]
+  end
+
+  local function linesForName(recommendations, itemID, name)
+    return TooltipLines.forItemName(recommendations, REALM, FACTION, itemID, name, suffixedNames)
+  end
+
+  it("gives the lines of the Item Key with that itemID and name", function()
+    local r = recs({
+      holdings = {
+        { itemKey = "15932", action = "Sell", quantity = 1, price = 500, profit = 475 },
+        { itemKey = "15932:1854", action = "Sell", quantity = 1, price = 1999, profit = 1899 },
+        { itemKey = "15932:1873", action = "Vendor", quantity = 1, price = 300, profit = 300 },
+      },
+      held = { ["15932:1854"] = { { character = "Kash-Patel", bags = 1, bank = 0, bound = 0 } } },
+    })
+
+    assert.are.same(
+      { "AQ: Sell 1 @ 19s 99c", "On Kash-Patel: 1 bags" },
+      linesForName(r, 15932, "Willow Belt of the Sorcerer")
+    )
+  end)
+
+  it("gives the lines of every Item Key a row groups under one name", function()
+    local r = recs({
+      holdings = { { itemKey = "15932:1854", action = "Sell", quantity = 1, price = 1999, profit = 1899 } },
+      shoppingList = { { itemKey = "15932:1855", action = "Sell", quantity = 2, price = 1500, profit = 800 } },
+    })
+
+    assert.are.same(
+      { "AQ: Sell 1 @ 19s 99c", "AQ: Buy 2 @ max 15s" },
+      linesForName(r, 15932, "Willow Belt of the Sorcerer")
+    )
+  end)
+
+  it("adds nothing for a name no Item Key has, or one the client hasn't loaded", function()
+    local r = recs({
+      holdings = { { itemKey = "15932:1999", action = "Sell", quantity = 1, price = 1999, profit = 1899 } },
+    })
+
+    assert.are.same({}, linesForName(r, 15932, "Willow Belt of the Sorcerer"))
+    assert.are.same({}, linesForName(nil, 15932, "Willow Belt of the Sorcerer"))
+  end)
+end)

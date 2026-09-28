@@ -86,22 +86,18 @@ local function buyLine(r)
   return line
 end
 
--- nameOf(itemString) names a Craft's reagents, as in the Recommendation Table.
-function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
+-- The lines for each of keys (a set of Item Keys) in the Market's entry, in the order the
+-- Recommendation Table has them, then who holds each.
+local function linesFor(entry, keys, nameOf)
   local lines = {}
-  local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
-  local key = link and itemKey(link)
-  if not entry or not key then
-    return lines
-  end
-  local held = RecommendationTable.heldUnits(entry.holdings)[key]
+  local held = RecommendationTable.heldUnits(entry.holdings)
   local holdersOf = entry.held or {}
   local function add(rows, lineOf)
     for _, r in ipairs(rows) do
-      if r.itemKey == key and not RecommendationTable.lowValue(r) then
+      if keys[r.itemKey] and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r, nameOf)
         local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf, holdersOf)
-          or RecommendationTable.roiLines(r, held)
+          or RecommendationTable.roiLines(r, held[r.itemKey])
         for _, line in ipairs(details) do
           lines[#lines + 1] = line
         end
@@ -111,10 +107,59 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
   add(entry.holdings, holdingLine)
   add(entry.shoppingList, buyLine)
   add(entry.predictionBuys, buyLine)
-  for _, line in ipairs(RecommendationTable.holderLines(holdersOf[key])) do
-    lines[#lines + 1] = line
+  local sorted = {}
+  for key in pairs(keys) do
+    sorted[#sorted + 1] = key
+  end
+  table.sort(sorted)
+  for _, key in ipairs(sorted) do
+    for _, line in ipairs(RecommendationTable.holderLines(holdersOf[key])) do
+      lines[#lines + 1] = line
+    end
   end
   return lines
+end
+
+local function entryFor(recommendations, realm, faction)
+  return recommendations and recommendations[realm] and recommendations[realm][faction]
+end
+
+-- nameOf(itemString) names a Craft's reagents, as in the Recommendation Table.
+function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
+  local entry = entryFor(recommendations, realm, faction)
+  local key = link and itemKey(link)
+  if not entry or not key then
+    return {}
+  end
+  return linesFor(entry, { [key] = true }, nameOf)
+end
+
+-- An AH browse row for a suffixed item links the plain item (#96), and one row can group
+-- several Item Keys under one name ("Items in this group may vary in stats"). So its lines
+-- are those of every Item Key in the Market with that itemID whose name, by nameOf, is the
+-- row's name.
+function TooltipLines.forItemName(recommendations, realm, faction, itemID, name, nameOf)
+  local entry = entryFor(recommendations, realm, faction)
+  if not entry or not name then
+    return {}
+  end
+  local keys = {}
+  local prefix = tostring(itemID)
+  local function consider(key)
+    local id = key:match("^(%d+)")
+    if id == prefix and nameOf(RecommendationTable.itemString(key)) == name then
+      keys[key] = true
+    end
+  end
+  for _, rows in ipairs({ entry.holdings, entry.shoppingList, entry.predictionBuys }) do
+    for _, r in ipairs(rows or {}) do
+      consider(r.itemKey)
+    end
+  end
+  for key in pairs(entry.held or {}) do
+    consider(key)
+  end
+  return linesFor(entry, keys, nameOf)
 end
 
 ns.TooltipLines = TooltipLines
