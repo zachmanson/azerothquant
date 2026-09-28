@@ -1,3 +1,12 @@
+2026-09-28 (later 25): SCOPED. Every open issue now has a `core` or `later` label (see docs/agents/triage-labels.md). Work only on `core` until that queue is empty; new issues default to `later`. The Next lists in the older entries below are superseded by this one.
+- core: #85, #86 and #18 (PC checks of built features), #51 (PC check), #83 (the Beta replay read, by Oct 21), #87 (Flips to Craft section), #53 (quieter chat).
+- later: everything else, including #84, #88, #76, #77, #89, #90 and #91. #90 (Beta Prior) has a Nov 4 deadline, so as `later` it most likely won't make launch. The user chose to accept thin recommendations for the first days of Live instead.
+
+Next, in order:
+1. At the PC: the #85 checklist (including `brain replay` for #83), the PC checks on #86 and #18, and #51. File a `core` bug for anything that fails.
+2. #87 build (/tdd), then /code-review + commit. It needs no PC.
+3. #53 grill, then build.
+
 2026-09-28 (later 24): FILED #91 (needs-triage) from the user's list of launch predictions: endgame potion mats, T1 reagents, Enchanting mats, and Uncommon Waylaid Supply Crates ("invest early"). Some are sold by a "black market" NPC. The issue lists the open questions. (1) Buy-and-hold Prediction vs "Hold what you farm". (2) With no Best Exit Value there's no Max Loss, so no Prediction buys at launch; the Beta Prior (#90) might fill that gap. (3) The itemIDs are unchecked, and several names look like Forever additions. (4) Limited-stock NPC items are never read as Merchant Cost. (5) The Catalyst. The user then clarified that all of these are buy-and-Hold calls with a raid release as the Catalyst, so (1) is settled; see the comment on #91. Grill it together with #90, since both touch launch pricing with no Live history.
 
 Next, in order (none need the PC):
