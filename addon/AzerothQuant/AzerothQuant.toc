@@ -9,6 +9,7 @@
 Recommendations.lua
 
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
+Chat.lua
 Money.lua
 Scan.lua
 MailboxRead.lua

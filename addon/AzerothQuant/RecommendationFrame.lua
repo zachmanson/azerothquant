@@ -13,6 +13,7 @@ local RecommendationTable = ns.RecommendationTable
 local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
+local Chat = ns.Chat
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
@@ -55,10 +56,6 @@ local redrawQueued = false
 -- C_Item on newer clients (the Beta has no global GetItemInfo), the old globals otherwise.
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local getItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
-
-local function say(msg)
-  print("|cff33ff99AzerothQuant|r " .. msg)
-end
 
 -- Where the logged-in Character's Market's Budget is saved in AzerothQuantDB.budgets.
 local function budgetKey()
@@ -399,7 +396,7 @@ local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
 
 local function reload()
   if Scanner.busy() then
-    say(BUSY_TIP)
+    Chat.say(BUSY_TIP)
     return
   end
   ReloadUI()
@@ -425,7 +422,7 @@ local function createBudgetBox(button)
       db.budgets[budgetKey()] = copper
       redraw()
     else
-      say("Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.")
+      Chat.say("Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.")
     end
     self:SetText(Money.goldText(savedBudget()))
     self:ClearFocus()
@@ -592,7 +589,10 @@ SlashCmdList.AZEROTHQUANT = function(msg)
     toggle()
   elseif msg:match("^%s*reload%s*$") then
     reload()
+  elseif msg:match("^%s*debug%s*$") then
+    Chat.toggleDebug()
   else
-    say("Usage: /aq recs (toggle the Recommendation Table), /aq reload")
+    Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload,"
+      .. " /aq debug (toggle chat lines you don't need to act on)")
   end
 end

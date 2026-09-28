@@ -15,6 +15,7 @@ local _, ns = ...
 local CharacterRead = ns.CharacterRead
 local RecommendationTable = ns.RecommendationTable
 local Prune = ns.Prune
+local Chat = ns.Chat
 local Professions = ns.Professions
 local Merchant = ns.Merchant
 
@@ -54,10 +55,6 @@ local bank -- { readAt, slots }: the latest read while the bank was open this se
 local carried -- { money, slots }: the latest read of gold and bags while in the world
 local timer
 local carriedTimer
-
-local function say(msg)
-  print("|cff33ff99AzerothQuant|r " .. msg)
-end
 
 local function readContainers(bags, into)
   for _, bag in ipairs(bags) do
@@ -138,7 +135,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
       local pruned = Prune.importedCharacterReads(db.characterReads, AzerothQuantRecommendations)
       if pruned > 0 then
-        say(string.format("Deleted %d Character Reads the Brain has imported.", pruned))
+        Chat.debug(string.format("Deleted %d Character Reads the Brain has imported.", pruned))
       end
     end
   elseif event == "BANKFRAME_OPENED" then

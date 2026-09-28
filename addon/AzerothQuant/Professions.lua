@@ -10,6 +10,7 @@
 -- Nothing that crafts, learns or changes a recipe.
 local _, ns = ...
 local KnownRecipes = ns.KnownRecipes
+local Chat = ns.Chat
 
 -- Recipe list updates come in bursts, so read once they have been quiet this long.
 local QUIET_SECONDS = 0.5
@@ -31,10 +32,6 @@ local timer
 local latest = {} -- professionID -> KnownRecipes entry, the latest read this session
 local announced = {} -- professionID -> recipe count in the last chat line printed
 local professionList -- { professionID, professionName } each, nil until read
-
-local function say(msg)
-  print("|cff33ff99AzerothQuant|r " .. msg)
-end
 
 -- A linked, guild or NPC crafting window shows someone else's recipes. If the client
 -- can't tell us, don't risk it.
@@ -78,7 +75,7 @@ local function readWindow()
   -- whenever the count changes rather than only once.
   if announced[entry.professionID] ~= #entry.recipes then
     announced[entry.professionID] = #entry.recipes
-    say(string.format("Read %d %s recipes.", #entry.recipes, entry.professionName or "?"))
+    Chat.debug(string.format("Read %d %s recipes.", #entry.recipes, entry.professionName or "?"))
   end
 end
 

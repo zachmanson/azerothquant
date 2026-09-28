@@ -9,6 +9,7 @@
 local _, ns = ...
 local MailboxRead = ns.MailboxRead
 local Prune = ns.Prune
+local Chat = ns.Chat
 
 -- MAIL_INBOX_UPDATE fires a few times as the inbox loads (twice within 0.4s in the
 -- spike). Read once it has been quiet this long.
@@ -20,10 +21,6 @@ local db
 local visiting = false -- the mailbox is open
 local readThisVisit = false
 local timer
-
-local function say(msg)
-  print("|cff33ff99AzerothQuant|r " .. msg)
-end
 
 local function cancel()
   if timer then
@@ -58,10 +55,10 @@ local function read()
   }, mails)
   table.insert(db.mailboxReads, mailboxRead)
   if #mailboxRead.mails > 0 then
-    say(string.format("Mailbox Read saved: %d Auction House mails.", #mailboxRead.mails))
+    Chat.debug(string.format("Mailbox Read saved: %d Auction House mails.", #mailboxRead.mails))
   end
   if total > shown then
-    say(string.format("Only %d of %d mails are visible; take some and reopen the mailbox to see the rest.", shown, total))
+    Chat.say(string.format("Only %d of %d mails are visible; take some and reopen the mailbox to see the rest.", shown, total))
   end
 end
 
@@ -80,7 +77,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
       local pruned = Prune.importedMailboxReads(db.mailboxReads, AzerothQuantRecommendations)
       if pruned > 0 then
-        say(string.format("Deleted %d Mailbox Reads the Brain has imported.", pruned))
+        Chat.debug(string.format("Deleted %d Mailbox Reads the Brain has imported.", pruned))
       end
     end
   elseif event == "MAIL_SHOW" then

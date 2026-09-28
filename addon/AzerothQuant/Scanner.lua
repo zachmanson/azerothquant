@@ -13,6 +13,7 @@ local _, ns = ...
 local Scan = ns.Scan
 local Prune = ns.Prune
 local Nudge = ns.Nudge
+local Chat = ns.Chat
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
@@ -35,10 +36,6 @@ local button, pulse, ticker
 local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
-
-local function say(msg)
-  print("|cff33ff99AzerothQuant|r " .. msg)
-end
 
 local function cancel(timer)
   if timer then
@@ -108,7 +105,7 @@ end
 local function tick()
   local now = time()
   if Nudge.due(db.lastScanAt, checkedAt, now) then
-    say("Scan ready: a second Scan now completes an Observation Window.")
+    Chat.debug("Scan ready: a second Scan now completes an Observation Window.")
   end
   checkedAt = now
   refreshButton()
@@ -130,7 +127,7 @@ local function finish(rows)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false
   refreshButton()
-  say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data, %d items with no Vendor Price yet."
+  Chat.say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data, %d items with no Vendor Price yet."
     .. " /reload to hand it to the Brain.",
     scan.id, #scan.listings, scan.droppedRows, scan.vendorPricesMissing))
 end
@@ -172,7 +169,7 @@ local function abort(reason)
   cancel(noResponseTimer)
   pending, reading = nil, false
   refreshButton()
-  say(reason)
+  Chat.say(reason)
 end
 
 local function requestScan()
@@ -193,7 +190,7 @@ local function requestScan()
     abort("No response from the Auction House (probably throttled). Try again when the button unlocks.")
   end)
   refreshButton()
-  say("Scan requested. Keep the Auction House open.")
+  Chat.debug("Scan requested. Keep the Auction House open.")
 end
 
 local function createButton()
@@ -219,17 +216,17 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
       local pruned = Prune.importedScans(db.scans, AzerothQuantRecommendations)
       if pruned > 0 then
-        say(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))
+        Chat.debug(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))
       end
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
       if savedAtLoad > 0 then
-        say(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
+        Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
           .. " (scripts\\play.bat), Reload again in a few seconds.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
       end
       Nudge.whenReloadReady(savedAtLoad, C_Timer.After, function()
         reloadReady = true
-      end, say)
+      end, Chat.say)
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
