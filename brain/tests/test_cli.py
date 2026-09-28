@@ -19,6 +19,7 @@ from brain.history import (
     Reagent,
     holdings,
     import_character_reads,
+    import_mailbox_reads,
     import_scans,
     known_recipes,
     listings,
@@ -405,7 +406,8 @@ def test_rebuild_tells_the_addon_what_is_in_the_rebuilt_history(tmp_path):
     }
 
 
-def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
+def _three_linen_held(tmp_path, mailbox_reads=()):
+    """3 Linen held, selling 2 an hour, with a Flip of two 7s 00c Linen to buy."""
     # One Sale Event, so the Flip minimum (#57) is lowered to let the Flip through.
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
@@ -450,8 +452,12 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
             conn, [scan(1_790_000_000, 20), scan(1_790_003_600, 18, cheap)], Era.BETA, config
         )
         import_character_reads(conn, [read], Era.BETA, config)
+        import_mailbox_reads(conn, list(mailbox_reads), Era.BETA, config)
+    return config
 
-    text = run_recommend(config)
+
+def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
+    text = run_recommend(_three_linen_held(tmp_path))
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert "Classic Beta PvP Alliance (beta)" in text
@@ -462,6 +468,35 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
     assert "Shopping List: 12g 34s 56c to spend, 14s 00c in total" in text
     assert ["2589", "Sell", "2", "7s 00c", "4s 98c", "14s 00c", "1"] in lines
+
+
+def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_path):
+    # 2 of the 3 held were bought for 5s each; posted at 9s 99c they net 9s 49.05c after
+    # the cut, +89.8%, a good time to sell.
+    won = {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": "Auction won: Linen Cloth",
+        "money": 0,
+        "daysLeft": 29.5,
+        "firstItemQuantity": 2,
+        "firstItemLink": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+        "invoice": {"invoiceType": "buyer", "itemName": "Linen Cloth", "bid": 1000, "count": 2},
+    }
+    mailbox_read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "shownCount": 1,
+        "totalCount": 1,
+        "skippedMails": 0,
+        "mails": [won],
+    }
+    text = run_recommend(_three_linen_held(tmp_path, [mailbox_read]))
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"] in lines
+    assert ["2589", "Sell", "3", "9s 99c", "28s 47c", "9s 39c", "1", "+89.8% * on 2 of 3"] in lines
 
 
 def _bolts_and_linen(tmp_path, money=0):

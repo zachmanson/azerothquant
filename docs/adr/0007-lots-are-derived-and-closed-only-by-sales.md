@@ -16,3 +16,4 @@ Grading a Prediction (ADR-0006) needs Lots: which units it covers, what they cos
 - Units used rather than sold are graded at market value, not what they actually earned. That's neutral rather than biased either way, and grading never has to reconcile bag counts.
 - The Decision Engine needs an "as of" moment instead of always reading the latest Scan.
 - A Grade is fixed at its grading moment, so the record and the brake don't move with later prices.
+- Amended by #50: Lots also feed Holdings. A held Item Key's Paid comes from its open Purchase Lots not tied to a Prediction, and held units take the **newest** open Lots, while Sold Outcomes still close the oldest. The two don't clash: a unit that left without a Sold Outcome (crafted away, vendored, mailed off) stays open, so the open units beyond the held ones are best taken to be the oldest, and the units still in the bags the latest bought. Paid is shown, never stored, and doesn't change any Action.

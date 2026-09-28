@@ -164,6 +164,10 @@ _Avoid_: risk, downside
 A quantity of one Item Key acquired together at one cost, tracked until it is sold. Realized profit is measured per Lot. Lots belong to a realm and faction, not a Character, since units move between Characters by mail the Brain doesn't see. There are two kinds: one per Purchase, at its price, and the units already held when a Prediction is written, at their Best Exit Value that day. Writing a Prediction ends the open Lots of its Item Keys and folds their units into that second kind. Only a Sold Outcome closes units, from the oldest Lot first; a unit that leaves without one (vendored, disenchanted, crafted away, mailed off) stays open, because the Brain can't tell which of those happened. Loot, crafting and merchant buys don't start Lots.
 _Avoid_: position, stack (a stack is an in-game bag concept)
 
+**Paid**:
+What a held Item Key's units cost, per unit, from its open Purchase Lots not tied to a Prediction, with how many units that covers. Held units take the newest open Lots first: open Lot units beyond the held ones are taken to be the oldest, gone without a Sold Outcome (crafted away, vendored, mailed off). Looted, farmed and crafted units have no cost, so a Paid can cover only some of the held units. A Holdings Sell or Vendor row's ROI is what one unit nets by its Action after the cut against its Paid; a Sell whose ROI reaches `roi_hint` is hinted at as a good time to sell, a hint only (ADR-0003).
+_Avoid_: cost basis, buy price
+
 **Best Exit Value**:
 The most one unit of an Item Key is worth via its best Action, where Disenchant and Craft value their outputs at those outputs' own Best Exit Value. This is what makes chained Actions work. Craft doesn't chain yet: its outputs are valued by Sell and Vendor only (ADR-0008).
 _Avoid_: value, worth

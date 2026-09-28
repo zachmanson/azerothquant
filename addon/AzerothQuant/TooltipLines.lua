@@ -92,14 +92,15 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
   if not entry or not key then
     return lines
   end
+  local held = RecommendationTable.heldUnits(entry.holdings)[key]
   local function add(rows, lineOf)
     for _, r in ipairs(rows) do
       if r.itemKey == key and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r)
-        if r.action == "Craft" then
-          for _, line in ipairs(RecommendationTable.reagentLines(r, nameOf)) do
-            lines[#lines + 1] = line
-          end
+        local more = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf)
+          or RecommendationTable.roiLines(r, held)
+        for _, line in ipairs(more) do
+          lines[#lines + 1] = line
         end
       end
     end

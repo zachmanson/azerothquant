@@ -87,12 +87,64 @@ function RecommendationTable.reagentLines(r, nameOf)
   return lines
 end
 
+-- The hint that it's a good time to sell (#50): the raid-target star, since the game's
+-- fonts may not have a star glyph.
+RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t"
+
+local ROI_UP, ROI_DOWN, ROI_HINT = "|cff1eff00", "|cffff2020", "|cff80ff80"
+
+local function percent(share)
+  return string.format("%+d%%", math.floor(share * 100 + 0.5))
+end
+
+-- A Sell or Vendor's ROI on what its units cost (#50), blank when none of them were
+-- bought on the Auction House.
+local function roiCell(r)
+  if not r.roi then
+    return ""
+  end
+  if r.roiHint then
+    return ROI_HINT .. percent(r.roi) .. " " .. RecommendationTable.STAR .. "|r"
+  end
+  return (r.roi < 0 and ROI_DOWN or ROI_UP) .. percent(r.roi) .. "|r"
+end
+
+-- How many units of each Item Key the Holdings hold, which a Paid covers some or all of:
+-- every row but a Craft's, whose units are made rather than held.
+function RecommendationTable.heldUnits(holdings)
+  local held = {}
+  for _, r in ipairs(holdings or {}) do
+    if r.action ~= "Craft" then
+      held[r.itemKey] = (held[r.itemKey] or 0) + r.quantity
+    end
+  end
+  return held
+end
+
+-- A Sell or Vendor's lines on what its units cost and what they net per unit after the cut
+-- (#50), and the hint when it's a good time to sell. held is heldUnits' count for its
+-- Item Key.
+function RecommendationTable.roiLines(r, held)
+  if not r.roi then
+    return {}
+  end
+  local of = r.paidUnits < held and (" (" .. r.paidUnits .. " of " .. held .. ")") or ""
+  local lines = {
+    "Paid " .. Money.format(r.paid) .. " each" .. of .. ", nets " .. Money.format(r.paid * (1 + r.roi))
+      .. ": " .. percent(r.roi),
+  }
+  if r.roiHint then
+    lines[2] = "Good time to sell: nets " .. percent(r.roi) .. " on what you paid (hint only)"
+  end
+  return lines
+end
+
 -- A Craft's tooltip lists its reagents; its note only names them by ID.
-local function tooltip(r, nameOf)
+local function tooltip(r, nameOf, held)
   if r.uses or r.buys then
     return RecommendationTable.reagentLines(r, nameOf)
   end
-  local lines = {}
+  local lines = RecommendationTable.roiLines(r, held[r.itemKey])
   if r.margin then
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)
   end
@@ -131,7 +183,7 @@ end
 local function holdingCells(r, name)
   local profit = r.action == "Hold" and "unknown" or money(r.profit)
   local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r)) or r.note or ""
-  return { name, r.action, tostring(r.quantity), money(r.price), profit, note }
+  return { name, r.action, tostring(r.quantity), money(r.price), profit, roiCell(r), note }
 end
 
 -- A Shopping List row is bought to sell as is, or its reagents are bought to craft it.
@@ -147,7 +199,7 @@ end
 -- (not known) sorts last whichever way the column goes.
 local function holdingKeys(r, name, cells)
   local profit = r.action ~= "Hold" and r.profit or nil
-  return { name:lower(), cells[2]:lower(), r.quantity, r.price, profit, cells[6]:lower() }
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, profit, r.roi, cells[7]:lower() }
 end
 
 local function shoppingKeys(r, name, cells)
@@ -205,6 +257,7 @@ function RecommendationTable.nextSort(section, state, column)
 end
 
 local function section(title, columns, rows, cells, keys, default, nameOf)
+  local held = RecommendationTable.heldUnits(rows)
   local out = { title = title, columns = columns, rows = {}, sort = default }
   local folded = 0
   for _, r in ipairs(rows) do
@@ -219,7 +272,7 @@ local function section(title, columns, rows, cells, keys, default, nameOf)
         keys = keys(r, name, rowCells),
         worth = (r.price or 0) * (r.quantity or 0),
         order = #out.rows + 1,
-        tooltip = tooltip(r, nameOf),
+        tooltip = tooltip(r, nameOf, held),
       }
     end
   end
@@ -270,7 +323,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf)
     sections = {
       section(
         "Holdings",
-        { "Item", "Action", "Qty", "Price", "Profit", "Note" },
+        { "Item", "Action", "Qty", "Price", "Profit", "ROI", "Note" },
         entry.holdings,
         holdingCells,
         holdingKeys,

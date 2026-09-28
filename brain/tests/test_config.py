@@ -267,6 +267,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.flip_min_sale_events == 3
     assert config.post_undercut_copper == 1
     assert config.craft_min_gain == 0
+    assert config.roi_hint == 0.2
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -283,6 +284,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "flip_min_sale_events = 5\n"
         "post_undercut_copper = 0\n"
         "craft_min_gain = 50\n"
+        "roi_hint = 0.5\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -298,6 +300,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.flip_min_sale_events == 5
     assert config.post_undercut_copper == 0
     assert config.craft_min_gain == 50
+    assert config.roi_hint == 0.5
 
 
 @pytest.mark.parametrize(
@@ -327,6 +330,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("post_undercut_copper", "true"),
         ("craft_min_gain", "-1"),
         ("craft_min_gain", '"0"'),
+        ("roi_hint", '"0.2"'),
+        ("roi_hint", "true"),
+        ("roi_hint", "-0.1"),
     ],
 )
 def test_rejects_bad_decision_engine_knobs(tmp_path, key, value):

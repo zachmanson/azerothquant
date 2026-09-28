@@ -34,6 +34,23 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Sell 2 @ 1g 28s" }, linesFor(r, "item:248704::::::::20:1490::::::"))
   end)
 
+  it("follows a Holding's Sell and Vendor with what its units cost and net, and the hint to sell", function()
+    local r = recs({
+      holdings = {
+        { itemKey = "2589", action = "Sell", quantity = 12, price = 15790, profit = 180000, paid = 12000, paidUnits = 5, roi = 0.25, roiHint = true },
+        { itemKey = "2589", action = "Vendor", quantity = 8, price = 6000, profit = 48000, paid = 12000, paidUnits = 5, roi = -0.5 },
+      },
+    })
+
+    assert.are.same({
+      "AQ: Sell 12 @ 1g 57s 90c",
+      "Paid 1g 20s each (5 of 20), nets 1g 50s: +25%",
+      "Good time to sell: nets +25% on what you paid (hint only)",
+      "AQ: Vendor 8 @ 60s",
+      "Paid 1g 20s each (5 of 20), nets 60s: -50%",
+    }, linesFor(r, "item:2589"))
+  end)
+
   it("keys a suffixed item by its bonus IDs in ascending order, like the Brain", function()
     local r = recs({
       holdings = {

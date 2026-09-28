@@ -49,6 +49,9 @@ _HEADER = (
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
     "-- uses = { { itemKey, quantity } }.\n"
+    "-- A Holdings Sell or Vendor row whose units were bought on the Auction House has\n"
+    "-- paid (per unit), paidUnits (how many units that covers), roi (a share, after\n"
+    "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
 )
 
 
@@ -108,6 +111,9 @@ _ROW_KEYS = {
     "prediction": "prediction",
     "max_loss": "maxLoss",
     "character": "character",
+    "paid": "paid",
+    "paid_units": "paidUnits",
+    "roi": "roi",
 }
 
 
@@ -118,6 +124,8 @@ def _row(row: Row) -> dict[str, object]:
         if value is None or value == "":
             continue
         out[key] = str(value) if isinstance(value, Action) else value
+    if row.roi_hint:
+        out["roiHint"] = True
     if row.buys:
         out["buys"] = [_buy(b) for b in row.buys]
     if row.uses:

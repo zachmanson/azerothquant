@@ -29,7 +29,7 @@ local CONTENT_WIDTH = WIDTH - 10 - SCROLL_LEFT - SCROLLBAR_WIDTH
 -- Per section, the width of each column after the icon but the last, which (Note, mostly)
 -- gets the leftover width. The first is the item name.
 local COLUMN_WIDTHS = {
-  ["Holdings"] = { 230, 70, 50, 110, 110 },
+  ["Holdings"] = { 230, 70, 50, 110, 110, 80 },
   ["Shopping List"] = { 190, 60, 45, 95, 95, 95, 95 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
 }

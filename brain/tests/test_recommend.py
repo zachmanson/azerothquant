@@ -2064,3 +2064,118 @@ def test_units_bought_under_a_prediction_tie_up_their_price_and_the_rest_todays_
 def test_with_nothing_graded_there_is_no_pooled_return(db):
     result = run(db, selling_two_linen_an_hour(), [character_read()], predictions=[prediction()])
     assert (result[MARKET].grades, result[MARKET].pooled_return) == ([], None)
+
+
+# --- Holdings ROI (#50) ---
+
+
+def won(read_at, count, price, link=LINEN_LINK, name="Linen Cloth"):
+    """A Mailbox Read with one Purchase that arrived 12 hours before it."""
+    mail = {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": f"Auction won: {name}",
+        "money": 0,
+        "daysLeft": 29.5,
+        "firstItemQuantity": count,
+        "firstItemLink": link,
+        "invoice": {"invoiceType": "buyer", "itemName": name, "bid": price, "count": count},
+    }
+    return mailbox_read(read_at, mail)
+
+
+def test_held_units_bought_on_the_auction_house_show_roi_after_the_cut(db):
+    # 10 Linen bought for 50c each. 6 Sell at 99 (94.05 after the cut), 4 Vendor at 10.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        mailbox_reads=[won(T0, count=10, price=500)],
+    )
+
+    sell, vendor = result[MARKET].holdings
+    assert (sell.action, sell.paid, sell.paid_units) == (Action.SELL, 50, 10)
+    assert sell.roi == pytest.approx(0.881)
+    assert (vendor.action, vendor.paid, vendor.paid_units) == (Action.VENDOR, 50, 10)
+    assert vendor.roi == pytest.approx(-0.8)
+
+
+def test_held_units_are_costed_by_the_newest_lots_first(db):
+    # 8 bought at 20c, then 5 at 80c, and 10 held: the 5 at 80c and 5 of the 20c ones. The
+    # other 3 are taken to be gone without a Sold Outcome.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        mailbox_reads=[
+            won(T0 - DAY, count=8, price=160),
+            won(T0, count=5, price=400),
+        ],
+    )
+
+    assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 10)}
+
+
+def test_held_units_without_a_lot_are_left_out_of_paid(db):
+    # Only 4 of the 10 were bought; the rest were looted, say.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        mailbox_reads=[won(T0, count=4, price=200)],
+    )
+
+    assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 4)}
+
+
+def test_units_bought_under_a_prediction_are_left_out_of_paid(db):
+    # 4 bought at 10s under a Prediction that has since ended, then 3 at 50c.
+    written = TODAY - timedelta(days=10)
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        predictions=[prediction(LINEN_KEY, written=written, happened=TODAY - timedelta(days=5))],
+        mailbox_reads=[
+            won(start_of(written) + 18 * HOUR, count=4, price=4000),
+            won(T0, count=3, price=150),
+        ],
+    )
+
+    assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 3)}
+
+
+def test_craft_rows_get_no_roi(db):
+    # A Bolt bought for 5s: the Bolt Sell row has its Paid, the Craft row none.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=2), item(BOLT_LINK), vendor_prices={2589: 10}, recipes=[recipe()]
+            )
+        ],
+        mailbox_reads=[won(T0, count=1, price=500, link=BOLT_LINK, name="Bolt of Linen Cloth")],
+    )
+
+    assert [(r.action, r.paid, r.paid_units) for r in result[MARKET].holdings] == [
+        (Action.SELL, 500, 1),
+        (Action.CRAFT, None, None),
+    ]
+
+
+@pytest.mark.parametrize(("roi_hint", "hinted"), [(0.88, True), (0.89, False)])
+def test_a_sell_whose_roi_reaches_the_threshold_is_hinted_at(db, roi_hint, hinted):
+    # As above: the Sell nets +88.1%, the Vendor -80%, which is never hinted at.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=replace(CONFIG, roi_hint=roi_hint),
+        mailbox_reads=[won(T0, count=10, price=500)],
+    )
+
+    assert [(r.action, r.roi_hint) for r in result[MARKET].holdings] == [
+        (Action.SELL, hinted),
+        (Action.VENDOR, False),
+    ]

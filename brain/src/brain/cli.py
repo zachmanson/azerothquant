@@ -16,6 +16,7 @@ import os
 import sqlite3
 import sys
 import time
+from collections import Counter
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -267,8 +268,12 @@ def run_recommend(config: Config) -> str:
 
 def _render_market(m: MarketRecommendations, range_days: int) -> str:
     as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
+    held = Counter[str]()
+    for r in m.holdings:
+        if r.action is not Action.CRAFT:
+            held[r.item_key] += r.quantity
     holdings = _table(
-        ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "Note"],
+        ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"],
         [
             [
                 r.item_key,
@@ -278,6 +283,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
                 "unknown" if r.action is Action.HOLD else _money(r.profit),
                 _money(r.margin),
                 _count(r.sale_events),
+                _roi(r, held[r.item_key]),
                 f"under {r.prediction}" if r.prediction else r.note,
             ]
             for r in m.holdings
@@ -373,6 +379,15 @@ def _count(n: int | None) -> str:
 
 def _percent(share: float | None) -> str:
     return "" if share is None else f"{share:.1%}"
+
+
+def _roi(row: Row, held: int) -> str:
+    """A Holdings row's ROI on what its units cost (#50), `*` when it's a good time to
+    sell, and how many of the Item Key's `held` units that rests on if not all."""
+    if row.roi is None:
+        return ""
+    text = f"{row.roi:+.1%}" + (" *" if row.roi_hint else "")
+    return text if row.paid_units == held else f"{text} on {row.paid_units} of {held}"
 
 
 def _money(copper: float | None) -> str:

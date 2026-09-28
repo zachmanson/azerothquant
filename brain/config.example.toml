@@ -92,6 +92,12 @@
 # than craft_min_gain copper. Defaults to 0. Must come before the first [[installs]].
 # craft_min_gain = 0
 
+# Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
+# it nets after the cut over what its units cost on the Auction House, is at least this
+# share. Only a hint; the Action stands either way. Defaults to 0.20. Must come before the
+# first [[installs]].
+# roi_hint = 0.20
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

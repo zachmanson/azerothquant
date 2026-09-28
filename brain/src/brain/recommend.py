@@ -93,6 +93,14 @@ class Row:
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
     character: str = ""  # a Craft's Character, the one that knows the recipe
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
+    # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
+    # Purchase Lots cover cost, and how many units that is. Split rows share it.
+    paid: float | None = None
+    paid_units: int | None = None
+    # (exit per unit after the cut - Paid) / Paid, and whether it's a Sell good enough to
+    # hint at (`roi_hint`). Only a hint: the Action stands either way (ADR-0003).
+    roi: float | None = None
+    roi_hint: bool = False
 
 
 @dataclass(frozen=True)
@@ -283,6 +291,7 @@ def recommend(
         caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
         bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
         rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
+        rows = _with_roi(rows, _market_lots(conn, config, market, predictions), cut, config)
         # Most expected profit first; rows without a number to rank by go last.
         rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
         shopping_cost = round(sum(r.cost for r in shopping))
@@ -1106,6 +1115,36 @@ def _costed(
                 lots_left[0] = (cost, open_units - covered)
         if n:
             result.append((value, i, n))
+    return result
+
+
+def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Config) -> list[Row]:
+    """`rows` with each Sell and Vendor row's Paid and ROI (#50). An Item Key's held units
+    are costed by its newest open Purchase Lots not tied to a Prediction (ADR-0007): open
+    units beyond the held ones are taken to be the oldest, gone without a Sold Outcome."""
+    held = Counter[str]()
+    for r in rows:
+        if r.action is not Action.CRAFT:
+            held[r.item_key] += r.quantity
+    paid: dict[str, tuple[float, int]] = {}
+    for lot in reversed(market_lots):  # newest first
+        left = held[lot.item_key] - paid.get(lot.item_key, (0.0, 0))[1]
+        if lot.prediction is not None or not lot.open_units or left <= 0:
+            continue
+        units = min(left, lot.open_units)
+        cost, costed = paid.get(lot.item_key, (0.0, 0))
+        paid[lot.item_key] = (cost + units * lot.cost / lot.units, costed + units)
+    result = []
+    for r in rows:
+        if r.item_key not in paid or r.action not in (Action.SELL, Action.VENDOR):
+            result.append(r)
+            continue
+        cost, units = paid[r.item_key]
+        each = cost / units
+        exit_ = None if r.price is None else r.price * (1 - cut if r.action is Action.SELL else 1)
+        roi = None if exit_ is None or not each else (exit_ - each) / each
+        hint = r.action is Action.SELL and roi is not None and roi >= config.roi_hint
+        result.append(replace(r, paid=each, paid_units=units, roi=roi, roi_hint=hint))
     return result
 
 

@@ -246,3 +246,26 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
         "Kash-Patel	1",
         "2320	1",
     ]
+
+
+def test_a_real_lua_reads_a_holdings_paid_and_roi(tmp_path, lua):
+    file = tmp_path / FILE_NAME
+    sell = Row("2589", Action.SELL, 12, price=99, paid=50.0, paid_units=5, roi=0.881, roi_hint=True)
+    vendor = Row("2589", Action.VENDOR, 8, price=10, paid=50.0, paid_units=5, roi=-0.8)
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[sell, vendor])]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, row in ipairs(r.recommendations["Quel\'Thalas"].Horde.holdings) do '
+        "  print(row.action, row.paid, row.paidUnits, row.roi, tostring(row.roiHint)) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "Sell	50	5	0.881	true",
+        "Vendor	50	5	-0.8	nil",
+    ]

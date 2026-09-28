@@ -72,8 +72,48 @@ describe("RecommendationTable.build", function()
     local view = build(entry({ holdings = { holdingsCraft() } }), AS_OF, names)
 
     local row = view.sections[1].rows[1]
-    assert.are.same({ "item:2997", "Craft", "3", "", "79c", "on Kash-Patel, 2 reagents" }, row.cells)
+    assert.are.same({ "item:2997", "Craft", "3", "", "79c", "", "on Kash-Patel, 2 reagents" }, row.cells)
     assert.are.same({ "Use 9 Wool Cloth", "Use 3 Coarse Thread" }, row.tooltip)
+  end)
+
+  it("shows a Holding's ROI green, red, or brighter green and starred when it's a good time to sell", function()
+    local function roiCell(fields)
+      local r = { itemKey = "2589", action = "Sell", quantity = 1, price = 200, profit = 190 }
+      for k, v in pairs(fields) do
+        r[k] = v
+      end
+      return build(entry({ holdings = { r } })).sections[1].rows[1].cells[6]
+    end
+
+    assert.are.equal("|cff1eff00+19%|r", roiCell({ paid = 160, paidUnits = 1, roi = 0.1875 }))
+    assert.are.equal("|cffff2020-12%|r", roiCell({ paid = 216, paidUnits = 1, roi = -0.12 }))
+    assert.are.equal(
+      "|cff80ff80+90% " .. RecommendationTable.STAR .. "|r",
+      roiCell({ paid = 100, paidUnits = 1, roi = 0.9, roiHint = true })
+    )
+    assert.are.equal("", roiCell({}))
+  end)
+
+  it("tells in a Holding's tooltip what its units cost and what they net, and hints when to sell", function()
+    -- 5 of the 20 held were bought, at 1g 20s each: Sold they net 1g 50s, Vendored 60s.
+    local view = build(entry({
+      holdings = {
+        { itemKey = "2589", action = "Sell", quantity = 12, price = 15790, profit = 180000, paid = 12000, paidUnits = 5, roi = 0.25, roiHint = true },
+        { itemKey = "2589", action = "Vendor", quantity = 8, price = 6000, profit = 48000, paid = 12000, paidUnits = 5, roi = -0.5 },
+        { itemKey = "2592", action = "Sell", quantity = 3, price = 100, profit = 285, paid = 50, paidUnits = 3, roi = 0.9 },
+      },
+    }))
+
+    local tooltips = {}
+    for _, row in ipairs(view.sections[1].rows) do
+      tooltips[row.itemString .. " " .. row.cells[2]] = row.tooltip
+    end
+    assert.are.same({
+      "Paid 1g 20s each (5 of 20), nets 1g 50s: +25%",
+      "Good time to sell: nets +25% on what you paid (hint only)",
+    }, tooltips["item:2589 Sell"])
+    assert.are.same({ "Paid 1g 20s each (5 of 20), nets 60s: -50%" }, tooltips["item:2589 Vendor"])
+    assert.are.same({ "Paid 50c each, nets 95c: +90%" }, tooltips["item:2592 Sell"])
   end)
 
   it("heads the table in two lines: the Scan's age and window hours, then gold and totals", function()
@@ -125,11 +165,11 @@ describe("RecommendationTable.build", function()
 
     local holdings = view.sections[1]
     assert.are.equal("Holdings", holdings.title)
-    assert.are.same({ "Item", "Action", "Qty", "Price", "Profit", "Note" }, holdings.columns)
+    assert.are.same({ "Item", "Action", "Qty", "Price", "Profit", "ROI", "Note" }, holdings.columns)
     local row = holdings.rows[1]
     assert.are.equal("item:248704", row.itemString)
     assert.are.same(
-      { "Heavy Leather", "Sell", "2", "1g 13s 43c", "2g 15s 51c", "incl. 3 crafted" },
+      { "Heavy Leather", "Sell", "2", "1g 13s 43c", "2g 15s 51c", "", "incl. 3 crafted" },
       row.cells
     )
     assert.are.same({ "Margin 1g 7s 75c", "Sales 1", "incl. 3 crafted" }, row.tooltip)
@@ -269,7 +309,7 @@ describe("RecommendationTable.build", function()
     }))
 
     assert.are.same(
-      { "item:12359", "Hold", "20", "25s", "unknown", "under Phase 2" },
+      { "item:12359", "Hold", "20", "25s", "unknown", "", "under Phase 2" },
       view.sections[1].rows[1].cells
     )
   end)
@@ -382,6 +422,19 @@ describe("sorting the Recommendation Table", function()
     assert.are.same({ "item:1", "item:3", "item:2996" }, itemStrings(shopping))
   end)
 
+  it("sorts Holdings by ROI, with rows none of whose units were bought last", function()
+    local function sell(itemKey, roi)
+      return { itemKey = itemKey, action = "Sell", quantity = 1, price = 100, profit = 95, paid = 50, paidUnits = 1, roi = roi }
+    end
+    local holdings = build(entry({ holdings = { sell("1", 0.9), sell("2"), sell("3", -0.5), sell("4", 2) } })).sections[1]
+
+    RecommendationTable.sort(holdings, { column = 6, descending = true })
+    assert.are.same({ "item:4", "item:1", "item:3", "item:2" }, itemStrings(holdings))
+
+    RecommendationTable.sort(holdings, { column = 6, descending = false })
+    assert.are.same({ "item:3", "item:1", "item:4", "item:2" }, itemStrings(holdings))
+  end)
+
   it("sorts the Item column by the item's name, ignoring case", function()
     local names = { ["item:1"] = "linen Cloth", ["item:2"] = "Copper Ore", ["item:3"] = "Wool Cloth" }
     local function sell(itemKey)
@@ -397,7 +450,7 @@ describe("sorting the Recommendation Table", function()
 end)
 
 describe("RecommendationTable.nextSort", function()
-  local holdings = build(entry()).sections[1] -- Item, Action, Qty, Price, Profit, Note
+  local holdings = build(entry()).sections[1] -- Item, Action, Qty, Price, Profit, ROI, Note
 
   it("sorts a number column largest first on its first click, and flips it on the next", function()
     local state = RecommendationTable.nextSort(holdings, holdings.sort, 3)
@@ -414,7 +467,7 @@ describe("RecommendationTable.nextSort", function()
 
   it("sorts a text column A to Z on its first click", function()
     assert.are.same({ column = 1, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 1))
-    assert.are.same({ column = 6, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 6))
+    assert.are.same({ column = 7, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 7))
   end)
 end)
 
