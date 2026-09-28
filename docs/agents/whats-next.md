@@ -1,3 +1,11 @@
+2026-09-28 (later 33): #98 is MERGED to main (the cloud branch landed), and the review questions are settled in 12189b8: (a) replay `_taken` grades only the profit top `shopping_list_rows` Flips (`_brain`/`_taken` take `flip_rows`); (b) a clicked sort is saved per tab in `AzerothQuantDB.recommendationSorts`, by column NAME (`RecommendationTable.savedSort`/`restoredSort`), so it survives column changes; (c) the Per day cut ranks Flips to Sell only. ADR-0017 amendment + CONTEXT.md updated. #98 stays open for its PC check (below).
+
+`core` is now ALL PC work (plus #83, which can't grade anything before ~Oct 3). The user has a free week of usage until ~Oct 5, so do `later` issues too.
+
+Next, in order:
+1. At the PC (one sitting, one session): the (later 30) #95/#96 checks, the #98 check from (later 32) plus "sort by ROI, /reload, still sorted by ROI", and the #85 checklist. Restart `brain watch` first (Brain commits since the last restart).
+2. Not at the PC: #76 Disenchant (ready-for-agent, spec on the issue). It's the base for #88 Buy Under, #89 Flip to Disenchant and a node kind in #77, so it goes first. Then #88, #77, #84 (#84 matters for the #83 Oct 21 read).
+
 2026-09-28 (later 31): #98 GRILLED (3 rounds), spec on the issue, ready-for-agent + core. The Shopping List tab only (Flips to Sell and Flips to Vendor; the Flips to Craft tab is unchanged). New per-row measures:
 - Per click = Profit / (Listings bought + stacks posted). Listings are counted exactly, so don't merge same-price Listings before counting. Posts = ceil(units / usual Sale Event size); a Flip to Vendor posts nothing.
 - Per day = Profit / days until the run's last unit sells, with held units queued ahead (the Deposit queue). A Flip to Vendor shows "now".
