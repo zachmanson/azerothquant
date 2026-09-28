@@ -1,4 +1,4 @@
--- Decides when to tell the player in chat that a Scan is ready: the moment the
+-- Decides when a Scan is ready (a debug chat line since #53): the moment the
 -- Scan cooldown ends while the Auction House is open, if a Scan then would
 -- complete an Observation Window with the previous one (ADR-0004). Separately,
 -- the Scan button pulses whenever a Scan can run, which is exactly when it's
