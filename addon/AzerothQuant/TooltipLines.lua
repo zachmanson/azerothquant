@@ -97,9 +97,9 @@ function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
     for _, r in ipairs(rows) do
       if r.itemKey == key and not RecommendationTable.lowValue(r) then
         lines[#lines + 1] = lineOf(r)
-        local more = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf)
+        local details = r.action == "Craft" and RecommendationTable.reagentLines(r, nameOf)
           or RecommendationTable.roiLines(r, held)
-        for _, line in ipairs(more) do
+        for _, line in ipairs(details) do
           lines[#lines + 1] = line
         end
       end

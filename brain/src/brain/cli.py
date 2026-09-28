@@ -16,7 +16,6 @@ import os
 import sqlite3
 import sys
 import time
-from collections import Counter
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,7 +33,7 @@ from brain.history import (
     open_history,
 )
 from brain.predictions import PredictionsError, load_predictions
-from brain.recommend import Action, MarketRecommendations, Row, recommend
+from brain.recommend import Action, MarketRecommendations, Row, held_units, recommend
 from brain.recommendations import write_recommendations
 from brain.savedvariables import SavedVariablesError
 from brain.watch import Watcher
@@ -268,10 +267,7 @@ def run_recommend(config: Config) -> str:
 
 def _render_market(m: MarketRecommendations, range_days: int) -> str:
     as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
-    held = Counter[str]()
-    for r in m.holdings:
-        if r.action is not Action.CRAFT:
-            held[r.item_key] += r.quantity
+    held = held_units(m.holdings)
     holdings = _table(
         ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"],
         [

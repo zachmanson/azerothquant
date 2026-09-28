@@ -2179,3 +2179,17 @@ def test_a_sell_whose_roi_reaches_the_threshold_is_hinted_at(db, roi_hint, hinte
         (Action.SELL, hinted),
         (Action.VENDOR, False),
     ]
+
+
+def test_hold_rows_get_no_roi(db):
+    # Linen bought before a Prediction of it was written, which Holds all 10.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), money=GOLD, vendor_prices={2589: 10})],
+        predictions=[prediction(LINEN_KEY)],
+        mailbox_reads=[won(T0 - DAY, count=10, price=500)],
+    )
+
+    [hold] = result[MARKET].holdings
+    assert (hold.action, hold.paid, hold.roi) == (Action.HOLD, None, None)

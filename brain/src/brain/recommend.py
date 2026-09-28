@@ -1118,33 +1118,43 @@ def _costed(
     return result
 
 
+def held_units(rows: Sequence[Row]) -> Counter[str]:
+    """How many units of each Item Key the Holdings rows hold, which a Paid covers some or
+    all of: every row but a Craft's, whose units are made rather than held."""
+    held: Counter[str] = Counter()
+    for r in rows:
+        if r.action is not Action.CRAFT:
+            held[r.item_key] += r.quantity
+    return held
+
+
 def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Config) -> list[Row]:
     """`rows` with each Sell and Vendor row's Paid and ROI (#50). An Item Key's held units
     are costed by its newest open Purchase Lots not tied to a Prediction (ADR-0007): open
     units beyond the held ones are taken to be the oldest, gone without a Sold Outcome."""
-    held = Counter[str]()
-    for r in rows:
-        if r.action is not Action.CRAFT:
-            held[r.item_key] += r.quantity
-    paid: dict[str, tuple[float, int]] = {}
+    held = held_units(rows)
+    # By Item Key, what the held units the Lots cover cost in all, and how many they are.
+    covered: dict[str, tuple[float, int]] = {}
     for lot in reversed(market_lots):  # newest first
-        left = held[lot.item_key] - paid.get(lot.item_key, (0.0, 0))[1]
-        if lot.prediction is not None or not lot.open_units or left <= 0:
+        cost, units = covered.get(lot.item_key, (0.0, 0))
+        uncovered = held[lot.item_key] - units
+        if lot.prediction is not None or not lot.open_units or uncovered <= 0:
             continue
-        units = min(left, lot.open_units)
-        cost, costed = paid.get(lot.item_key, (0.0, 0))
-        paid[lot.item_key] = (cost + units * lot.cost / lot.units, costed + units)
+        taken = min(uncovered, lot.open_units)
+        covered[lot.item_key] = (cost + taken * lot.cost / lot.units, units + taken)
     result = []
     for r in rows:
-        if r.item_key not in paid or r.action not in (Action.SELL, Action.VENDOR):
+        roi = None
+        if r.item_key in covered and r.action in (Action.SELL, Action.VENDOR) and r.price:
+            cost, units = covered[r.item_key]
+            paid = cost / units
+            net = r.price * (1 - cut) if r.action is Action.SELL else r.price
+            roi = (net - paid) / paid if paid else None
+        if roi is None:
             result.append(r)
             continue
-        cost, units = paid[r.item_key]
-        each = cost / units
-        exit_ = None if r.price is None else r.price * (1 - cut if r.action is Action.SELL else 1)
-        roi = None if exit_ is None or not each else (exit_ - each) / each
-        hint = r.action is Action.SELL and roi is not None and roi >= config.roi_hint
-        result.append(replace(r, paid=each, paid_units=units, roi=roi, roi_hint=hint))
+        hint = r.action is Action.SELL and roi >= config.roi_hint
+        result.append(replace(r, paid=paid, paid_units=units, roi=roi, roi_hint=hint))
     return result
 
 

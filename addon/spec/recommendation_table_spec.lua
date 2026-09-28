@@ -91,6 +91,7 @@ describe("RecommendationTable.build", function()
       "|cff80ff80+90% " .. RecommendationTable.STAR .. "|r",
       roiCell({ paid = 100, paidUnits = 1, roi = 0.9, roiHint = true })
     )
+    assert.are.equal("|cff1eff00+0%|r", roiCell({ paid = 100, paidUnits = 1, roi = -0.003 }))
     assert.are.equal("", roiCell({}))
   end)
 

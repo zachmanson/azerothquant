@@ -87,14 +87,18 @@ function RecommendationTable.reagentLines(r, nameOf)
   return lines
 end
 
--- The hint that it's a good time to sell (#50): the raid-target star, since the game's
--- fonts may not have a star glyph.
-RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t"
+-- The hint that it's a good time to sell (#50): the raid-target star tinted to the hint's
+-- green (its last three numbers), since the game's fonts may not have a star glyph.
+RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0:0:0:0:64:64:0:64:0:64:128:255:128|t"
 
-local ROI_UP, ROI_DOWN, ROI_HINT = "|cff1eff00", "|cffff2020", "|cff80ff80"
+local GAIN_COLOR, LOSS_COLOR, HINT_COLOR = "|cff1eff00", "|cffff2020", "|cff80ff80"
+
+local function wholePercent(share)
+  return math.floor(share * 100 + 0.5)
+end
 
 local function percent(share)
-  return string.format("%+d%%", math.floor(share * 100 + 0.5))
+  return string.format("%+d%%", wholePercent(share))
 end
 
 -- A Sell or Vendor's ROI on what its units cost (#50), blank when none of them were
@@ -104,9 +108,10 @@ local function roiCell(r)
     return ""
   end
   if r.roiHint then
-    return ROI_HINT .. percent(r.roi) .. " " .. RecommendationTable.STAR .. "|r"
+    return HINT_COLOR .. percent(r.roi) .. " " .. RecommendationTable.STAR .. "|r"
   end
-  return (r.roi < 0 and ROI_DOWN or ROI_UP) .. percent(r.roi) .. "|r"
+  -- By the percent shown, so a loss that rounds to +0% isn't red.
+  return (wholePercent(r.roi) < 0 and LOSS_COLOR or GAIN_COLOR) .. percent(r.roi) .. "|r"
 end
 
 -- How many units of each Item Key the Holdings hold, which a Paid covers some or all of:
@@ -128,9 +133,9 @@ function RecommendationTable.roiLines(r, held)
   if not r.roi then
     return {}
   end
-  local of = r.paidUnits < held and (" (" .. r.paidUnits .. " of " .. held .. ")") or ""
+  local share = r.paidUnits < held and (" (" .. r.paidUnits .. " of " .. held .. ")") or ""
   local lines = {
-    "Paid " .. Money.format(r.paid) .. " each" .. of .. ", nets " .. Money.format(r.paid * (1 + r.roi))
+    "Paid " .. Money.format(r.paid) .. " each" .. share .. ", nets " .. Money.format(r.paid * (1 + r.roi))
       .. ": " .. percent(r.roi),
   }
   if r.roiHint then
