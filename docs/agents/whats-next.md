@@ -1,3 +1,15 @@
+2026-09-28 (later 34): PC CHECKS DONE for #95, #96 and #98, all closed. `brain watch` restarted (it wasn't running), then stopped for `brain rebuild` (26 Scans, 0 rejected, 2.5 min) and started again on current main.
+- #95: the client prints `Between 2 hrs and 12 hrs` / `Greater than 12 hrs`, so the defaults are now <30m, 30m-2h, 2-12h, 12-24h (740b0fe; bucket 4 capped at 24 h, the longest Forever post).
+- #96: PASS on the Willow Belt of the Sorcerer browse row.
+- #98: PASS, including a clicked sort surviving /reload. Fixed on the spot: Profit/Per click/Per day truncated gold (widened, 772fae8). Truncated cells show their full text as a bare tooltip line (RecommendationFrame.lua), which looked like stray lines.
+- #85 stays open: #50 is blocked by the new bug #100 (a won-mail taken within ~2 s of opening the mailbox is never read; hypothesis on the issue), #33/#75 have no data, #83 replay waits until ~Oct 3, Booty Bay Broker optional.
+- Noted on #92: one import took 50.7 s, just over RELOAD_READY_AFTER = 50.
+- Unchecked: `brain rebuild` logs `skipped a mail: missing or bad 'firstItemQuantity'` for an `Auction canceled` mail (Hunter's Muzzle Loader). Probably old; nobody has looked.
+
+Next, in order:
+1. #100 (core bug, needs-triage): diagnose at the PC (the confirm steps are on the issue), then fix. It unblocks the #50 check.
+2. Not at the PC: #76 Disenchant (ready-for-agent, spec on the issue), then #88, #77, #84.
+
 2026-09-28 (later 33): #98 is MERGED to main (the cloud branch landed), and the review questions are settled in 12189b8: (a) replay `_taken` grades only the profit top `shopping_list_rows` Flips (`_brain`/`_taken` take `flip_rows`); (b) a clicked sort is saved per tab in `AzerothQuantDB.recommendationSorts`, by column NAME (`RecommendationTable.savedSort`/`restoredSort`), so it survives column changes; (c) the Per day cut ranks Flips to Sell only. ADR-0017 amendment + CONTEXT.md updated. #98 stays open for its PC check (below).
 
 `core` is now ALL PC work (plus #83, which can't grade anything before ~Oct 3). The user has a free week of usage until ~Oct 5, so do `later` issues too.
