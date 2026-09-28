@@ -33,8 +33,8 @@ end
 -- How long after a load `brain watch` should have imported the Scans it saved and
 -- rewritten Recommendations.lua: a guess, since the Addon can't see that file change.
 -- Tune it by the "Import took Xs" lines `brain watch` logs, plus its 3 s
--- settle time (#71).
-Nudge.RELOAD_READY_AFTER = 10
+-- settle time (#71). Real imports on the Beta took 33-42 s (2026-09-28).
+Nudge.RELOAD_READY_AFTER = 50
 Nudge.RELOAD_READY_LINE = "The Brain should be done: Reload to see the new Scan."
 
 -- On a load with `unimported` saved Scans, waits RELOAD_READY_AFTER seconds, then
