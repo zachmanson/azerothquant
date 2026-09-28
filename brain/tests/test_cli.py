@@ -482,7 +482,9 @@ def _three_linen_held(tmp_path, mailbox_reads=()):
 
 
 def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
-    text = run_recommend(_three_linen_held(tmp_path))
+    # A 48 h posting, so exactly one queued unit waits past it (below).
+    config = dataclasses.replace(_three_linen_held(tmp_path), post_duration_hours=48)
+    text = run_recommend(config)
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert "Classic Beta PvP Alliance (beta)" in text

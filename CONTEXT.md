@@ -107,7 +107,7 @@ The gold an NPC merchant charges for one unit of an item it sells, such as threa
 _Avoid_: vendor price, buy price
 
 **Deposit**:
-The copper the Auction House charges to post a unit, refunded when it sells and lost each time a posting expires unsold. Per unit, it's the deposit on the Item Key's latest Sold invoice divided by its count, else `ah_deposit_share` (0.60, unverified) of its Vendor Price, or nothing without one. The Decision Engine charges each unit it would post the deposits it expects that unit to lose: an Item Key's units sell in queue order (unbound held units, then the one Shopping List option's Flip to Sell or Flip to Craft outputs, each option queued as if it were the only buy, ADR-0017), and unit i of the queue waits i / (units per hour) and loses one deposit per `post_duration_hours` (48) that wait covers (ADR-0013).
+The copper the Auction House charges to post a unit, refunded when it sells and lost each time a posting expires unsold. Per unit, it's the deposit on the Item Key's latest Sold invoice divided by its count, else `ah_deposit_share` (0.60, the 24 h rate) of its Vendor Price, or nothing without one. The Decision Engine charges each unit it would post the deposits it expects that unit to lose: an Item Key's units sell in queue order (unbound held units, then the one Shopping List option's Flip to Sell or Flip to Craft outputs, each option queued as if it were the only buy, ADR-0017), and unit i of the queue waits i / (units per hour) and loses one deposit per `post_duration_hours` (24) that wait covers (ADR-0013).
 _Avoid_: posting fee, AH fee, cut
 
 ## Crafting

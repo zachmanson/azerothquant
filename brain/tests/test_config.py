@@ -273,7 +273,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.roi_hint == 0.2
     assert config.non_stacking_effort_copper == 500
     assert config.ah_deposit_share == 0.6
-    assert config.post_duration_hours == 48
+    assert config.post_duration_hours == 24
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):

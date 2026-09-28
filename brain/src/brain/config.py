@@ -96,10 +96,12 @@ DEFAULT_ROI_HINT = 0.20
 DEFAULT_NON_STACKING_EFFORT_COPPER = 500
 # Posting on the Auction House costs a deposit, refunded on a sale and lost on each expiry
 # (#78, ADR-0013). An Item Key never seen Sold is charged this share of its Vendor Price
-# per unit per posting. Unverified: retail's 48h rate, since Forever's isn't published.
+# per unit per posting at 24 h: Classic's 5% per 2 h, checked in game 2026-09-28
+# (floor(Vendor Price x 5%) x 12; 8c/32c/96c at 2/8/24 h for a 162c Vendor Price).
 DEFAULT_AH_DEPOSIT_SHARE = 0.60
 # How long the player posts for: a unit still unsold after it expires and loses its deposit.
-DEFAULT_POST_DURATION_HOURS = 48
+# Forever offers 2, 8 or 24 h (no 48 h, checked 2026-09-28).
+DEFAULT_POST_DURATION_HOURS = 24
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
