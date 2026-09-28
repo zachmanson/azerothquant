@@ -15,3 +15,7 @@ Default five-role vocabulary: needs-triage, needs-info, ready-for-agent, ready-f
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Ending a session
+
+Always end with a handoff: a single command the user can paste to continue in the next session (e.g. `/tdd Build #50 per the spec comment on the issue, then /code-review and commit`). Make it self-contained: name the issue and the skill to run.
