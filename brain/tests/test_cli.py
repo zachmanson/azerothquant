@@ -506,10 +506,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
         "Qty",
         "Max price",
         "Profit",
-        "Cost",
         "Per click",
         "Per day",
         "ROI",
+        "Cost",
         "Sales",
         "Note",
     ] in lines
@@ -519,10 +519,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
         "2",
         "7s 00c",
         "4s 92c",
-        "14s 00c",
         "2s 46c",
         "1s 89c",
         "35.1%",
+        "14s 00c",
         "1",
     ] in lines
 

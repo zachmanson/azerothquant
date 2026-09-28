@@ -238,7 +238,7 @@ end
 
 -- A Flip's clicks and wait (#98), e.g. "12 Listings + 3 posts, sells in ~2.5 days". A Flip
 -- to Vendor posts nothing and has no wait.
-local function effortLine(r)
+local function clicksLine(r)
   if not r.days then
     return plural(r.listings, "Listing") .. ", vendor now"
   end
@@ -254,7 +254,7 @@ local function details(r, nameOf, held, holdersOf)
   end
   local lines = RecommendationTable.roiLines(r, held[r.itemKey])
   if r.listings then
-    lines[#lines + 1] = effortLine(r)
+    lines[#lines + 1] = clicksLine(r)
   end
   if r.margin then
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)

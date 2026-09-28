@@ -1,3 +1,34 @@
+2026-09-28 (later 32): #98 BUILT on branch `claude/zen-mccarthy-xaqoze` (a cloud session, so not on `main` yet). Commits 582b28d + the review-fix commit after it. The issue is still open and labelled needs-pc.
+- Brain:
+  - Each Flip to Sell and Flip to Vendor row gets `listings`, `posts` and `days`. `_listings_left` keeps same-price Listings apart for the Flip to Vendor count; the old `without` merged them. `_SellRun.listings` is `len(units)`.
+  - Posts use `_Valuer.stack`: the usual Sale Event size under the Flip prior (`_sale_size`), or 1 for an Item Key that doesn't stack.
+  - `days` = (held + bought) / units per day under the Flip priors.
+  - `_options` keeps a row that's in the top `shopping_list_rows` by any of `_profit`, `per_click`, `per_day` or `return_on_cost`, ties going to profit.
+  - The new Row fields are `compare=False`, so tests assert them on their own.
+- CLI: Per click, Per day and ROI columns after Profit.
+- Addon: the Shopping List tab has 11 columns (`flipCells`/`flipKeys`). Flips to Craft keeps the old 8. Tooltip lines: `N Listings + M posts, sells in ~2.5 days`, `~N h` for a wait under a day, and `N Listings, vendor now` for a Flip to Vendor. The frame's MAX_COLUMNS is 11, with new Shopping List widths.
+- CONTEXT.md (**Per click**, **Per day**) and the ADR-0017 amendment are done.
+
+Review leftovers. Open questions for the user:
+- (a) Replay `_taken` walks the longer list (up to 200 Flips), so replay numbers can change. The spec says the replay is "not changed". Accept this, or make replay walk only the profit top 50?
+- (b) "The sort you click is remembered". Today a clicked sort resets on each open, as before. Should it persist in `AzerothQuantDB`?
+- (c) Every Flip to Vendor ties at "now" on Per day. With 50+ of them, no Flip to Sell gets in on Per day.
+Judgement calls, not done:
+- `posts`/`stack` vs the Listing entry's _Avoid_ ("post", "stack"). The names come from the spec.
+- The Lua `flipCells` inserts cells by index.
+- No zero guard on `days` (a run needs a Sell Rate, so it's safe today).
+
+User to do at the PC (add to #85): /reload (no new files). Open the Shopping List tab and check:
+- The 11 columns fit, and Note isn't clipped badly.
+- Sorting by Per click, Per day and ROI works, and Flips to Vendor show `now`.
+- The tooltip line reads right.
+Then close #98.
+
+Next, in order:
+1. Merge `claude/zen-mccarthy-xaqoze` into `main`, and answer the (a)-(c) questions above.
+2. At the PC: the (later 30) list, the #98 check above, the (later 27) client restart and the #85 checklist, plus #86, #18 and #51.
+3. Once `core` is empty: ask whether #90 or #97 move to `core`.
+
 2026-09-28 (later 31): #98 GRILLED (the spec is on the issue), ready-for-agent, `core`. The Shopping List tab only (Flips to Sell and Flips to Vendor; the Flips to Craft tab is unchanged). Each row gets `listings`, `posts` and `days`. Per click = Profit ÷ (Listings bought + stacks posted at the usual Sale Event size); Per day = Profit ÷ days until the run's last unit sells, held units queued ahead (a Flip to Vendor shows "now"); ROI = Profit ÷ Cost. The cut keeps a row in the top 50 on ANY of Profit/Per click/Per day/ROI. The buying order, Budgets, Sale Horizon and replay are unchanged. Addon: sortable columns, opens on Profit, tooltip `12 Listings + 3 posts, sells in ~2.5 days`. Gotcha: `_without` merges same-price Listings, so count Listings before merging.
 Mix-up this session (now undone): I took the user's #98 answers as answers about #90/#91, and posted and then withdrew specs there. #90 and #91 are still needs-triage/`later`, and #99 was closed as not planned. #90 still has its Nov 4 deadline: ask the user.
 

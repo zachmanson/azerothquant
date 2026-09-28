@@ -13,6 +13,7 @@ here touches the game process (ADR-0003).
 import argparse
 import dataclasses
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -37,7 +38,16 @@ from brain.history import (
 )
 from brain.lots import start_of
 from brain.predictions import PredictionsError, load_predictions
-from brain.recommend import Action, MarketRecommendations, Row, held_units, recommend
+from brain.recommend import (
+    Action,
+    MarketRecommendations,
+    Row,
+    held_units,
+    per_click,
+    per_day,
+    recommend,
+    return_on_cost,
+)
 from brain.recommendations import write_recommendations
 from brain.replay import MarketReplay, Policy, replay
 from brain.savedvariables import SavedVariablesError
@@ -356,10 +366,10 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
             "Qty",
             "Max price",
             "Profit",
-            "Cost",
             "Per click",
             "Per day",
             "ROI",
+            "Cost",
             "Sales",
             "Note",
         ],
@@ -370,8 +380,8 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
                 str(r.quantity),
                 _money(r.price),
                 _money(r.profit),
-                _money(r.cost),
                 *_measures(r),
+                _money(r.cost),
                 _count(r.sale_events),
                 r.note,
             ]
@@ -459,11 +469,11 @@ def _measures(row: Row) -> list[str]:
     """A Shopping List row's Per click, Per day and ROI (#98). A Flip to Craft has none."""
     if row.listings is None:
         return ["", "", ""]
-    per_day = "now" if row.days is None else _money(row.profit / row.days)
+    day = per_day(row)
     return [
-        _money(row.profit / (row.listings + row.posts)),
-        per_day,
-        _percent(row.profit / row.cost),
+        _money(per_click(row)),
+        "now" if day == math.inf else _money(day),
+        _percent(return_on_cost(row)),
     ]
 
 

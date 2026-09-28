@@ -151,7 +151,7 @@ class Row:
     # hint at (`roi_hint`). Only a hint: the Action stands either way (ADR-0003).
     roi: float | None = None
     roi_hint: bool = False
-    # A Flip to Sell's or Flip to Vendor's effort and wait (#98): the Listings it buys,
+    # A Flip to Sell's or Flip to Vendor's clicks and wait (#98): the Listings it buys,
     # the stacks it posts, and the days until its last unit sells (None for a Flip to
     # Vendor, which sells now). Not compared, so rows are checked on them apart.
     listings: int | None = field(default=None, compare=False)
@@ -161,7 +161,7 @@ class Row:
 
 @dataclass(frozen=True)
 class _VendorBuy:
-    """The units of one Listing worth buying to Vendor. Each pays on its own."""
+    """Units of one Listing worth buying to Vendor. Each pays on its own."""
 
     item_key: str
     unit_buyout: int
@@ -2016,12 +2016,11 @@ def _options(
         groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
     flips = [row for group in groups.values() for row in _option(group, [], gold)]
     crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
-    kept = {
-        id(r)
-        for measure in (_profit, _per_click, _per_day, _roi)
+    kept: set[int] = set()
+    for measure in (_profit, per_click, per_day, return_on_cost):
         # Ties go to the most profit.
-        for r in sorted(flips, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
-    }
+        top = sorted(flips, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
+        kept |= {id(r) for r in top}
     crafted.sort(key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.
     return sorted(
@@ -2033,18 +2032,19 @@ def _profit(row: Row) -> float:
     return row.profit
 
 
-def _per_click(row: Row) -> float:
+def per_click(row: Row) -> float:
     """A Flip's Profit for each Listing bought and stack posted (#98)."""
     return row.profit / (row.listings + row.posts)
 
 
-def _per_day(row: Row) -> float:
+def per_day(row: Row) -> float:
     """A Flip's Profit for each day until its last unit sells: a Flip to Vendor sells now,
     before any Flip to Sell (#98)."""
     return math.inf if row.days is None else row.profit / row.days
 
 
-def _roi(row: Row) -> float:
+def return_on_cost(row: Row) -> float:
+    """A Flip's Profit on its Cost (#98), not a Holdings row's `roi` on what was Paid."""
     return row.profit / row.cost
 
 

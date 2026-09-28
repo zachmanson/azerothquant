@@ -47,7 +47,7 @@ With one cut, Flips to Craft (often tens of silver) fell off a busy Scan's list 
 
 Replay's `_taken` is unchanged: it goes through the (now longer) list in profit order while the gold lasts, so it grades what the player is shown. Replay numbers from before this change aren't comparable to later ones, since up to 75 options can now be taken.
 
-## Amendment: the cut keeps the top options by effort and wait too (#98)
+## Amendment: the cut keeps the top options by clicks and wait too (#98)
 
 The player would rather buy 2 staffs for 10g than 400 potions for 22g: the potions take far more clicks, and have to sell. Each Shopping List row (Flips to Sell and Flips to Vendor) now carries `listings` (the Listings it buys, counted before same-price Listings are merged), `posts` (stacks posted, at the usual Sale Event size; none for a Flip to Vendor) and `days` (until its last unit sells, behind the unbound held units; none for a Flip to Vendor, which sells now). From them and Profit and Cost come **Per click**, **Per day** and ROI.
 
