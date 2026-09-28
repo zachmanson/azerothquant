@@ -16,6 +16,7 @@ import os
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -412,22 +413,31 @@ def _watch(config: Config) -> int:
         return 0
 
 
-def _watch_step(config: Config, watcher: Watcher) -> None:
+def _watch_step(
+    config: Config, watcher: Watcher, clock: Callable[[], float] = time.monotonic
+) -> None:
     ready: list[Path] = []
     try:
         # Re-listed every time so a newly created account folder is picked up.
-        ready = watcher.poll(savedvariables_files(config), now=time.monotonic())
+        noticed = clock()
+        ready = watcher.poll(savedvariables_files(config), now=noticed)
         if not ready:
             return
         results = run_import(config, ready)
         _log_results(results)
+        # What the Addon's RELOAD_READY_AFTER guesses at (#71), less the settle time.
+        log.info(
+            "Imported %d new Scans in %.1fs",
+            sum(r.report.scans_imported for r in results if r.report is not None),
+            clock() - noticed,
+        )
         failed = [r.path for r in results if r.error is not None]
     except Exception:
         # A long-running watcher logs and carries on rather than exit on one bad pass.
         log.exception("Import failed; will try again")
         failed = ready
     for path in failed:
-        watcher.retry(path, now=time.monotonic())
+        watcher.retry(path, now=clock())
 
 
 def main(argv: list[str] | None = None) -> int:

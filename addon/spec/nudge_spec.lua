@@ -33,3 +33,44 @@ describe("Nudge.due", function()
     assert.is_false(Nudge.due(nil, SCAN, SCAN + 1))
   end)
 end)
+
+describe("Nudge.whenReloadReady", function()
+  -- Fakes for C_Timer.After, the Reload button pulse and a chat line.
+  local function world()
+    local w = { timers = {}, pulses = 0, lines = {} }
+    w.after = function(seconds, fn)
+      table.insert(w.timers, { seconds = seconds, fn = fn })
+    end
+    w.pulse = function()
+      w.pulses = w.pulses + 1
+    end
+    w.say = function(text)
+      table.insert(w.lines, text)
+    end
+    return w
+  end
+
+  it("after a load with unimported Scans, pulses Reload and says so once the Brain should be done", function()
+    local w = world()
+
+    Nudge.whenReloadReady(2, w.after, w.pulse, w.say)
+
+    assert.are.equal(1, #w.timers)
+    assert.are.equal(10, w.timers[1].seconds)
+    assert.are.equal(0, w.pulses)
+    assert.are.same({}, w.lines)
+
+    w.timers[1].fn()
+
+    assert.are.equal(1, w.pulses)
+    assert.are.same({ "The Brain should be done: Reload to see the new Scan." }, w.lines)
+  end)
+
+  it("sets no timer when every saved Scan was imported", function()
+    local w = world()
+
+    Nudge.whenReloadReady(0, w.after, w.pulse, w.say)
+
+    assert.are.same({}, w.timers)
+  end)
+end)

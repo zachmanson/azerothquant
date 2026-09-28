@@ -408,9 +408,13 @@ local function createReloadButton()
   note:SetPoint("RIGHT", button, "LEFT", -8, 0)
   note:SetTextColor(1, 0.5, 0.25)
 
+  -- Pulses once the Brain should have imported the Scans saved at load (#71).
+  local pulse = Scanner.addPulse(button)
+
   -- A Scan starts and ends on its own clock, so follow it while the frame is shown.
   button:SetScript("OnUpdate", function(self)
     self:SetEnabled(not Scanner.busy())
+    Scanner.setPulsing(pulse, Scanner.reloadReady() and not Scanner.busy())
     local text = RecommendationTable.waitingNote(Scanner.waiting())
     if text ~= note:GetText() then
       note:SetText(text)

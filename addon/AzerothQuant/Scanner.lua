@@ -32,6 +32,7 @@ local debounceTimer, noResponseTimer
 local button, pulse, ticker
 local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
+local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
 
 local function say(msg)
   print("|cff33ff99AzerothQuant|r " .. msg)
@@ -50,8 +51,28 @@ local function cooldownRemaining()
   return math.max(0, db.lastScanAt + COOLDOWN_SECONDS - time())
 end
 
--- refreshButton runs every second, so only start or stop the pulse on a change.
-local function setPulsing(on)
+-- A pulsing glow over a button (the Scan button here, Reload in RecommendationFrame.lua),
+-- off until setPulsing turns it on. Our own glow rather than ActionButton_ShowOverlayGlow:
+-- the Beta's modern UI has already dropped Blizzard helpers we relied on.
+local function addPulse(target)
+  local glow = target:CreateTexture(nil, "OVERLAY")
+  glow:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
+  glow:SetTexCoord(0, 0.625, 0, 0.6875)
+  glow:SetBlendMode("ADD")
+  glow:SetAllPoints()
+  glow:Hide()
+  local group = glow:CreateAnimationGroup()
+  group:SetLooping("BOUNCE")
+  local fade = group:CreateAnimation("Alpha")
+  fade:SetFromAlpha(0.3)
+  fade:SetToAlpha(1)
+  fade:SetDuration(0.8)
+  group.glow = glow
+  return group
+end
+
+-- Callers run every second or frame, so only start or stop the pulse on a change.
+local function setPulsing(pulse, on)
   if on and not pulse:IsPlaying() then
     pulse.glow:Show()
     pulse:Play()
@@ -70,15 +91,15 @@ local function refreshButton()
   if pending then
     button:SetText("Scanning...")
     button:Disable()
-    setPulsing(false)
+    setPulsing(pulse, false)
   elseif remaining > 0 then
     button:SetText(string.format("Scan (%d:%02d)", math.floor(remaining / 60), remaining % 60))
     button:Disable()
-    setPulsing(false)
+    setPulsing(pulse, false)
   else
     button:SetText("Scan")
     button:Enable()
-    setPulsing(true)
+    setPulsing(pulse, true)
   end
 end
 
@@ -178,22 +199,7 @@ local function createButton()
   button:SetSize(110, 22)
   button:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -25, 2)
   button:SetScript("OnClick", requestScan)
-
-  -- Our own glow rather than ActionButton_ShowOverlayGlow: the Beta's modern UI has
-  -- already dropped Blizzard helpers we relied on.
-  local glow = button:CreateTexture(nil, "OVERLAY")
-  glow:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
-  glow:SetTexCoord(0, 0.625, 0, 0.6875)
-  glow:SetBlendMode("ADD")
-  glow:SetAllPoints()
-  glow:Hide()
-  pulse = glow:CreateAnimationGroup()
-  pulse:SetLooping("BOUNCE")
-  local fade = pulse:CreateAnimation("Alpha")
-  fade:SetFromAlpha(0.3)
-  fade:SetToAlpha(1)
-  fade:SetDuration(0.8)
-  pulse.glow = glow
+  pulse = addPulse(button)
 end
 
 local frame = CreateFrame("Frame")
@@ -219,6 +225,9 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         say(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
           .. " (scripts\\play.bat), Reload again in a few seconds.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
       end
+      Nudge.whenReloadReady(savedAtLoad, C_Timer.After, function()
+        reloadReady = true
+      end, say)
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
@@ -261,4 +270,10 @@ ns.Scanner = {
   waiting = function()
     return (db and #db.scans or 0) - savedAtLoad, savedAtLoad
   end,
+  -- True once the Brain should have imported the Scans saved at load, so Reload pulses.
+  reloadReady = function()
+    return reloadReady
+  end,
+  addPulse = addPulse,
+  setPulsing = setPulsing,
 }

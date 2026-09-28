@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 import re
 import shutil
 import sqlite3
@@ -10,7 +11,14 @@ from pathlib import Path
 import pytest
 
 from brain.archive import Archive
-from brain.cli import RebuildError, run_import, run_rebuild, run_recommend, savedvariables_files
+from brain.cli import (
+    RebuildError,
+    _watch_step,
+    run_import,
+    run_rebuild,
+    run_recommend,
+    savedvariables_files,
+)
 from brain.config import Config, Era, Install
 from brain.history import (
     Holding,
@@ -33,6 +41,7 @@ from brain.predictions import Prediction
 from brain.recommend import grades
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
+from brain.watch import Watcher
 
 FIXTURE = Path(__file__).parent / "fixtures" / "AzerothQuant.lua"
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
@@ -114,6 +123,21 @@ def install_addon(install: Path) -> None:
 def read_recommendations(install: Path) -> dict:
     file = addon_folder(Install(install, Era.BETA)) / FILE_NAME
     return parse_savedvariables(file.read_text(encoding="utf-8"))[GLOBAL_NAME]
+
+
+def test_watch_logs_how_long_an_import_took(tmp_path, caplog):
+    # From when the file is noticed settled to when Recommendations.lua is written, so the
+    # Addon's RELOAD_READY_AFTER can be tuned by it (#71).
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    watcher = Watcher(settle_seconds=0)
+    caplog.set_level(logging.INFO)
+    clock = iter([100.0, 110.0, 114.2]).__next__
+
+    _watch_step(config, watcher, clock)  # sees the file for the first time
+    _watch_step(config, watcher, clock)  # it has settled: import
+
+    assert "Imported 2 new Scans in 4.2s" in caplog.text
 
 
 def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_path):
