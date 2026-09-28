@@ -1,6 +1,6 @@
 2026-09-28 (later 25): SCOPED. Every open issue now has a `core` or `later` label (see docs/agents/triage-labels.md). Work only on `core` until that queue is empty; new issues default to `later`. The Next lists in the older entries below are superseded by this one.
 - core: #85, #86 and #18 (PC checks of built features), #51 (PC check), #83 (the Beta replay read, by Oct 21), #87 (Flips to Craft section), #53 (quieter chat).
-- later: everything else, including #84, #88, #76, #77, #89, #90 and #91. #90 (Beta Prior) has a Nov 4 deadline, so as `later` it most likely won't make launch. The user chose to accept thin recommendations for the first days of Live instead.
+- later: everything else, including #84, #88, #76, #77, #89, #90 and #91. #90 (Beta Prior) has a Nov 4 deadline, so as `later` it most likely won't make launch. Ask the user whether to move it to `core` or accept thin recommendations for the first days of Live.
 
 Next, in order:
 1. At the PC: the #85 checklist (including `brain replay` for #83), the PC checks on #86 and #18, and #51. File a `core` bug for anything that fails.
