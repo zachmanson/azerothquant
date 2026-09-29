@@ -1,3 +1,15 @@
+2026-09-28 (later 38): #76 SLICE 2 DONE (ac81a0b), with /tdd then /code-review. Disenchant Results: `DisenchantCapture.lua` (plain Lua, busted specs) is fed by Character.lua on UNIT_SPELLCAST_START/SUCCEEDED 13262 and LOOT_READY. The item is the bag diff from cast start; a Result waits up to 5 s of bag reads for the item to leave, then falls back to mats only. Results ride on Character Reads as `disenchantResults` into the Brain tables `disenchant_result` + `disenchant_result_mat`. `brain disenchants` (`disenchant_check.py`) runs Wilson + exact t-intervals (A&S 26.7.3/4, no new deps), with `disenchant_check_min_results` = 20. CONTEXT "Disenchant Result" and the ADR-0018 amendment are done. The event-order probe is a comment on #85. #76 stays open only for its PC check. Its Buy Under parts are #88, Flip to Disenchant is #89, and the chain node is #77.
+- New tool: `scripts/busted.py` runs addon/spec on lupa's Lua 5.1 (`pip install lupa`, then `python ../scripts/busted.py` from addon/). It only knows the busted API the specs use; add to it when a spec needs more. CI still runs real busted.
+- Gotchas:
+  - Heredocs in the Bash tool here turn `\\n` inside Python source into a real newline. Write edit scripts with the Write tool into the scratchpad and run them, rather than `python - <<'EOF'` with escapes.
+  - `ruff` isn't on PATH: use `python -m ruff`.
+  - A background `brain watch` from an earlier session was killed for low memory on 2026-09-28. It is NOT running. Restart it at the next PC sitting.
+- Review notes left as they are: `CharacterRead.build` now takes 7 positional args (a candidate for an options table if an 8th comes). Mats show as item IDs in `brain disenchants`, with no names.
+
+Next, in order:
+1. Not at the PC: #101 (triage: 1 day vs Sale Horizon), #102 (triage), #88 (with the Disenchant Buy Under; see the #88 comment for hooks), #77, #84.
+2. Next PC sitting: restart `brain watch`, then the #85 checks from "later 35" and "later 37", plus the new Disenchant probe comment on #85 (does UNIT_SPELLCAST_START fire for Disenchant? is the green gone at LOOT_READY?).
+
 2026-09-28 (later 37): #76 SLICE 1 DONE (e8da1ea), with /tdd then /code-review. It adds the Disenchant data file (`brain/src/brain/data/disenchant.toml`, `disenchant.py`), Item Info from Scans AND Character Reads (a bound green is never scanned), the Enchanting skill on `known_profession`, the Holdings Disenchant Action (Craft's marginal rule, with fractional mats interpolated), and Best Exit Value with the Disenchant way (`_Valuer.best_exit`; `worth` stays Sell/Vendor for Crafts). The replay treats Disenchant rows as kept. ADR-0018 is new, and CONTEXT.md gained Disenchant and Disenchant source group.
 - Scope decided with the user: the Buy Under parts of #76 moved to #88 (comment on #88 lists the hooks to build on). #76 stays open for slice 2.
 - Review follow-ups filed as #102 (needs-triage): bound units on a non-enchanter Character, Best Exit Value ignoring held mats, as-of look-ahead of skills and Item Info.
