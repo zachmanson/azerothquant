@@ -1,3 +1,21 @@
+2026-09-29 (later 7): #77 BRAIN SLICE BUILT (1b34337), with /tdd then /code-review. #77 stays open for the Addon slice. Every Craft row has `chain` (a `ChainNode` tree). It's recorded while sourcing: `_Chain.parts` holds `_Part`s keyed by `at`, the craft the part feeds as Item Keys from the top output down. `_Sources.parts` values the held units and leftovers, `_held_exits`/`_exits` add the exits, `_Plan.add(chain, parts)` sums them, and `_Plan.chain()` builds the tree. The roots are the exits, and the LAST one has the top craft as its only child. A craft's gold is the sum of its children, and every other node sums to `profit`. Blocked rows: `_blocked_chain`. Written to Lua as `chain` (the node keys are in the Recommendations.lua header). `brain recommend --chain ITEM_KEY` prints an ASCII tree. The full summary is on #77.
+
+Next, in order:
+1. Not at the PC: the #77 Addon slice, per the spec comment's "### Addon" section and the Brain-slice comment:
+   - CraftChain.lua (busted), which turns the tree into lines.
+   - The frame glue in RecommendationFrame.lua.
+   - Plain click selects a row, shift-click links it.
+   - The ADR-0016 note.
+   - The .toc change goes on the #85 checklist (full client restart).
+2. At the PC: #71's tune and #104's in-game check (as in the entries below).
+
+- Gotchas:
+  - The Brain's Lua tests (`test_recommendations.py`) SKIP unless `LUA` is set: `LUA=Z:/vibing/azerothquant/.lua/bin/lua.exe python -m pytest`. Lua 5.1 prints whole floats without `.0`.
+  - Ruff isn't on PATH: use `../.venv/Scripts/ruff.exe` from `brain/`. `brain recommend` needs `brain/` as the working directory (for config.toml).
+  - Bash heredocs with `\\n` inside Python replace scripts didn't match here. Write the script to the scratchpad with the Write tool, or use Edit.
+  - Piped stdout on Windows is cp1252: box glyphs in CLI output crash. The Addon has no such limit.
+  - A blocked row whose other reagents can't be sourced has an empty `chain`. The panel needs a "no chain" state.
+
 2026-09-29 (later 6): #84 DONE and closed (9dbff93), with /tdd then /code-review. `recommend_market(pricer=)` takes an optional `Pricer` (Item Key, cheapest other ask left) -> post price. `_Valuer` switches on it in `sale_queue`, `priced`, `has_data`, `_post_at_or_under` and `rows`, and `_flips`/`_outlet` take the per-Item-Key `priced` callable. Only `replay._tsm_pricer` builds one. New Policy row "Brain without own-Market Sell Rate". ADR-0015 describes it. Replay on beta (24 h, 23 Scans, ~40 min): the other rows are unchanged from #103, and the new row is -240g 19s 52c against Brain 5g 64s 29c and TSM -249g 73s 87c (table on #84).
 
 Next, in order:
