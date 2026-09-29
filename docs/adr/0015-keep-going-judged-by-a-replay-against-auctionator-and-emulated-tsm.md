@@ -6,7 +6,7 @@ Should azerothquant keep going when TradeSkillMaster (TSM) exists? It exists for
 
 **The test is a replay over the Archive.** At each past Scan of a Market, three policies choose Actions from the same Holdings and Listings: the Brain, an Auctionator baseline (post just under the lowest current Listing, buy nothing it can't resell above that) and an emulated TSM baseline (price strings over DBMarket and DBMinBuyout computed from our own Scans by TSM's published method: DBMarket is a 14-day weighted average of the lower listings). Each policy is graded by Best Exit Value against what the Market did next, as Grades already are. The one number that decides is graded value, Brain vs. each baseline.
 
-**Ablations** rerun the Brain with one feature switched off at a time: Sub-crafts, Flip to Craft, Deposits and own-Market Sell Rate (replaced by a DBMarket-style price with no Sell Rate). They say which features pay and where the next month of work goes. The features expected to win are own-Market Sell Rate and Sale Events, Sub-crafts, Flip to Craft and the Beta Prior. Deposits and Holdings Sell vs Vendor should win by less, and Predictions are unproven.
+**Ablations** rerun the Brain with one feature switched off at a time: Sub-crafts, Flip to Craft, Deposits and own-Market Sell Rate (replaced by a DBMarket-style price with no Sell Rate). They say which features pay and where the next month of work goes. The features expected to win are own-Market Sell Rate and Sale Events, Sub-crafts and Flip to Craft. Deposits and Holdings Sell vs Vendor should win by less, and Predictions are unproven.
 
 **Checkpoints.** Beta and Live data are never mixed (Era), so there are two reads:
 
@@ -18,7 +18,7 @@ Should azerothquant keep going when TradeSkillMaster (TSM) exists? It exists for
 
 Realized profit from Lots and Sold mail is reported alongside as the confirmation. Gold per hour of the player's time is reported honestly as TSM's traditional strength. ADR-0016 narrows that gap, and it doesn't decide the verdict.
 
-**Outside market data.** TSM's real value may be its data, so if TSM (or anyone else) publishes Forever data, it supplements ours and doesn't replace it. It's imported like the Beta Prior and fills in where our own Market is thin (rare Item Keys, items with no Sell Rate, new recipes). Our own Sale Events override it wherever there are enough of them, and an ablation measures whether it helps. It may replace one of our metrics (Fair Value or Sell Rate) only if the replay shows it predicts that metric better. Revisit trigger: TSM announces Forever support or AuctionDB data. Then "real TSM" joins the replay as a third baseline and as a supplement, read from the file the TSM desktop app writes (`TradeSkillMaster_AppHelper`) as an ordinary import. Booty Bay Broker is researched now (#82), as the one Forever source that exists.
+**Outside market data.** TSM's real value may be its data, so if TSM (or anyone else) publishes Forever data, it supplements ours and doesn't replace it. It's imported per Market and fills in where our own Market is thin (rare Item Keys, items with no Sell Rate, new recipes). Our own Sale Events override it wherever there are enough of them, and an ablation measures whether it helps. It may replace one of our metrics (Fair Value or Sell Rate) only if the replay shows it predicts that metric better. Revisit trigger: TSM announces Forever support or AuctionDB data. Then "real TSM" joins the replay as a third baseline and as a supplement, read from the file the TSM desktop app writes (`TradeSkillMaster_AppHelper`) as an ordinary import. Booty Bay Broker is researched now (#82), as the one Forever source that exists.
 
 ## Considered Options
 
@@ -34,7 +34,8 @@ Realized profit from Lots and Sold mail is reported alongside as the confirmatio
 - The replay harness (#80) is built before the #38 build so it runs on Beta data before Oct 21. It needs the two baseline policies, grading by Best Exit Value and ablation flags in config.
 - Brain feature work after Dec 2 depends on the verdict (#83), and a stop freezes it.
 - DBMarket and DBMinBuyout emulation lives in the harness as a baseline. It isn't a Brain price.
-- An outside data source is a prior, so it follows the Beta Prior's rules: it's per Market, and it gives way to Live observation.
+- An outside data source is a prior: it's per Market, and it gives way to Live observation.
+- The Beta Prior is display only (#90): the Decision Engine never reads it, so it isn't ablated. Using Beta as an engine prior is a separate question (#110).
 
 ## How the replay grades (#80)
 

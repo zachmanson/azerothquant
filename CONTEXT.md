@@ -19,7 +19,7 @@ _Avoid_: model, AI
 ## Market data
 
 **Era**:
-Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed.
+Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed: no decision reads the other Era. The Beta Prior only puts a Beta price on screen beside Live's.
 _Avoid_: season, phase
 
 **Market**:
@@ -27,7 +27,8 @@ One Auction House in one Era, identified by realm, faction (Alliance, Horde or N
 _Avoid_: server, AH (when you mean the data scope)
 
 **Beta Prior**:
-Relative value learned from Beta (price ratios, turnover rank) that the Decision Engine uses early in Live, while Live history is still thin. It stops being used a few weeks after launch.
+A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and its tooltip names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
+_Avoid_: Beta price as a prior or input (it's display only)
 
 **Scan**:
 One full pass over every Listing on the Auction House, as it stood at the moment the Scan was requested.
