@@ -683,9 +683,13 @@ local function createSettingBox(anchor, setting)
     GameTooltip:Show()
   end)
   box:SetScript("OnLeave", GameTooltip_Hide)
-  box:SetScript("OnShow", function(self)
-    self:SetText(setting.text(setting.saved()))
-  end)
+  -- Shows the saved value, unfocused. Called from the frame's OnShow: the box's own
+  -- OnShow didn't fire on the first open after a /reload, so it stayed blank, and an
+  -- Enter into that blank box then cleared the setting.
+  function box.refresh()
+    box:SetText(setting.text(setting.saved()))
+    box:ClearFocus()
+  end
   return box
 end
 
@@ -778,7 +782,11 @@ local function createFrame()
     self:StopMovingOrSizing()
     savePosition()
   end)
-  frame:SetScript("OnShow", redraw)
+  frame:SetScript("OnShow", function()
+    frame.budget.refresh()
+    frame.daysToSell.refresh()
+    redraw()
+  end)
   frame:Hide()
   tinsert(UISpecialFrames, "AzerothQuantRecommendationFrame") -- Escape closes it
   frame:SetPortraitToAsset(PORTRAIT)
@@ -804,6 +812,13 @@ local function createFrame()
   scroll:SetScrollChild(content)
 
   createTabs()
+
+  -- After the boxes exist (the frame:Hide() above would otherwise fire it first).
+  -- A box left focused while hidden would swallow the next Enter meant for chat.
+  frame:SetScript("OnHide", function()
+    frame.budget:ClearFocus()
+    frame.daysToSell:ClearFocus()
+  end)
 end
 
 -- An AH open always lands on the Shopping List; /aq recs reopens the tab last picked.
