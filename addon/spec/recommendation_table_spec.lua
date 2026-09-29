@@ -731,6 +731,49 @@ describe("RecommendationTable.build", function()
   end)
 end)
 
+-- A selected row (#77) is found again after a redraw by its Item Key and action.
+describe("selecting a Recommendation Table row", function()
+  it("finds the row with the same Item Key and action after a redraw", function()
+    local sell = { itemKey = "2589", action = "Sell", quantity = 16, price = 100, profit = 1520 }
+    local rows = build(entry({ holdings = { holdingsCraft(), sell } }), AS_OF, names).sections[1].rows
+    local selected = rows[1].record.action == "Sell" and rows[1] or rows[2]
+
+    local redrawn = build(entry({ holdings = { sell, holdingsCraft() } }), AS_OF, names).sections[1]
+
+    local found = RecommendationTable.find(redrawn, selected.id).record
+    assert.are.same({ "2589", "Sell" }, { found.itemKey, found.action })
+  end)
+
+  it("finds nothing once no row has that Item Key and action", function()
+    local sell = { itemKey = "2589", action = "Sell", quantity = 16, price = 100, profit = 1520 }
+    local selected = build(entry({ holdings = { sell } }), AS_OF, names).sections[1].rows[1]
+    local vendor = { itemKey = "2589", action = "Vendor", quantity = 16, price = 20, profit = 320 }
+
+    local redrawn = build(entry({ holdings = { vendor } }), AS_OF, names).sections[1]
+
+    assert.is_nil(RecommendationTable.find(redrawn, selected.id))
+  end)
+
+  -- Each Known Recipe is planned on its own, so two Characters can each craft one output.
+  it("tells apart two Craft rows of one output on different Characters", function()
+    local other = flipToCraft()
+    other.character = "Alt-One"
+    other.profit = 100
+    local rows = build(entry({ shoppingList = { flipToCraft(), other } }), AS_OF, names).sections[3].rows
+    local alt = rows[1].record.character == "Alt-One" and rows[1] or rows[2]
+
+    assert.are.equal("Alt-One", RecommendationTable.find({ rows = rows }, alt.id).record.character)
+  end)
+
+  it("keeps the Brain's row on each line, for the Craft Chain panel", function()
+    local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, names)
+
+    local row = view.sections[3].rows[1]
+    assert.are.equal("Craft", row.record.action)
+    assert.are.equal(6, row.record.quantity)
+  end)
+end)
+
 describe("RecommendationTable.openingTab", function()
   it("lands on the Shopping List when the Auction House opens the table, whatever was saved", function()
     assert.are.equal("Shopping List", RecommendationTable.openingTab("Holdings", true))

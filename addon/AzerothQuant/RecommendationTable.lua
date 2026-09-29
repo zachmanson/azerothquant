@@ -504,6 +504,10 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         rowCells[1] = RecommendationTable.BAG .. " " .. name
       end
       out.rows[#out.rows + 1] = {
+        -- What a selection finds the row by after a redraw (#77). A Buy Under has a way
+        -- out instead of an action, and two Characters can each Craft one output.
+        id = table.concat({ r.itemKey or name, r.action or r.way or "", r.character or "" }, " "),
+        record = r,
         itemString = r.itemKey and itemString(r.itemKey),
         cells = rowCells,
         keys = keys(r, name, rowCells),
@@ -527,6 +531,16 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
   end
   out.more = #more > 0 and table.concat(more, ", ") or nil
   return out
+end
+
+-- The section's row with that id, if a redraw kept it (#77).
+function RecommendationTable.find(section, id)
+  for _, row in ipairs(section.rows) do
+    if row.id == id then
+      return row
+    end
+  end
+  return nil
 end
 
 -- The tab the table opens on. The AH is where the Shopping List gets bought, so opening

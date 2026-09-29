@@ -5,11 +5,13 @@
 -- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, the tab
 -- last picked and each Market's Budget are saved in AzerothQuantDB; open/closed is not.
 --
--- Read-only: hover shows a tooltip and shift-click links the item. Nothing else (ADR-0003).
+-- Read-only: hover shows a tooltip, a click selects the row and shift-click links the item
+-- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the right (#77).
 -- The Budget box (#86) only saves what the player will spend: the table hides options over
 -- it at once, and Character.lua hands it to the Brain in the next Character Read.
 local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
+local CraftChain = ns.CraftChain
 local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
@@ -52,6 +54,9 @@ local selected -- the title of the section on show
 local shown -- the section on show, as built, so a header click knows its columns
 local openedByAuctionHouse = false
 local redrawQueued = false
+-- The selected row's id (RecommendationTable.find). It survives a redraw while a row with
+-- the same Item Key and action is on show, and clears otherwise.
+local selectedId
 
 -- C_Item on newer clients (the Beta has no global GetItemInfo), the old globals otherwise.
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
@@ -120,10 +125,9 @@ local function showTooltip(line)
   GameTooltip:Show()
 end
 
+local redraw
+
 local function linkInChat(line)
-  if not IsModifiedClick("CHATLINK") then
-    return
-  end
   local _, link = getItemInfo(line.itemString)
   if link then
     ChatEdit_InsertLink(link)
@@ -158,8 +162,13 @@ local function getLine(i)
   end)
   line:SetScript("OnLeave", GameTooltip_Hide)
   line:SetScript("OnClick", function(self)
-    if self.itemString then
-      linkInChat(self)
+    if IsModifiedClick("CHATLINK") then
+      if self.itemString then
+        linkInChat(self)
+      end
+    elseif self.id then
+      selectedId = self.id
+      redraw()
     end
   end)
   lines[i] = line
@@ -176,6 +185,12 @@ local function drawLine(i, texts, widths, font, item, justify)
   line:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -(i - 1) * LINE_HEIGHT)
   line.itemString = item and item.itemString
   line.tooltip = item and item.tooltip
+  line.id = item and item.id
+  if line.id and line.id == selectedId then
+    line:LockHighlight()
+  else
+    line:UnlockHighlight()
+  end
   line:EnableMouse(item ~= nil)
   line.stripe:SetShown(item ~= nil and i % 2 == 0)
   if item and item.itemString then
@@ -208,7 +223,195 @@ local function drawLine(i, texts, widths, font, item, justify)
   line:Show()
 end
 
-local redraw
+-- The Craft Chain panel (#77): the selected Craft row's chain as a top-down tree, docked to
+-- the frame's right edge. It's the frame's child, so it closes with it. CraftChain.lua
+-- shapes the lines; here they're drawn. The elbows are textures, not ├ └ │, which the
+-- game's fonts may not have.
+local PANEL_WIDTH = 300
+local CHAIN_LINE_HEIGHT = 20
+local CHAIN_ICON_SIZE = 16
+local INDENT = 14
+local GOLD_WIDTH = 64
+local GUIDE_COLOR = { 0.6, 0.6, 0.6, 0.6 }
+local BLOCKED_ICON = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:0|t"
+local GOLD_COLORS = {
+  gain = { 0.12, 1, 0 },
+  loss = { 1, 0.13, 0.13 },
+  subtotal = { 0.6, 0.6, 0.6 },
+}
+
+local chainPanel
+local chainLines = {}
+
+local function setGoldColor(fontString, color)
+  local rgb = GOLD_COLORS[color] or { 1, 1, 1 }
+  fontString:SetTextColor(rgb[1], rgb[2], rgb[3])
+end
+
+-- The item, its gold's breakdown, and the line's text if the panel clipped it.
+local function showChainTooltip(line)
+  GameTooltip:SetOwner(line, "ANCHOR_RIGHT")
+  GameTooltip:SetHyperlink(line.itemString)
+  if line.text:IsTruncated() then
+    GameTooltip:AddLine(line.text:GetText(), 1, 1, 1, true)
+  end
+  for _, text in ipairs(line.tooltip) do
+    GameTooltip:AddLine(text, 1, 1, 1, true)
+  end
+  GameTooltip:Show()
+end
+
+local function newGuide(line)
+  local guide = { up = line:CreateTexture(nil, "ARTWORK"), across = line:CreateTexture(nil, "ARTWORK") }
+  guide.up:SetColorTexture(unpack(GUIDE_COLOR))
+  guide.across:SetColorTexture(unpack(GUIDE_COLOR))
+  return guide
+end
+
+local function getChainLine(i)
+  local line = chainLines[i]
+  if line then
+    return line
+  end
+  line = CreateFrame("Button", nil, chainPanel)
+  line:SetHeight(CHAIN_LINE_HEIGHT)
+  line:RegisterForClicks("LeftButtonUp")
+  line:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+  line.guides = {}
+  line.icon = line:CreateTexture(nil, "ARTWORK")
+  line.icon:SetSize(CHAIN_ICON_SIZE, CHAIN_ICON_SIZE)
+  line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  line.text:SetJustifyH("LEFT")
+  line.text:SetWordWrap(false)
+  line.gold = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  line.gold:SetJustifyH("RIGHT")
+  line.gold:SetWidth(GOLD_WIDTH)
+  line.gold:SetPoint("RIGHT", line, "RIGHT", -4, 0)
+  line:SetScript("OnEnter", function(self)
+    if self.itemString then
+      showChainTooltip(self)
+    end
+  end)
+  line:SetScript("OnLeave", GameTooltip_Hide)
+  line:SetScript("OnClick", function(self)
+    if self.itemString and IsModifiedClick("CHATLINK") then
+      linkInChat(self)
+    end
+  end)
+  chainLines[i] = line
+  return line
+end
+
+-- One level's elbow or pipe, centred in its INDENT-wide column. "last" stops halfway down.
+local function drawGuide(line, level, kind)
+  local guide = line.guides[level] or newGuide(line)
+  line.guides[level] = guide
+  local x = (level - 1) * INDENT + INDENT / 2
+  guide.up:ClearAllPoints()
+  guide.across:ClearAllPoints()
+  guide.up:SetShown(kind ~= "space")
+  guide.across:SetShown(kind == "branch" or kind == "last")
+  guide.up:SetWidth(1)
+  guide.up:SetPoint("TOPLEFT", line, "TOPLEFT", x, 0)
+  guide.up:SetHeight(kind == "last" and CHAIN_LINE_HEIGHT / 2 or CHAIN_LINE_HEIGHT)
+  guide.across:SetHeight(1)
+  guide.across:SetWidth(INDENT / 2)
+  guide.across:SetPoint("LEFT", line, "TOPLEFT", x, -CHAIN_LINE_HEIGHT / 2)
+end
+
+-- A tree line (with an item) or the Profit footer.
+local function drawChainLine(i, entry)
+  local line = getChainLine(i)
+  line:ClearAllPoints()
+  line:SetPoint("TOPLEFT", chainPanel.Inset, "TOPLEFT", 6, -6 - (i - 1) * CHAIN_LINE_HEIGHT)
+  line:SetPoint("RIGHT", chainPanel.Inset, "RIGHT", -6, 0)
+  local guides = entry.guides or {}
+  for _, guide in ipairs(line.guides) do
+    guide.up:SetShown(false)
+    guide.across:SetShown(false)
+  end
+  for level, kind in ipairs(guides) do
+    drawGuide(line, level, kind)
+  end
+  local x = #guides * INDENT
+  line.itemString = entry.itemString
+  line.tooltip = entry.tooltip
+  line:EnableMouse(entry.itemString ~= nil)
+  if entry.itemString then
+    line.icon:SetTexture(select(5, getItemInfoInstant(entry.itemString)))
+    line.icon:ClearAllPoints()
+    line.icon:SetPoint("LEFT", line, "LEFT", x + 1, 0)
+    line.icon:Show()
+    x = x + CHAIN_ICON_SIZE + 4
+  else
+    line.icon:Hide()
+  end
+  local text = entry.text
+  if entry.tag then
+    text = text .. " |cffa0a0a0" .. entry.tag .. "|r"
+  end
+  if entry.blocked then
+    text = BLOCKED_ICON .. " " .. text .. " |cffff2020" .. entry.blocked .. "|r"
+  end
+  line.text:ClearAllPoints()
+  line.text:SetPoint("LEFT", line, "LEFT", x, 0)
+  line.text:SetPoint("RIGHT", line.gold, "LEFT", -4, 0)
+  line.text:SetText(text)
+  line.gold:SetText(entry.gold or "")
+  setGoldColor(line.gold, entry.color)
+  line:Show()
+end
+
+local function createChainPanel()
+  chainPanel = CreateFrame("Frame", "AzerothQuantCraftChainPanel", frame, "ButtonFrameTemplate")
+  chainPanel:SetPoint("TOPLEFT", frame, "TOPRIGHT", 2, 0)
+  chainPanel:SetPoint("BOTTOMLEFT", frame, "BOTTOMRIGHT", 2, 0)
+  chainPanel:SetWidth(PANEL_WIDTH)
+  chainPanel.Inset:ClearAllPoints()
+  chainPanel.Inset:SetPoint("TOPLEFT", chainPanel, "TOPLEFT", 4, INSET_TOP)
+  chainPanel.Inset:SetPoint("BOTTOMRIGHT", chainPanel, "BOTTOMRIGHT", -6, 6)
+  -- Why a row has no chain to draw, wrapped across the panel.
+  chainPanel.empty = chainPanel:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  chainPanel.empty:SetPoint("TOPLEFT", chainPanel.Inset, "TOPLEFT", 10, -10)
+  chainPanel.empty:SetPoint("RIGHT", chainPanel.Inset, "RIGHT", -10, 0)
+  chainPanel.empty:SetJustifyH("LEFT")
+  -- Closing it drops the selection, or the next redraw would open it again.
+  chainPanel.CloseButton:SetScript("OnClick", function()
+    selectedId = nil
+    redraw()
+  end)
+end
+
+-- Opens the panel on a Craft row, or closes it (nil).
+local function drawChain(record)
+  if not record then
+    if chainPanel then
+      chainPanel:Hide()
+    end
+    return
+  end
+  if not chainPanel then
+    createChainPanel()
+  end
+  local chain = CraftChain.build(record, nameOf)
+  local itemString = RecommendationTable.itemString(record.itemKey)
+  chainPanel:SetTitle("Craft Chain: " .. (nameOf(itemString) or itemString))
+  chainPanel:SetPortraitToAsset(select(5, getItemInfoInstant(itemString)) or PORTRAIT)
+  local n = 0
+  for _, entry in ipairs(chain.lines) do
+    n = n + 1
+    drawChainLine(n, entry)
+  end
+  chainPanel.empty:SetText(chain.empty or "")
+  if chain.profit then
+    n = n + 1
+    drawChainLine(n, chain.profit)
+  end
+  for i = n + 1, #chainLines do
+    chainLines[i]:Hide()
+  end
+  chainPanel:Show()
+end
 
 -- The sort the section on show is in: the last header click, saved across sessions (#98),
 -- or its default.
@@ -346,6 +549,18 @@ function redraw()
     lines[i]:Hide()
   end
   content:SetHeight(math.max(n, 1) * LINE_HEIGHT)
+
+  -- The selection clears once no tab has its row, so a tab switch keeps it. A selected
+  -- Craft row on show opens its chain; any other row, or none, closes it.
+  local kept = false
+  for _, section in ipairs(view.sections or {}) do
+    kept = kept or (selectedId and RecommendationTable.find(section, selectedId)) ~= nil
+  end
+  if not kept then
+    selectedId = nil
+  end
+  local row = shown and selectedId and RecommendationTable.find(shown, selectedId)
+  drawChain(row and row.record.action == "Craft" and row.record or nil)
 end
 
 -- GET_ITEM_INFO_RECEIVED fires once per item, often dozens at a time: redraw once after.

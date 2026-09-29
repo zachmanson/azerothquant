@@ -9,6 +9,8 @@ ADR-0003 kept the Addon read-only, stricter than Blizzard requires. Posting is w
 
 Nothing moves on to the next row by itself. The player picks each row, so the decision is always theirs.
 
+**Selecting a row** (built with #77, before Post and Cancel). A plain click selects a row and highlights it. A shift-click links the item in chat, which a plain click used to do. The selection survives a redraw (a sort, a tab switch, a re-import) while a row with the same Item Key and action is on show, and clears otherwise. Selecting a Craft row also opens its Craft Chain panel. Selecting takes no action by itself.
+
 **When the price has gone stale.** The Brain is offline, so Post at comes from the last import. If the live lowest Listing on the Sell screen is below Post at, the button still works but shows the undercut ("Lowest is now 4s 20c, below 4s 50c"). Repricing is the Brain's job on the next import, not something the Addon improvises.
 
 **Guardrails** (what keeps the account-risk surface where TSM's has been for over a decade):
