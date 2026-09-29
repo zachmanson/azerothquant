@@ -944,4 +944,14 @@ describe("RecommendationTable.waitingNote", function()
     assert.are.equal("3 Scans waiting: Reload to send them to the Brain",
       RecommendationTable.waitingNote(1, 2))
   end)
+
+  it("asks to start brain watch when the Brain is behind, since a Reload alone won't help", function()
+    assert.are.equal("2 Scans waiting: start brain watch",
+      RecommendationTable.waitingNote(0, 2, true))
+  end)
+
+  it("still asks to send unsaved Scans first when the Brain is behind", function()
+    assert.are.equal("3 Scans waiting: Reload to send them to the Brain",
+      RecommendationTable.waitingNote(1, 2, true))
+  end)
 end)

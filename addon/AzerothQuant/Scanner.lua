@@ -5,8 +5,9 @@
 -- the AH is open the button pulses whenever a Scan can run, and it says in chat when a
 -- Scan would complete an Observation Window (Nudge.lua).
 -- ns.Scanner.busy() says whether a Scan is in flight, and reloadReady() whether the Brain
--- should have imported the Scans saved at load (#71). It also lends the Scan button's
--- pulse (addPulse, setPulsing) to the Reload button.
+-- should have imported the Scans saved at load (#71). At logout it stamps each Scan with
+-- when it was first saved, so the next load can tell the Brain is behind (#104). It also
+-- lends the Scan button's pulse (addPulse, setPulsing) to the Reload button.
 --
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
@@ -36,6 +37,7 @@ local button, pulse, ticker
 local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
+local behindAtLoad = false -- it should have imported some long ago, so brain watch is off (#104)
 
 local function cancel(timer)
   if timer then
@@ -208,6 +210,7 @@ end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("AUCTION_HOUSE_SHOW")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
@@ -225,13 +228,18 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       end
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
-      if savedAtLoad > 0 then
+      behindAtLoad = Nudge.afterLoad(db.scans, time(), C_Timer.After, function()
+        reloadReady = true
+      end, Chat.say)
+      if savedAtLoad > 0 and not behindAtLoad then
         Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
           .. " (scripts\\play.bat), Reload again in a few seconds.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
       end
-      Nudge.whenReloadReady(savedAtLoad, C_Timer.After, function()
-        reloadReady = true
-      end, Chat.say)
+    end
+  elseif event == "PLAYER_LOGOUT" then
+    -- SavedVariables is written right after this, on a /reload too.
+    if db then
+      Nudge.stampSaved(db.scans, time())
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
@@ -270,9 +278,10 @@ ns.Scanner = {
     return pending ~= nil
   end,
   -- Scans the Recommendation Table doesn't reflect yet: those taken since the last reload
-  -- (unsaved), and those saved then that the Brain hadn't imported (unimported).
+  -- (unsaved), and those saved then that the Brain hadn't imported (unimported). Then
+  -- whether the Brain was behind at load (Nudge.brainBehind): waitingNote's arguments.
   waiting = function()
-    return (db and #db.scans or 0) - savedAtLoad, savedAtLoad
+    return (db and #db.scans or 0) - savedAtLoad, savedAtLoad, behindAtLoad
   end,
   -- True once the Brain should have imported the Scans saved at load, so Reload pulses.
   reloadReady = function()

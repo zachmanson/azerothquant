@@ -34,7 +34,9 @@ describe("Nudge.due", function()
   end)
 end)
 
-describe("Nudge.whenReloadReady", function()
+describe("Nudge.afterLoad", function()
+  local NOW = SCAN + 60 * MIN
+
   -- Fakes for C_Timer.After, starting the Reload button pulse and a chat line.
   local function world()
     local w = { timers = {}, pulses = 0, lines = {} }
@@ -53,8 +55,9 @@ describe("Nudge.whenReloadReady", function()
   it("after a load with unimported Scans, pulses Reload and says so once the Brain should be done", function()
     local w = world()
 
-    Nudge.whenReloadReady(2, w.after, w.pulse, w.say)
+    local behind = Nudge.afterLoad({ { savedAt = NOW }, { savedAt = NOW } }, NOW, w.after, w.pulse, w.say)
 
+    assert.is_false(behind)
     assert.are.equal(1, #w.timers)
     assert.are.equal(Nudge.RELOAD_READY_AFTER, w.timers[1].seconds)
     assert.are.equal(0, w.pulses)
@@ -69,8 +72,57 @@ describe("Nudge.whenReloadReady", function()
   it("sets no timer when every saved Scan was imported", function()
     local w = world()
 
-    Nudge.whenReloadReady(0, w.after, w.pulse, w.say)
+    assert.is_false(Nudge.afterLoad({}, NOW, w.after, w.pulse, w.say))
 
     assert.are.same({}, w.timers)
+    assert.are.same({}, w.lines)
+  end)
+
+  it("when the Brain is behind, asks whether brain watch is running instead of promising it's done", function()
+    local w = world()
+
+    local behind = Nudge.afterLoad({ { savedAt = NOW }, { savedAt = NOW - 7 * MIN - 59 } }, NOW, w.after, w.pulse, w.say)
+
+    assert.is_true(behind)
+    assert.are.same({}, w.timers)
+    assert.are.same({ "The Brain hasn't imported Scans saved 7 min ago. Is brain watch running? (scripts\\play.bat)" },
+      w.lines)
+  end)
+end)
+
+describe("Nudge.stampSaved", function()
+  it("stamps the Scans saved for the first time and keeps the stamp on ones saved before", function()
+    local fresh = { id = 2 }
+    local older = { id = 1, savedAt = SCAN }
+    local scans = { older, fresh }
+
+    Nudge.stampSaved(scans, SCAN + 5 * MIN)
+
+    assert.are.equal(SCAN, older.savedAt)
+    assert.are.equal(SCAN + 5 * MIN, fresh.savedAt)
+  end)
+end)
+
+describe("Nudge.brainBehind", function()
+  local NOW = SCAN + 60 * MIN
+
+  it("isn't behind with no Scans waiting", function()
+    assert.is_nil(Nudge.brainBehind({}, NOW))
+  end)
+
+  it("isn't behind while every Scan was saved too recently for brain watch to be done", function()
+    local justUnder = NOW - Nudge.BRAIN_BEHIND_AFTER + 1
+    assert.is_nil(Nudge.brainBehind({ { savedAt = justUnder }, { savedAt = NOW } }, NOW))
+  end)
+
+  it("is behind by the oldest Scan's age once one has waited the threshold or longer", function()
+    local atThreshold = NOW - Nudge.BRAIN_BEHIND_AFTER
+    local older = NOW - 10 * MIN
+    assert.are.equal(Nudge.BRAIN_BEHIND_AFTER, Nudge.brainBehind({ { savedAt = atThreshold }, { savedAt = NOW } }, NOW))
+    assert.are.equal(10 * MIN, Nudge.brainBehind({ { savedAt = atThreshold }, { savedAt = older } }, NOW))
+  end)
+
+  it("ignores a Scan with no savedAt, saved by a build from before the stamp", function()
+    assert.is_nil(Nudge.brainBehind({ { id = 1 } }, NOW))
   end)
 end)

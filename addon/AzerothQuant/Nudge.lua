@@ -3,7 +3,8 @@
 -- complete an Observation Window with the previous one (ADR-0004). Separately,
 -- the Scan button pulses whenever a Scan can run, which is exactly when it's
 -- enabled: AH open, cooldown over, no Scan pending (Scanner.lua, #48). And after a
--- load with unimported Scans, it decides when to say the Brain should be done (#71).
+-- load with unimported Scans, it decides when to say the Brain should be done (#71),
+-- or that it's behind: Scans saved long ago are still waiting, so brain watch is off (#104).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
@@ -37,17 +38,55 @@ end
 Nudge.RELOAD_READY_AFTER = 50
 Nudge.RELOAD_READY_LINE = "The Brain should be done: Reload to see the new Scan."
 
--- On a load with `unimported` saved Scans, waits RELOAD_READY_AFTER seconds, then
--- calls `ready` (which starts the Reload button's pulse) and says so in chat once.
--- `after` and `say` are C_Timer.After and the chat line.
-function Nudge.whenReloadReady(unimported, after, ready, say)
-  if unimported == 0 then
-    return
+-- Called at PLAYER_LOGOUT (which a /reload fires too), as SavedVariables is written:
+-- stamps every Scan saved for the first time with savedAt = now. One saved before keeps
+-- its stamp, so savedAt is when the Scan first reached the file the Brain reads (#104).
+function Nudge.stampSaved(scans, now)
+  for _, scan in ipairs(scans) do
+    scan.savedAt = scan.savedAt or now
   end
-  after(Nudge.RELOAD_READY_AFTER, function()
-    ready()
-    say(Nudge.RELOAD_READY_LINE)
-  end)
+end
+
+-- A Scan saved this long ago that's still in SavedVariables after pruning means the
+-- Brain didn't import it: long enough for `brain watch` to have done it, with a margin.
+Nudge.BRAIN_BEHIND_AFTER = Nudge.RELOAD_READY_AFTER + 60
+-- %d: the oldest behind Scan's age in whole minutes.
+Nudge.BRAIN_BEHIND_LINE = "The Brain hasn't imported Scans saved %d min ago. Is brain watch running?"
+  .. " (scripts\\play.bat)"
+
+-- scans: those left after Prune.importedScans at load. Returns how many seconds ago the
+-- oldest Scan the Brain should have imported by now was saved, or nil if there's none.
+-- A Scan with no savedAt (saved by an older build) never counts.
+function Nudge.brainBehind(scans, now)
+  local oldest
+  for _, scan in ipairs(scans) do
+    if scan.savedAt and scan.savedAt <= now - Nudge.BRAIN_BEHIND_AFTER then
+      oldest = math.min(oldest or scan.savedAt, scan.savedAt)
+    end
+  end
+  return oldest and now - oldest
+end
+
+-- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
+-- in chat and asks after brain watch. Otherwise, if any Scans are waiting, waits
+-- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the Reload button's pulse)
+-- and says so in chat once (#71). "The Brain should be done" would be a false promise
+-- when it's behind, so it's one or the other. `after` and `say` are C_Timer.After and the
+-- chat line. Returns whether the Brain is behind.
+function Nudge.afterLoad(scans, now, after, ready, say)
+  local behind = Nudge.brainBehind(scans, now)
+  if behind then
+    local minutes = math.max(1, math.floor(behind / 60))
+    say(string.format(Nudge.BRAIN_BEHIND_LINE, minutes))
+    return true
+  end
+  if #scans > 0 then
+    after(Nudge.RELOAD_READY_AFTER, function()
+      ready()
+      say(Nudge.RELOAD_READY_LINE)
+    end)
+  end
+  return false
 end
 
 ns.Nudge = Nudge
