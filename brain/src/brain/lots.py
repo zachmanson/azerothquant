@@ -159,17 +159,32 @@ def link_sales(
     outcomes: list[Outcome], listings: list[Listing], purchases: list[Purchase]
 ) -> list[Outcome]:
     """The Outcomes with each Sold one's Item Key found by its item name (ADR-0007)."""
-    # Only own Listings carry a name.
-    named = [(ls.item_name, ls.item_key) for ls in listings if ls.item_name is not None]
-    named += [(p.item_name, p.item_key) for p in purchases]
-    named += [(o.item_name, o.item_key) for o in outcomes if o.item_key is not None]
     keys: dict[str, set[str]] = {}
-    for name, item_key in named:
+    for name, item_key in _named(outcomes, listings, purchases):
         keys.setdefault(name, set()).add(item_key)
     return [
         replace(o, item_key=_only(keys.get(o.item_name, set()))) if o.kind is MailKind.SOLD else o
         for o in outcomes
     ]
+
+
+def item_names(
+    outcomes: list[Outcome], listings: list[Listing], purchases: list[Purchase]
+) -> dict[str, str]:
+    """The item name of each Item Key the player has listed, bought or sold (#108), from
+    `outcomes` already linked (`link_sales`). Other players' Listings carry none."""
+    return {item_key: name for name, item_key in _named(outcomes, listings, purchases)}
+
+
+def _named(
+    outcomes: list[Outcome], listings: list[Listing], purchases: list[Purchase]
+) -> list[tuple[str, str]]:
+    """Every (item name, Item Key) pair the mail and own Listings show."""
+    # Only own Listings carry a name.
+    named = [(ls.item_name, ls.item_key) for ls in listings if ls.item_name is not None]
+    named += [(p.item_name, p.item_key) for p in purchases]
+    named += [(o.item_name, o.item_key) for o in outcomes if o.item_key is not None]
+    return named
 
 
 def deposits(outcomes: list[Outcome]) -> dict[str, float]:

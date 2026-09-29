@@ -47,9 +47,11 @@ from brain.recommend import (
     Action,
     BuyUnder,
     ChainNode,
+    Check,
     MarketRecommendations,
     NodeKind,
     Row,
+    WhyNot,
     held_units,
     per_click,
     per_day,
@@ -63,6 +65,7 @@ from brain.watch import Watcher
 
 log = logging.getLogger("brain")
 
+NEAR_MISSES = 20  # per Market in `brain recommend --why-not` (#108)
 DEFAULT_CONFIG = Path("config.toml")  # run from brain/, or pass --config
 SAVEDVARIABLES_FILE = "AzerothQuant.lua"
 # How long a SavedVariables file must go unchanged before it is read, and how often
@@ -245,12 +248,12 @@ def _import_once(config: Config) -> int:
     return 1 if any(r.error is not None for r in results) else 0
 
 
-def _recommend(config: Config, chain: str | None = None) -> int:
+def _recommend(config: Config, chain: str | None = None, why_not: str | None = None) -> int:
     if not config.history_path.exists():
         log.error("No history at %s yet; run `brain import` first", config.history_path)
         return 1
     try:
-        text = run_recommend(config, chain)
+        text = run_recommend(config, chain, why_not)
     except sqlite3.Error as e:
         log.error("Couldn't read the history: %s", e)
         return 1
@@ -421,16 +424,22 @@ def _mean_qty(c: MatCheck) -> str:
     return f"{c.qty:.2f} ({low:.2f} to {high:.2f})"
 
 
-def run_recommend(config: Config, chain: str | None = None) -> str:
+def run_recommend(config: Config, chain: str | None = None, why_not: str | None = None) -> str:
     """The Recommendations for every Market the player has Characters in, as text, or
-    with `chain` an Item Key's Craft rows as their Craft Chains (#77)."""
+    with `chain` an Item Key's Craft rows as their Craft Chains (#77), or with `why_not`
+    why Item Keys on sale aren't Flips on the Shopping List: "" for each Market's near
+    misses, else for the Item Key or item name it matches (#108)."""
     predictions = load_predictions(config.predictions_path)
     with closing(open_history(config.history_path)) as conn:
-        markets = recommend(conn, config, predictions)
+        markets = recommend(conn, config, predictions, why_not=why_not is not None)
     if not markets:
         return "No Character has a Market with a Scan yet.\n"
     if chain is not None:
         return "\n".join(_render_chains(m, chain) for m in markets)
+    if why_not == "":
+        return "\n".join(_render_near_misses(m) for m in markets)
+    if why_not is not None:
+        return _render_why_not(markets, why_not)
     range_days = config.sell_rate_range_seconds // 86400
     return "\n".join(_render_market(m, range_days) for m in markets)
 
@@ -551,8 +560,126 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
     )
 
 
+def _market_title(m: MarketRecommendations) -> str:
+    return f"{m.market.realm} {m.market.faction} ({m.market.era.value})\n"
+
+
+def _render_near_misses(m: MarketRecommendations) -> str:
+    """The Market's closest near misses (#108): those short of the Flip margin first, by
+    how far short, then the rest by how close they came."""
+    misses = sorted(
+        (w for w in m.why_not if w.failed is not None),
+        key=lambda w: (w.failed is not Check.MARGIN, _shortfall(w)),
+    )[:NEAR_MISSES]
+    table = _table(
+        ["Item", "Item Key", "Check", "Gap"],
+        [[w.name or "?", w.item_key, w.failed.value, _numbers(w, w.failed)] for w in misses],
+    )
+    return f"{_market_title(m)}Why not: the {NEAR_MISSES} closest near misses\n{table}"
+
+
+def _render_why_not(markets: list[MarketRecommendations], item: str) -> str:
+    """Every Check of the one Item Key on sale that `item` is, or else is part of the name
+    of, in each Market it's on sale in (#108). Several matches are listed instead."""
+    candidates = {w.item_key: w.name for m in markets for w in m.why_not}
+    if item in candidates:
+        found = {item: candidates[item]}
+    else:
+        found = {k: n for k, n in candidates.items() if item.lower() in (n or "").lower()}
+    if not found:
+        return f"No Item Key on sale matches '{item}'.\n"
+    if len(found) > 1:
+        listed = "".join(f"  {_item_label(n, k)}\n" for k, n in sorted(found.items(), key=_by_name))
+        return f"{len(found)} Item Keys match '{item}':\n{listed}"
+    [item_key] = found
+    return "\n".join(
+        _market_title(m) + _render_checks(w, m)
+        for m in markets
+        for w in m.why_not
+        if w.item_key == item_key
+    )
+
+
+def _by_name(found: tuple[str, str | None]) -> tuple[str, str]:
+    item_key, name = found
+    return (name or "", item_key)
+
+
+def _item_label(name: str | None, item_key: str) -> str:
+    return item_key if name is None else f"{name} ({item_key})"
+
+
+def _render_checks(w: WhyNot, m: MarketRecommendations) -> str:
+    """Each Check of `w` in order, passed, failed or not reached ("-"), with its numbers,
+    and its Shopping List rows if it made the list."""
+    verdict = "made the list" if w.failed is None else w.failed.value
+    lines = [[check.value, *_check(w, check)] for check in Check]
+    listed = [
+        r
+        for r in m.shopping_list
+        if r.item_key == w.item_key and r.action in (Action.SELL, Action.VENDOR)
+    ]
+    rows = "".join(
+        f"  {r.action.value} {r.quantity} up to {_money(r.price)}: {_money(r.profit)} profit\n"
+        for r in listed
+    )
+    return f"{_item_label(w.name, w.item_key)}: {verdict}\n{rows}{_lines(lines)}"
+
+
+def _check(w: WhyNot, check: Check) -> tuple[str, str]:
+    """Whether `w` passed `check` ("pass", "fail", or "-" if it never got that far) and
+    the numbers behind it."""
+    order = list(Check)
+    if w.failed is not None and order.index(check) > order.index(w.failed):
+        return "-", ""
+    match check:
+        case Check.SALE_EVENTS:
+            passed = w.sale_events >= w.min_sale_events
+        case Check.ROOM:
+            passed = w.room > w.held
+        case _:
+            passed = check is not w.failed
+    return ("pass" if passed else "fail"), _numbers(w, check)
+
+
+def _shortfall(w: WhyNot) -> float:
+    """How far short of its failed Check a near miss is, as a share of what it needed."""
+    match w.failed:
+        case Check.SALE_EVENTS:
+            return (w.min_sale_events - w.sale_events) / w.min_sale_events
+        case Check.ROOM:
+            return (w.held + 1 - w.room) / (w.held + 1)
+        case Check.MARGIN:
+            return math.inf if w.clear_at is None else (w.ask - w.clear_at) / w.ask
+        case Check.BUDGET:
+            return (w.cost - w.spend) / w.cost
+        case Check.ROW_CAP:
+            return (w.rank - w.rows) / w.rank
+
+
+def _numbers(w: WhyNot, check: Check) -> str:
+    """The numbers behind one Check of `w`."""
+    match check:
+        case Check.SALE_EVENTS:
+            return f"{w.sale_events}/{w.min_sale_events} Sale Events"
+        case Check.ROOM:
+            return f"{w.held} held, room for {w.room}"
+        case Check.MARGIN:
+            if w.clear_at is None:
+                return f"ask {_money(w.ask)}, no way out"
+            short = w.ask - w.clear_at
+            return (
+                f"ask {_money(w.ask)}, clears at {_money(w.clear_at)}: "
+                f"{_money(short)} ({short / w.ask:.1%})"
+            )
+        case Check.BUDGET:
+            return f"cheapest run {_money(w.cost)}, spend {_money(w.spend)}"
+        case Check.ROW_CAP:
+            return f"best place {w.rank}, top {w.rows} kept"
+
+
 def _render_chains(m: MarketRecommendations, item_key: str) -> str:
-    market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})\n"
+    market = _market_title(m)
     crafts = [
         (where, r)
         for where, rows in (("Holdings", m.holdings), ("Shopping List", m.shopping_list))
@@ -610,12 +737,17 @@ def _signed(copper: float | None) -> str:
 def _table(headers: list[str], rows: list[list[str]]) -> str:
     if not rows:
         return "  (nothing)\n"
-    widths = [max(len(cell) for cell in column) for column in zip(headers, *rows, strict=True)]
+    return _lines([headers, *rows])
+
+
+def _lines(lines: list[list[str]]) -> str:
+    """Rows of cells in columns as wide as their widest cell, indented two spaces."""
+    widths = [max(len(cell) for cell in column) for column in zip(*lines, strict=True)]
     return "".join(
         "  "
         + "  ".join(cell.ljust(w) for cell, w in zip(line, widths, strict=True)).rstrip()
         + "\n"
-        for line in (headers, *rows)
+        for line in lines
     )
 
 
@@ -742,6 +874,14 @@ def main(argv: list[str] | None = None) -> int:
     recommending.add_argument(
         "--chain", metavar="ITEM_KEY", help="print the Craft Chains of an Item Key's Craft rows"
     )
+    recommending.add_argument(
+        "--why-not",
+        nargs="?",
+        const="",
+        metavar="ITEM",
+        help="print why items on sale aren't Flips on the Shopping List: the near misses, "
+        "or every check of one Item Key or item name",
+    )
     replaying = commands.add_parser(
         "replay", help="grade the Brain against Auctionator and emulated TSM on past Scans"
     )
@@ -764,7 +904,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rebuild":
         return _rebuild(config)
     if args.command == "recommend":
-        return _recommend(config, args.chain)
+        return _recommend(config, args.chain, args.why_not)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
     if args.command == "disenchants":

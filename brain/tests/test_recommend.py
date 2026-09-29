@@ -22,6 +22,7 @@ from brain.recommend import (
     BuyUnder,
     ChainNode,
     CharacterHolding,
+    Check,
     Grade,
     NodeKind,
     ReagentBuy,
@@ -3553,6 +3554,121 @@ def test_hold_rows_get_no_roi(db):
 
     [hold] = result[MARKET].holdings
     assert (hold.action, hold.paid, hold.roi) == (Action.HOLD, None, None)
+
+
+# --- Why not (#108) ---
+
+
+def why_not(db, scans, reads, config=CONFIG):
+    import_scans(db, list(scans), Era.BETA, config)
+    import_character_reads(db, list(reads), Era.BETA, config)
+    [market] = recommend(db, config, why_not=True)
+    return market, {w.item_key: w for w in market.why_not}
+
+
+def test_why_not_an_item_key_with_too_few_sale_events_says_how_many_of_how_many(db):
+    # #57: two Sale Events at or above the 999 it would post at once the 500 is bought, of
+    # the 3 a Flip needs.
+    _, why = why_not(
+        db,
+        selling_two_linen_an_hour(row(unit=500), unit=1000, sale_events=2),
+        [character_read(money=GOLD)],
+        config=replace(CONFIG, flip_min_sale_events=3),
+    )
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.sale_events, linen.min_sale_events) == (Check.SALE_EVENTS, 2, 3)
+
+
+def test_why_not_an_item_key_whose_room_the_held_units_fill_says_how_many_of_how_many(db):
+    # #67: 6 sell within the 3 h Sale Horizon at 999, once the 500s are bought, and 6 are
+    # held.
+    _, why = why_not(
+        db,
+        selling_two_linen_an_hour(row(quantity=6, unit=500), unit=1000),
+        [character_read(item(count=6), money=GOLD)],
+    )
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.held, linen.room) == (Check.ROOM, 6, 6)
+
+
+def test_why_not_counts_the_sale_events_where_buying_the_cheapest_ask_would_post(db):
+    # The one sale was at 400. Bought, the 300 posts at 999 under the 1000s, where no Sale
+    # Event is, though one is at or above 299 under the 300 itself.
+    _, why = why_not(
+        db,
+        [
+            scan(T0, row(quantity=2, unit=400), row(quantity=20, unit=1000)),
+            scan(T0 + HOUR, row(unit=300), row(quantity=20, unit=1000)),
+        ],
+        [character_read(money=GOLD)],
+    )
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.sale_events) == (Check.SALE_EVENTS, 0)
+
+
+def test_why_not_an_ask_just_over_the_clearing_price_says_by_how_much(db):
+    # Bought, the 280 posts at 399 under the 400s: 379.05 after the cut clears the 1
+    # silver margin for up to 279. The Buy Under's way value, once it's bought (ADR-0019).
+    _, why = why_not(
+        db, selling_two_linen_an_hour(row(unit=280), unit=400), [character_read(money=GOLD)]
+    )
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.ask, linen.clear_at) == (Check.MARGIN, 280, 279)
+
+
+def test_why_not_a_flip_the_budget_cant_buy_one_of_says_what_it_costs(db):
+    # #86: the Ore clears as a Flip to Vendor at 20, but the Budget is 10.
+    _, why = why_not(
+        db,
+        [scan(T0, row(ORE, quantity=2, unit=20))],
+        [character_read(money=GOLD, vendor_prices={2770: 25}, budget=10)],
+    )
+
+    ore = why[ORE_KEY]
+    assert (ore.failed, ore.cost, ore.spend) == (Check.BUDGET, 20, 10)
+
+
+def test_why_not_a_flip_outside_the_kept_rows_says_its_best_place(db):
+    # shopping_list_rows = 1. The Tin (6 profit, 6 a click, 25% ROI) is second to the Ore
+    # (50, 10 a click, 100%) by every measure (#98).
+    tin = "item:2771::::::::20:1490"
+    _, why = why_not(
+        db,
+        [scan(T0, *[row(ORE, quantity=2, unit=5)] * 5, row(tin, quantity=3, unit=8))],
+        [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert (why["2771"].failed, why["2771"].rank, why["2771"].rows) == (Check.ROW_CAP, 2, 1)
+    assert why[ORE_KEY].failed is None
+
+
+def test_why_not_says_made_the_list_for_exactly_the_flips_on_the_shopping_list(db):
+    # A Flip to Sell of Linen, Flips to Vendor of Ore and Tin that the one kept row splits
+    # by measure, a Tin too dear to Vendor and Copper Bars nobody buys.
+    tin, bar = "item:2771::::::::20:1490", "item:2840::::::::20:1490"
+    market, why = why_not(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=2, unit=700),
+            *[row(ORE, quantity=2, unit=5)] * 5,
+            row(tin, quantity=3, unit=6),
+            row(tin, quantity=1, unit=50),
+            row(bar, quantity=4, unit=300),
+            unit=1000,
+        ),
+        [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10, 2840: 20})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    made = {k for k, w in why.items() if w.failed is None}
+    listed = {r.item_key for r in market.shopping_list if r.action in (Action.SELL, Action.VENDOR)}
+    assert made == listed
+    assert len(made) > 1 and why["2840"].failed is not None
 
 
 # --- Buy Under (#88) ---

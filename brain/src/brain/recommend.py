@@ -43,7 +43,17 @@ from brain.history import (
     supply_at,
     vendor_prices,
 )
-from brain.lots import Held, Lot, deposits, ended_at, link_sales, lots, settle, start_of
+from brain.lots import (
+    Held,
+    Lot,
+    deposits,
+    ended_at,
+    item_names,
+    link_sales,
+    lots,
+    settle,
+    start_of,
+)
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
@@ -112,6 +122,49 @@ class CraftOutput:
     units: int
     selling: int
     post_at: float | None
+
+
+class Check(StrEnum):
+    """The Shopping List's checks on a Flip to Sell or Vendor, in the order the Brain
+    makes them (#108)."""
+
+    SALE_EVENTS = "Sale Events"
+    ROOM = "Room"
+    MARGIN = "Flip margin"
+    BUDGET = "Budget"
+    ROW_CAP = "Row cap"
+
+
+@dataclass(frozen=True)
+class WhyNot:
+    """Why an Item Key with other players' Listings is or isn't on the Shopping List as a
+    Flip to Sell or Vendor (#108): the first Check it `failed`, None if it made the list,
+    and the numbers behind each Check."""
+
+    item_key: str
+    failed: Check | None
+    # At or above the price the cheapest other player's Listing would post at once bought,
+    # as `_flips` posts its first run: under the next ask.
+    sale_events: int
+    min_sale_events: int
+    # What sells within Days to Sell at that price (#109), and the unbound held units that
+    # take it first (#67).
+    room: int
+    held: int
+    # The cheapest other player's ask, and the most one unit of it could cost and clear
+    # the Flip margin: the Buy Under's way value once that Listing is bought (ADR-0019),
+    # less effort and the margin. None without a way out.
+    ask: int
+    clear_at: int | None
+    # The cheapest run that clears, against what an option may spend (#86). None unless
+    # one clears.
+    cost: int | None
+    spend: int
+    # Its row's best place by any of the Shopping List's measures (#98), against the
+    # places kept. None unless a row was built.
+    rank: int | None
+    rows: int
+    name: str | None = None  # only if the player has listed, bought or sold it
 
 
 class BlockReason(StrEnum):
@@ -396,6 +449,8 @@ class MarketRecommendations:
     held: dict[str, list[CharacterHolding]] = field(default_factory=dict)
     # Buy Unders, most profit per unit at the Buy Under first (#88). No Budget applies.
     buy_under: list[BuyUnder] = field(default_factory=list)
+    # Each Item Key with other players' Listings, if asked for (#108).
+    why_not: list[WhyNot] = field(default_factory=list)
 
     @property
     def spend(self) -> int:
@@ -412,9 +467,11 @@ def recommend(
     config: Config,
     predictions: Sequence[Prediction] = (),
     fair_value_cache: FairValueCache | None = None,
+    why_not: bool = False,
 ) -> list[MarketRecommendations]:
     """Recommendations for every Market the player has Characters in. `fair_value_cache`
-    is the past Scans' Fair Values, kept from one pass to the next (#105)."""
+    is the past Scans' Fair Values, kept from one pass to the next (#105). With `why_not`,
+    each says why each Item Key on sale is or isn't a Flip on the Shopping List (#108)."""
     if fair_value_cache is not None:
         fair_value_cache.start_pass()
     result = []
@@ -429,6 +486,7 @@ def recommend(
                     predictions,
                     times[-1],
                     fair_value_cache=fair_value_cache,
+                    why_not=why_not,
                 )
             )
     return result
@@ -444,13 +502,15 @@ def recommend_market(
     buy_under: bool = True,
     fair_value_cache: FairValueCache | None = None,
     pricer: Pricer | None = None,
+    why_not: bool = False,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
     #103). Without `buy_under`, the Buy
     Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
     `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
-    the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click."""
+    the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click.
+    `why_not` as in `recommend`."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -552,7 +612,9 @@ def recommend_market(
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
     prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
-    linked = link_sales(outcomes(conn, market), seen, purchases(conn, market))
+    market_purchases = purchases(conn, market)
+    linked = link_sales(outcomes(conn, market), seen, market_purchases)
+    names = item_names(linked, seen, market_purchases)
     return MarketRecommendations(
         market,
         now,
@@ -568,7 +630,76 @@ def recommend_market(
         pooled_return=pooled,
         held=_whose(by_character),
         buy_under=_buy_unders(conn, config, market, now, valuer, plans) if buy_under else [],
+        why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
     )
+
+
+def _why_not(
+    valuer: "_Valuer",
+    buys: list[_VendorBuy | _FlipToSell],
+    spend: int,
+    under: set[str],
+    names: Mapping[str, str],
+    config: Config,
+) -> list[WhyNot]:
+    """`recommend`'s `why_not` from the Valuer the Flips were sized on, their `buys` and
+    what each option may `spend`, for the Item Keys not `under` a Prediction, with the
+    item `names` known (#108)."""
+    flips = _flip_options(buys, spend)
+    rank: dict[str, int] = {}
+    for row, place in zip(flips, _best_ranks(flips), strict=True):
+        rank[row.item_key] = min(place, rank.get(row.item_key, place))
+    cost: dict[str, int] = {}
+    for buy in buys:
+        least = (
+            min(run.cost for run in buy.runs) if isinstance(buy, _FlipToSell) else buy.unit_buyout
+        )
+        cost[buy.item_key] = min(least, cost.get(buy.item_key, least))
+    rows = config.shopping_list_rows
+    result = []
+    for item_key in sorted(valuer.others):
+        if item_key in under:
+            continue
+        cheapest = min(valuer.others[item_key])
+        bought_cheapest = valuer.after({item_key: [cheapest]})
+        rate, post_at = valuer.rates.get(item_key), bought_cheapest.flip_post_at(item_key)
+        demand = _demand_at(rate, post_at)
+        sale_events = demand.sale_events if demand else 0
+        room = _room_at(rate, post_at, 0, config, config.days_to_sell_or_horizon_seconds)
+        held = valuer.held.get(item_key, 0)
+        out = _way_out(item_key, bought_cheapest, config)
+        clear_at = (
+            None if out is None else _under_margin(out.value - valuer.effort(item_key), config)
+        )
+        # An Item Key with a Flip to Vendor gets past the checks a Flip to Sell alone makes.
+        if item_key in rank:
+            failed = Check.ROW_CAP if rank[item_key] > rows else None
+        elif item_key in cost:
+            failed = Check.BUDGET
+        elif sale_events < config.flip_min_sale_events:
+            failed = Check.SALE_EVENTS
+        elif room <= held:
+            failed = Check.ROOM
+        else:
+            failed = Check.MARGIN
+        result.append(
+            WhyNot(
+                item_key,
+                failed,
+                sale_events=sale_events,
+                min_sale_events=config.flip_min_sale_events,
+                room=room,
+                held=held,
+                ask=cheapest[0],
+                clear_at=clear_at,
+                cost=cost.get(item_key),
+                spend=spend,
+                rank=rank.get(item_key),
+                rows=rows,
+                name=names.get(item_key),
+            )
+        )
+    return result
 
 
 @dataclass(frozen=True)
@@ -2990,28 +3121,43 @@ def _options(
     and the Flips to Craft,
     apart, to the top `craft_rows` by Profit (#87). A Flip to Sell is priced on the run it
     buys (ADR-0011)."""
-    groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
-    for buy in buys:
-        groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
-    flips = [row for group in groups.values() for row in _option(group, [], gold)]
+    flips = _flip_options(buys, gold)
+    ranks = _best_ranks(flips)
     crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
-    kept: set[int] = set()
-    selling = [r for r in flips if r.action is Action.SELL]
-    for measure, rows in (
-        (_profit, flips),
-        (per_click, flips),
-        # Every Flip to Vendor ties at "now", so Per day ranks the Flips to Sell alone.
-        (per_day, selling),
-        (return_on_cost, flips),
-    ):
-        # Ties go to the most profit.
-        top = sorted(rows, key=lambda r: (-measure(r), -r.profit))[:flip_rows]
-        kept |= {id(r) for r in top}
     crafted.sort(key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.
     return sorted(
-        [r for r in flips if id(r) in kept] + crafted[:craft_rows], key=lambda r: -r.profit
+        [r for r, rank in zip(flips, ranks, strict=True) if rank <= flip_rows]
+        + crafted[:craft_rows],
+        key=lambda r: -r.profit,
     )
+
+
+def _flip_options(buys: list[_VendorBuy | _FlipToSell], gold: float) -> list[Row]:
+    """Each Item Key's Flip to Sell and Flip to Vendor as a Shopping List option (#86)."""
+    groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
+    for buy in buys:
+        groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
+    return [row for group in groups.values() for row in _option(group, [], gold)]
+
+
+def _best_ranks(flips: list[Row]) -> list[int]:
+    """Each Flip's best place, from 1, by any of Profit, Per click, Per day (Flips to Sell
+    only) or ROI (#98)."""
+    best = [len(flips)] * len(flips)  # Profit ranks them all
+    selling = [i for i, r in enumerate(flips) if r.action is Action.SELL]
+    for measure, indices in (
+        (_profit, range(len(flips))),
+        (per_click, range(len(flips))),
+        # Every Flip to Vendor ties at "now", so Per day ranks the Flips to Sell alone.
+        (per_day, selling),
+        (return_on_cost, range(len(flips))),
+    ):
+        # Ties go to the most profit.
+        ranked = sorted(indices, key=lambda i: (-measure(flips[i]), -flips[i].profit))
+        for place, i in enumerate(ranked, 1):
+            best[i] = min(best[i], place)
+    return best
 
 
 def _profit(row: Row) -> float:

@@ -867,6 +867,109 @@ def test_disenchants_says_when_there_are_none(tmp_path):
     assert run_disenchants(config) == "No Disenchant Results yet.\n"
 
 
+def _near_misses(tmp_path):
+    """Linen, selling 2 an hour at 4s, with one at 2s 80c: 1c over what clears the margin.
+    Two Copper Ore at 20c that a vendor buys for 25c, over the 10c Budget. A Bolt of Linen
+    Cloth at 9s that never sold. The player's own Linen and Bolt Listings name them."""
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
+        flip_min_sale_events=1,
+        sell_rate_prior_hours_flips=0,
+        sale_size_prior_events_flips=0,
+    )
+    linen, ore = "item:2589::::::::20:1490", "item:2770::::::::20:1490"
+    bolt = "item:2996::::::::20:1490"
+
+    def listing(item, quantity, unit, **extra):
+        return {
+            "itemString": item,
+            "quantity": quantity,
+            "buyout": quantity * unit,
+            "timeLeft": 4,
+        } | extra
+
+    own = [
+        listing(linen, 1, 2000, own=True, name="Linen Cloth"),
+        listing(bolt, 1, 5000, own=True, name="Bolt of Linen Cloth"),
+    ]
+
+    def scan(at, *rows):
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": [*own, listing(bolt, 2, 900), *rows],
+        }
+
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 123456,
+        "budget": 10,
+        "vendorPrices": {2770: 25},
+        "bags": [],
+    }
+    scans = [
+        scan(1_790_000_000, listing(linen, 20, 400)),
+        scan(1_790_003_600, listing(linen, 18, 400), listing(linen, 1, 280), listing(ore, 2, 20)),
+    ]
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, scans, Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+    return config
+
+
+def test_recommend_why_not_lists_the_near_misses_flip_margin_first(tmp_path):
+    text = run_recommend(_near_misses(tmp_path), why_not="")
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    rows = lines[lines.index(["Item", "Item Key", "Check", "Gap"]) + 1 :]
+    assert rows == [
+        ["Linen Cloth", "2589", "Flip margin", "ask 2s 80c, clears at 2s 79c: 1c (0.4%)"],
+        ["?", "2770", "Budget", "cheapest run 20c, spend 10c"],
+        ["Bolt of Linen Cloth", "2996", "Sale Events", "0/1 Sale Events"],
+    ]
+
+
+def test_recommend_why_not_an_item_key_shows_every_check(tmp_path):
+    text = run_recommend(_near_misses(tmp_path), why_not="2589")
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert lines[1:] == [
+        ["Linen Cloth (2589): Flip margin"],
+        ["Sale Events", "pass", "1/1 Sale Events"],
+        ["Room", "pass", "0 held, room for 336"],
+        ["Flip margin", "fail", "ask 2s 80c, clears at 2s 79c: 1c (0.4%)"],
+        ["Budget", "-"],
+        ["Row cap", "-"],
+    ]
+
+
+def test_recommend_why_not_an_item_key_on_the_shopping_list_shows_its_row(tmp_path):
+    # The two 7s 00c Linen are a Flip to Sell (above).
+    text = run_recommend(_three_linen_held(tmp_path), why_not="2589")
+
+    assert "2589: made the list\n  Sell 2 up to 7s 00c: " in text
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ("BOLT", "Bolt of Linen Cloth (2996): Sale Events"),
+        (
+            "linen",
+            "2 Item Keys match 'linen':\n  Bolt of Linen Cloth (2996)\n  Linen Cloth (2589)\n",
+        ),
+        ("silk", "No Item Key on sale matches 'silk'."),
+    ],
+)
+def test_recommend_why_not_finds_an_item_by_part_of_its_name(tmp_path, item, expected):
+    assert expected in run_recommend(_near_misses(tmp_path), why_not=item)
+
+
 def test_recommend_prints_the_buy_unders(tmp_path):
     # Linen Vendors for 10s, but 2 of them make a Bolt that Vendors for 50s: 25s a Linen,
     # less 20% of the Buy Under, is 20s 83c. A 5s Listing was seen in the one Scan.
@@ -953,3 +1056,16 @@ def test_recommend_prints_the_disenchant_buy_unders(tmp_path):
     seen = "1 Scan / 7d, listed now"
     assert ["9999", "18s 12c", "Disenchant (Bob)", "no limit", seen] in lines
     assert ["Green armor ilvl 16-20", "18s 12c", "Disenchant (Bob)", "no limit", seen] in lines
+
+
+def test_recommend_why_not_leaves_the_checks_after_the_first_failed_one_unreached(tmp_path):
+    text = run_recommend(_near_misses(tmp_path), why_not="2996")
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert lines[2:] == [
+        ["Sale Events", "fail", "0/1 Sale Events"],
+        ["Room", "-"],
+        ["Flip margin", "-"],
+        ["Budget", "-"],
+        ["Row cap", "-"],
+    ]
