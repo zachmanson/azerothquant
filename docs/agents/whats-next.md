@@ -1,3 +1,13 @@
+2026-09-29 (later 14): #93 BUILT (f147226), with /tdd then /code-review, and relabelled needs-triage -> needs-pc. In `section()` (RecommendationTable.lua), a tab with no rows only gets its `empty` text when nothing was folded over the Budget, so an all-over-Budget tab shows just "N over the Budget (Reload to re-size)". A tab of only low-value rows still says it's empty, since those aren't options. The mixed case can only happen on the Shopping List, because a Craft is never low-value.
+
+Next, in order:
+1. Not at the PC: triage the rest of needs-triage. #92 looks fixed by #105 (recommend 45 s to 10 s), so check the latest `Import took` lines and close it if so. #106 is blocked on its in-game LoadOnDemand spike, so add that spike to #85.
+2. At the PC: #85's list, including #93's check (Budget 0.1g, open Flips to Craft), #108's check (`brain recommend --why-not` vs the Shopping List) and #109's Days to Sell = 2 check.
+
+- Gotchas:
+  - Before building an issue from this queue, check `git log --grep '#N'` and the issue's last comment.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 13): QUEUE CLEANUP, nothing built. The "#88, then #76" item was stale: #88 (bd7f467, 9886c89, 8fda1f3, 3b9fc6d) and #76 (e8da1ea, ac81a0b) were already built and are open only for their #85 checks. #88, #76, #108 and #109 moved from `ready-for-agent` to `needs-pc`, so `ready-for-agent` now lists only unbuilt work (currently none).
 
 Next, in order:
