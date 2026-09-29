@@ -1,3 +1,14 @@
+2026-09-29 (later 8): #77 ADDON SLICE BUILT (e2216da), with /tdd then /code-review. It stays open for the in-game check, which is now on #85. `CraftChain.build(row, nameOf)` turns `chain` into lines: guides, text, tag, gold, color, blocked and tooltip, plus `profit` or `empty`. Table rows carry `id` (Item Key, action, Character) and `record`, and `RecommendationTable.find(section, id)` finds the selection again. In RecommendationFrame.lua, a click selects a row and a shift-click links it. A selected Craft row opens the docked panel. The selection is kept while any tab has its row, and the close button clears it. The ADR-0016 note is in. The full summary is on #77.
+
+Next, in order:
+1. At the PC: #85's checklist, which now starts with a FULL client restart (CraftChain.lua is new in the .toc), plus the #77 panel check. Also #71's tune and #104's in-game check (as in the entries below).
+2. Not at the PC: nothing is queued from this thread. Pick from ready-for-agent issues (`gh issue list --label ready-for-agent`).
+
+- Gotchas:
+  - The glue can't run under busted. A throwaway WoW-stub smoke script (catch-all metatable stubs for CreateFrame and friends) caught nothing but was cheap. Worth keeping in mind for glue-heavy changes.
+  - Review leftovers, not done: a cooldown row's panel doesn't show the row note. `CraftChain`'s `REASONS` repeats `RecommendationTable.note`'s reason text. The "only Craft opens the panel" check is in the glue.
+  - addon/AzerothQuant/Recommendations.lua is modified locally (real Brain output). Don't commit it.
+
 2026-09-29 (later 7): #77 BRAIN SLICE BUILT (1b34337), with /tdd then /code-review. #77 stays open for the Addon slice. Every Craft row has `chain` (a `ChainNode` tree). It's recorded while sourcing: `_Chain.parts` holds `_Part`s keyed by `at`, the craft the part feeds as Item Keys from the top output down. `_Sources.parts` values the held units and leftovers, `_held_exits`/`_exits` add the exits, `_Plan.add(chain, parts)` sums them, and `_Plan.chain()` builds the tree. The roots are the exits, and the LAST one has the top craft as its only child. A craft's gold is the sum of its children, and every other node sums to `profit`. Blocked rows: `_blocked_chain`. Written to Lua as `chain` (the node keys are in the Recommendations.lua header). `brain recommend --chain ITEM_KEY` prints an ASCII tree. The full summary is on #77.
 
 Next, in order:
