@@ -1,3 +1,16 @@
+2026-09-28 (later 40): #88 SLICE 1 DONE (bd7f467), with /tdd then /code-review. #88 is split in 3 slices (agreed with the user): 1 the Brain, 2 the Addon, 3 Disenchant.
+- Slice 1: `BuyUnder` / `MarketRecommendations.buy_under` in recommend.py (`_buy_unders`, `_way_out`, `_sell_way`, `_craft_way`, `_under_margin`), `history.cheapest_seen` (one query, distinct Scans), `_Sources.chain_without` for a Craft way's other reagents (Holdings ignored). The config keys `buy_under_min_sightings`/`buy_under_window_days`, a Buy Under section in `brain recommend`, and `buyUnder` in Recommendations.lua (`{ itemKey, price, way, units?, seen, windowDays, listedNow?, recipe?, output?, crafter? }`; `output` is the Craft output Item Key, for the tab's `Craft <output> (<crafter>)`). CONTEXT **Buy Under**, and ADR-0019.
+- Decisions made in the build: a way with 0 units isn't a way (falls back to the next); Craft units are whole crafts (`room // quantity_min * qty`); a Craft output that binds on craft, or whose bind type is unknown, counts only its Vendor Price; the replay passes `buy_under=False` (it adds ~4.5 s per recommend on the real history, mostly the query).
+- On the real history, `brain recommend` shows ~dozens of Sell-way Buy Unders. The whole recommend takes ~50 s, and Buy Under isn't the slow part (`without` in `_post_at`, `listings`, `supply_at` are).
+- Review notes left as they are: `BuyUnder`'s recipe_id/output/crafter could be one optional type; `_under_margin` restates the Flip margin rule that `_resells` and `_flip_step` also spell out.
+- Gotchas:
+  - A 1-unit Listing reads as non-stacking, so it pays the 5s effort. Use `quantity=20` in Buy Under test fixtures unless effort is the point.
+  - No Lua on this PC, so the Recommendations.lua tests skip. A `lua -e` shim on lupa is easy: a .bat calling a Python script that runs `lupa.lua51.LuaRuntime().execute(argv[2])` with a `print` override. Set `LUA` to the .bat. It lived only in the session scratchpad; worth adding to `scripts/` (ask first).
+
+Next, in order:
+1. Not at the PC: #88 slice 2, the Addon (/tdd): the Buy Under tab (4th section), the tooltip line, and the AH highlight matcher (plain Lua + busted specs, thin frame glue on the ScrollBox row init; .toc change). Then slice 3, Disenchant (the second comment on #88). Then #101, #102, #77, #84, and triage #103.
+2. Next PC sitting: unchanged from "later 38", plus the #88 PC check once slice 2 is in.
+
 2026-09-28 (later 39): TRIAGED #101 and #102. No code. Both are now bug + ready-for-agent + later, with agent briefs as comments on the issues.
 - #101 Per day: floor at 1 day, not the Sale Horizon (a Sale Horizon floor would make Per day = Profit/7 for nearly every Flip). The Addon computes Per day on its own in RecommendationTable.lua `measures`, so fix it there too, plus CONTEXT **Per day**.
 - #102: item 1 (bound units only Disenchanted by the Character holding them) and item 2 (Best Exit Value values Disenchant mats jointly across all held Item Keys; the user chose to fix it, not accept it). Item 3 is split out as #103 (needs-triage): `known_recipes` and `enchanting_skills` have no as-of, so the replay and Grades use today's recipes and skills. Item Info as-of doesn't matter.
