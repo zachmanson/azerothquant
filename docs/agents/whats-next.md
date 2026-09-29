@@ -1,3 +1,18 @@
+2026-09-28 (later 45): #105 SLICE 1 DONE (28c2d69), with /diagnosing-bugs (perf branch) then /code-review. On the real history, `recommend` went from 49.7 s to 18.3 s, and the output is byte-identical. `recommend_market` loads `listings` once and passes an optional `seen` down to `_valuer`, `_market_lots`, `_lot_costs`, `sell_rates`, `non_stacking`, `sell_rate_evidence` and `disappearances`. `_flips` prices each run in one pass (`_undercut`, `_cheapest`, `_cheapest_from`). The re-profile and the next design question are in a comment on #105.
+- Review notes left as they are:
+  - `seen` isn't shared yet with `grades` → `_market_lots`/`exit_values`, with `deposit_of`, or with the replay.
+  - No direct test for `_cheapest_from`, because the tests only go through public seams. The Flip tests and the real-data diff cover it.
+  - `(conn, market, seen)` is a data clump across 7 signatures.
+  - `_cheapest_from` differs from `without` only on negative quantities, which the DB never holds.
+- Gotchas:
+  - Perf harness: scratchpad `bench.py` (modes `out <file>`, `prof N`, `parse`) runs `recommend` on a copy of history.sqlite with `grades_path=None, archive_dir=None`. It's session scratch, so write it again from this description. Check "identical" with `cmp` on `repr(recommend(...))` plus the `run_recommend` text.
+  - The SQL for `supply_at` is floored at ~0.2 s per Scan (a full walk over the 440k Listings). A batched query over every Scan was slower (11.7 s). Don't retry the SQL route.
+  - A Python `read_text`/`write_text` edit turns files into CRLF on Windows. That's fine here: autocrlf=true, and every edited file stayed consistent.
+
+Next, in order:
+1. #105 slice 2: per-Scan Fair Values, computed once rather than every pass (~9 s of the 18 s). Ask the user first: (a) a cache in the watcher process, or (b) a table written at import (schema change, ADR). Then the parse time (8.2 MB, 5.8 s) and #71's reload-ready guess.
+2. Not at the PC: #77, #84, then triage #103 and #104.
+
 2026-09-28 (later 44): #102 DONE (3ef8724), with /tdd then /code-review. A bound unit is Disenchanted only by the Character who holds it, and only if that Character can (`_disenchants(..., bound)`, `_bound_by`, `_holders`, `_NextUnit`). Otherwise it's Vendored. Unbound units stay pooled. `exit_values` runs the Disenchant marginal rule once over all of `held` (`_Valuer.best_exit` is gone), and so do Grades' open units. The replay passes `market_bound` for its untouched Holdings. ADR-0018 and CONTEXT (Disenchant, Best Exit Value) say so.
 - Review fixes made: Grades are valued jointly too (the Spec review caught them), a `_bound(h)` helper, `_NextUnit` instead of a bare tuple, and "Sale Horizon" instead of "sale slots" in the docs.
 - Review notes left as they are:
