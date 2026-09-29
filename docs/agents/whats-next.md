@@ -1,3 +1,13 @@
+2026-09-29 (later 3): CLOSED #105 (slices 1+2 took `recommend` from ~45 s to ~10 s; slice 3 isn't worth it now). TRIAGED #103 (ready-for-agent, later) and #104 (ready-for-agent, **core**, the user's call). The specs are the issue comments.
+- #104 in short: stamp `savedAt` on each Scan at PLAYER_LOGOUT (only if it has none). At load, after pruning, the Brain is behind if any Scan has `savedAt <= now - (RELOAD_READY_AFTER + 60)`. Then print a `Chat.say` line, have `waitingNote` say to start brain watch, and skip the reload-ready timer. It's all Addon (busted), and the Brain ignores the extra field.
+- #103 in short: an optional `as_of` on `known_recipes`, `enchanting_skills`, `_professions` and `_market_characters`, passed from `recommend_market(as_of)`, `exit_values(at)` and the replay (move its `known_recipes` into the tick loop). Then a before/after replay on beta.
+- #71's `RELOAD_READY_AFTER` (50 s now) is still waiting on real `Import took` lines. The user runs `brain watch` in their own terminal, Scans and `/reload`s a few times, and pastes the lines. Set it to the slowest import + 3 s settle + a few seconds.
+
+Next, in order:
+1. Build #104 (core; no PC needed for the build, the in-game check waits for the next PC sitting).
+2. At the PC: #71's tune (above) and #104's in-game check.
+3. Not at the PC: #103, #77, #84.
+
 2026-09-29 (later 2): #107 DONE and closed (c8d9002), with /tdd then /code-review. `SellRate` now carries `sale_prices` (each Sale Event's price and units). `max_sale_price` is now a property, and `at_or_above(P)` gives the rate at a price. When the Brain decides whether to buy something to Sell, it counts only the Sale Events at or above the post price. The helpers are `_demand_at`, `_room_at`, `_flip_queue` and `_sell_take`, used by `_flips` (each run at its own post price; it stops after a partial take), `_outlet`, `_hold_buys` and `_sell_way` (via `_Valuer.flip_post_at`). Held units keep the whole rate and the max cap (`_Valuer.post_at`). CONTEXT (Sell, Sell Rate, Flip, Buy Under) and ADR-0019 say so. Replay on beta at a 24 h horizon over 23 Scans: the Brain went from -14g 94s 22c to +5g 67s 00c (table on #107).
 - Review notes left as they are (also on #107):
   - A Flip to Sell's `stack`/`posts` still uses the whole rate's Sale Event size.
