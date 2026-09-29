@@ -1,3 +1,18 @@
+2026-09-29 (later 12): #108 BUILT (c0c7021), with /tdd then /code-review. It stays open for the human check at the PC. `recommend(..., why_not=True)` fills `MarketRecommendations.why_not` (`WhyNot`, `Check` in recommend.py) from `_why_not`, which reuses `_room_at` (Days to Sell), `_way_out` and `_under_margin`. `_options` is now `_flip_options` + `_best_ranks`, which the Row cap check shares. Two changes from the brief, agreed in session:
+- Names come only from own Listings, Purchases and linked Outcomes (`lots.item_names`). Scans don't carry other players' item names, so most rows show "?".
+- The Flip margin, Sale Events and Room are all priced as if the cheapest Listing were bought, so posting under the NEXT ask, as `_flips`' first run does. The plain Buy Under value made a lone cheap Listing under a wall look 41% short when it was really 1c short.
+On the real history, plain `brain recommend` is byte-identical to HEAD, and "made the list" = the Shopping List's Sell/Vendor Item Keys (24/24). Of the 4740 candidates: 3851 fail Sale Events, 862 Flip margin, 3 Budget.
+
+Next, in order:
+1. Not at the PC: #88, then #76.
+2. At the PC: #85's list (Days to Sell = 2 check and the Budget box, from #109). Also #108's human check: run `brain recommend --why-not` and eyeball the near misses against the Shopping List.
+
+- Gotchas:
+  - `--why-not`'s top 20 are all Flip margin on the real data (margin misses come first by design, as the brief asks), so Budget/Row cap misses never show there. Use `--why-not ITEM` for those.
+  - Review leftovers, not done: CONTEXT.md has no entry for "Check"/"near miss". `why_not=""` means the near-miss list (argparse `const`). `market_days_to_sell` repeats `market_budget`'s SQL. `parseDays`/`daysText` repeat the shape of `Money.parseGold`/`goldText`.
+  - Git Bash heredocs here turn `\n` inside Python source strings into real newlines. Use Edit for anything containing `\n`.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 11): #109 BUILT (fa56555), with /tdd then /code-review. It stays open for the in-game check, which is now on #85 (see the comment there). The Days to Sell box is saved per Market in `AzerothQuantDB.daysToSell` and sent as `daysToSell` in the Character Read. The Brain side is `character_read.days_to_sell` and `market_days_to_sell`. `recommend_market` puts it on `Config.days_to_sell_seconds`, and `Config.days_to_sell_or_horizon_seconds` clamps it to the Sale Horizon. `_flip_room`/`_room_at` now take the horizon explicitly. With the setting unset, `brain recommend` output is byte-identical to HEAD on the real history. The full summary is on #109.
 
 Next, in order:
