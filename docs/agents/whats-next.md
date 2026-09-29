@@ -1,3 +1,16 @@
+2026-09-29 (later 9): PC SITTING. #77 CLOSED: the in-game check passed, and the Craft Chain panel now docks LEFT of the table, over the AH (c1a2b4b), because on the right it ran off a 1920px screen. #71 tuned: `RELOAD_READY_AFTER` 50 -> 30 s (bbc4282), from 11-23 s imports, and checked in game. #104 CLOSED: the in-game check passed (warning line + header note with watch stopped, both gone after restart). Filed #108 (Shopping List "why not" diagnostic) and #109 (player-set stock horizon for Buy Qty: the user dislikes 100-200 unit buys but doesn't want to force it on everyone). Both are needs-triage.
+
+Next, in order:
+1. Triage #109, then #108 (the user raised both; #109 is the one they care about). Use the triage skill and grill the design: a separate Buy horizon vs. reusing `sale_horizon_days` (which also grades the replay).
+2. Not at the PC: ready-for-agent #88, #76.
+3. At the PC, still open on #85: a blocked/empty Craft Chain (#77/#75, needs a blocked Craft row to exist), #33 chained rows, #50, the `brain rebuild` for #78, the #80 replay (Oct 3+ for 7 days of history), and the Booty Bay Broker follow-up.
+
+- Gotchas:
+  - Pasted screenshots don't reach the session. The user presses PrtScn in game, and the newest file is in `Z:\Battle.net\World of Warcraft\_classic_beta_\Screenshots`: read it with the Read tool.
+  - Claude can run `brain watch` itself as a background Bash task (`cd brain && PYTHONIOENCODING=utf-8 ../.venv/Scripts/brain.exe watch`) and read "Import took" lines from its output file.
+  - watch's first import after starting ran 31.4 s (cold), just over the 30 s nudge. Running imports were 16-22 s. Bump it only if the line shows before the table is current.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 8): #77 ADDON SLICE BUILT (e2216da), with /tdd then /code-review. It stays open for the in-game check, which is now on #85. `CraftChain.build(row, nameOf)` turns `chain` into lines: guides, text, tag, gold, color, blocked and tooltip, plus `profit` or `empty`. Table rows carry `id` (Item Key, action, Character) and `record`, and `RecommendationTable.find(section, id)` finds the selection again. In RecommendationFrame.lua, a click selects a row and a shift-click links it. A selected Craft row opens the docked panel. The selection is kept while any tab has its row, and the close button clears it. The ADR-0016 note is in. The full summary is on #77.
 
 Next, in order:
