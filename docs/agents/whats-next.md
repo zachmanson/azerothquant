@@ -1,3 +1,19 @@
+2026-09-29 (later 20): AT THE PC. Built #90 (d1dd9d4), checked in game on Beta data, closed.
+- `brain/src/brain/beta_prior.py` runs from `cli._write_recommendations` after `recommend`, never inside it (ADR-0015). It reuses the pass's FairValueCache, so a pass takes ~50 s, up from ~40 s. The remaining ~9 s is `sell_rates` on the Beta Market. Beta freezes on Oct 21, so that result could be saved and reused if speed ever matters.
+- Beta Markets get their own Beta Prior too (the user chose this so it could be checked in game), so the column shows on Beta until about Oct 10.
+- Cell widths: the Shopping List with Beta has 12 columns. Beta, Post at and Cost are 85 px, and Item is narrowed to 120 px (`BETA_COLUMN_WIDTHS` in RecommendationFrame.lua).
+
+Next, in order:
+1. Build #91's Merchant Cost cap (before Dec 9).
+2. Grill #106's open questions.
+
+- Gotchas:
+  - After Brain code changes, restart `brain watch`: a running one keeps the old code and rewrites Recommendations.lua without the new fields. That happened this session. The venv is an editable install, so a restart is enough.
+  - On Nov 4 at the PC, in this order: open Mister Graphed's window with a Live Character, read the Item Keys of #91's list in game, then write the four Predictions in `predictions.toml` before buying anything.
+  - There's no Lua on this PC, so the brain real-Lua tests skip locally. To run them, point `LUA` at a lupa shim (`python -c` wrapper around lupa.lua51 running `-e script`); CI runs them on real Lua.
+  - `git stash list` has an old "pre-pull local changes 2026-09-28" stash. Leave it alone unless the user asks.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 19): NOT AT THE PC. Grilled #90 and #91; both are now ready-for-agent. Filed #110.
 - #90 Beta Prior: display only (the Brain never reads it), shown as a grey "Beta" column plus a tooltip on every tab. Raw median Sale Event price (Beta's last 14 days, at least 3 Sale Events), or else the median daily Fair Value (last 7 days), marked "listed, not sold". It comes from the same-faction Beta Market, or else Alliance. `beta_column_days` = 14 from the Live Market's first Scan. The Brain writes it into Recommendations.lua. Full spec in the comment on #90. CONTEXT.md and ADR-0015 are updated (d3e6dd6).
 - #110 (needs-triage): Beta as an engine prior. Split out of #90.
