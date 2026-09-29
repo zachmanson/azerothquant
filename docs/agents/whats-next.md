@@ -1,3 +1,14 @@
+2026-09-29 (later 4): #104 BUILT (f6d2021), with /tdd then /code-review. It stays open for the in-game check. `Nudge.stampSaved` runs at PLAYER_LOGOUT. `Nudge.brainBehind` gives the oldest behind Scan's age. `Nudge.whenReloadReady` is now `Nudge.afterLoad(scans, now, after, ready, say)`, which either says `BRAIN_BEHIND_LINE` or starts the timer, and returns whether the Brain is behind. `waitingNote(unsaved, unimported, behind)` still puts unsaved Scans first. The review notes are on #104.
+
+Next, in order:
+1. At the PC: #71's tune (below) and #104's in-game check. For #104: stop brain watch, Scan, `/reload`, wait more than 2 min, then `/reload` again. The chat line and the "start brain watch" note should show. Start watch, then `/reload` after the import: both should be gone. Close #104 if that works. Note: Scans saved by the old build have no `savedAt`, so they never count as behind. The first Scan to test with has to be saved by this build.
+2. Not at the PC: #103, #77, #84.
+
+- Gotchas:
+  - `RELOAD_READY_AFTER` tuning (#71) also moves `BRAIN_BEHIND_AFTER` (it's +60 s).
+  - Busted runs locally: `.lua\bin\busted.bat --directory=.` from `addon\` (196 specs).
+  - Python `'''...'''` string replaces in Lua source mangle `\\` escapes. Use the Edit tool for lines with backslashes.
+
 2026-09-29 (later 3): CLOSED #105 (slices 1+2 took `recommend` from ~45 s to ~10 s; slice 3 isn't worth it now). TRIAGED #103 (ready-for-agent, later) and #104 (ready-for-agent, **core**, the user's call). The specs are the issue comments.
 - #104 in short: stamp `savedAt` on each Scan at PLAYER_LOGOUT (only if it has none). At load, after pruning, the Brain is behind if any Scan has `savedAt <= now - (RELOAD_READY_AFTER + 60)`. Then print a `Chat.say` line, have `waitingNote` say to start brain watch, and skip the reload-ready timer. It's all Addon (busted), and the Brain ignores the extra field.
 - #103 in short: an optional `as_of` on `known_recipes`, `enchanting_skills`, `_professions` and `_market_characters`, passed from `recommend_market(as_of)`, `exit_values(at)` and the replay (move its `known_recipes` into the tick loop). Then a before/after replay on beta.
