@@ -1,3 +1,14 @@
+2026-09-29 (later 6): #84 DONE and closed (9dbff93), with /tdd then /code-review. `recommend_market(pricer=)` takes an optional `Pricer` (Item Key, cheapest other ask left) -> post price. `_Valuer` switches on it in `sale_queue`, `priced`, `has_data`, `_post_at_or_under` and `rows`, and `_flips`/`_outlet` take the per-Item-Key `priced` callable. Only `replay._tsm_pricer` builds one. New Policy row "Brain without own-Market Sell Rate". ADR-0015 describes it. Replay on beta (24 h, 23 Scans, ~40 min): the other rows are unchanged from #103, and the new row is -240g 19s 52c against Brain 5g 64s 29c and TSM -249g 73s 87c (table on #84).
+
+Next, in order:
+1. At the PC: #71's tune and #104's in-game check (both as in the entry below).
+2. Not at the PC: #77.
+
+- Gotchas:
+  - Replay is slow (~40 min on beta at 24 h) mostly because it passes no `fair_value_cache`, so `sell_rates` recomputes every past Scan's Fair Value per Brain run and per `exit_values`. Worth an issue: one `FairValueCache` per Market through the replay.
+  - Review leftovers, not done: the "pricer or Sell Rate" switch is repeated in ~7 places in recommend.py and could be one small pricing object in `_Valuer`. In replay.py, a policy's variant is split across `_BRAINS` (identity lambda for the new one) and a per-Scan `pricers` dict.
+  - With a pricer, `_sell_way` (Buy Under) and the Shopping List's Per day/Per click still use the Sell Rate. The replay doesn't grade either.
+
 2026-09-29 (later 5): #103 DONE and closed (1d39004), with /tdd then /code-review. `known_recipes`, `enchanting_skills`, `_professions` and `_market_characters` take an optional `as_of` (only Character Reads up to it count). `recommend_market(as_of)` passes it to `known_recipes` and to `_valuer(..., skills_as_of=)`. `exit_values(at)` passes `at`. The replay reads Known Recipes per replayed Scan. `_LATEST_CHARACTER_READS` is gone (inlined into `_market_characters`). CONTEXT (Known Recipe) says so. Replay on beta (24 h, 23 Scans): Brain 5g 67s 00c before, 5g 64s 29c after. TSM went from -286g 31s to -249g 73s, since it no longer crafts at a loss with recipes learned later (tables on #103).
 
 Next, in order:
