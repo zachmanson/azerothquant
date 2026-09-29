@@ -1,10 +1,11 @@
+import dataclasses
 from pathlib import Path
 
 import pytest
 
 from brain.config import Config, Era, Install
-from brain.fair_value import fair_value, fair_values
-from brain.history import Market, import_scans, open_history
+from brain.fair_value import FairValueCache, fair_value, fair_values
+from brain.history import Market, import_scans, open_history, supply_at
 
 # Default slice (cheapest 15% of units) and outlier cut (under half the slice's median).
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
@@ -115,3 +116,76 @@ def test_a_cheap_outlier_and_a_one_listing_item_in_a_scan(db):
     )
 
     assert fair_values(db, MARKET, CONFIG) == {LINEN_KEY: 100, SILK_KEY: 700}
+
+
+# --- Fair Values kept between a watcher's passes (#105) ---
+
+
+def test_a_scans_fair_values_stay_the_same_as_later_scans_come_in(db):
+    # What the cache rests on: the Partial Sales and Disappearances seen after a Scan
+    # don't change what that Scan held.
+    run(db, scan(T0, row(quantity=20, unit=100), row(quantity=10, unit=300)))
+    cache = FairValueCache()
+    before = cache.fair_values(db, MARKET, CONFIG, T0)
+
+    run(db, scan(T0 + 20 * MINUTE, row(quantity=15, unit=100)))
+
+    assert before == {LINEN_KEY: 100}
+    assert fair_values(db, MARKET, CONFIG, at=T0) == before
+    assert cache.fair_values(db, MARKET, CONFIG, T0) == before
+
+
+def counting_supply_at(monkeypatch) -> list[int]:
+    """Spy on the Scans Fair Values are computed from: their requested_at, in order."""
+    calls = []
+
+    def spy(conn, market, at, others_only=False):
+        calls.append(at)
+        return supply_at(conn, market, at, others_only)
+
+    monkeypatch.setattr("brain.fair_value.supply_at", spy)
+    return calls
+
+
+def test_a_scans_fair_values_are_computed_once(db, monkeypatch):
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, row(unit=120)))
+    calls = counting_supply_at(monkeypatch)
+    cache = FairValueCache()
+
+    cache.fair_values(db, MARKET, CONFIG, T0)
+    cache.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE)
+    cache.fair_values(db, MARKET, CONFIG, T0)
+
+    assert calls == [T0, T0 + 20 * MINUTE]
+
+
+def test_another_market_or_fair_value_config_is_computed_afresh(db):
+    horde = dataclasses.replace(MARKET, faction="Horde")
+    run(db, scan(T0, row(unit=1), row(quantity=12, unit=100), row(quantity=7, unit=120)))
+    run(db, scan(T0, row(unit=500), faction="Horde"))
+    cache = FairValueCache()
+    # The whole supply, with no outlier cut: 1 + 12 * 100 + 7 * 120 over 20 units.
+    whole = dataclasses.replace(CONFIG, fair_value_slice_share=1.0, fair_value_outlier_share=0)
+    cut = dataclasses.replace(whole, fair_value_outlier_share=0.5)  # the 1 copper goes
+
+    assert cache.fair_values(db, MARKET, CONFIG, T0) == {LINEN_KEY: 100}
+    assert cache.fair_values(db, horde, CONFIG, T0) == {LINEN_KEY: 500}
+    assert cache.fair_values(db, MARKET, whole, T0) == {LINEN_KEY: 2041 / 20}
+    assert cache.fair_values(db, MARKET, cut, T0) == {LINEN_KEY: 2040 / 19}
+
+
+def test_a_pass_keeps_only_the_scans_the_last_pass_used(db, monkeypatch):
+    # So a long watch holds the Scans still in the Sell Rate range, not every one it saw.
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, row(unit=120)))
+    calls = counting_supply_at(monkeypatch)
+    cache = FairValueCache()
+
+    cache.fair_values(db, MARKET, CONFIG, T0)
+    cache.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE)
+    cache.start_pass()
+    cache.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE)
+    cache.start_pass()
+    cache.fair_values(db, MARKET, CONFIG, T0)
+    cache.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE)
+
+    assert calls == [T0, T0 + 20 * MINUTE, T0]

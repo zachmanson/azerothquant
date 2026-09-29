@@ -46,3 +46,33 @@ def fair_values(
             return {}
         at = times[-1]
     return {item_key: fair_value(s, config) for item_key, s in supply_at(conn, market, at).items()}
+
+
+class FairValueCache:
+    """Fair Values by Scan, kept by `brain watch` from one pass to the next (#105). A
+    Scan's supply doesn't change once it's imported, since `supply_at` adds back the
+    Partial Sales seen after it, so neither do its Fair Values under the same config.
+    A pass keeps only the Scans the pass before it used, so it doesn't grow forever."""
+
+    def __init__(self) -> None:
+        self._last_pass: dict[_ScanKey, dict[str, float]] = {}
+        self._this_pass: dict[_ScanKey, dict[str, float]] = {}
+
+    def start_pass(self) -> None:
+        self._last_pass, self._this_pass = self._this_pass, {}
+
+    def fair_values(
+        self, conn: sqlite3.Connection, market: Market, config: Config, at: int
+    ) -> dict[str, float]:
+        """`fair_values` of the Market's Scan requested at `at`."""
+        # The Scan, and the config fields `fair_value` reads.
+        key = (market, at, config.fair_value_slice_share, config.fair_value_outlier_share)
+        if key not in self._this_pass:
+            if key in self._last_pass:
+                self._this_pass[key] = self._last_pass[key]
+            else:
+                self._this_pass[key] = fair_values(conn, market, config, at=at)
+        return self._this_pass[key]
+
+
+_ScanKey = tuple[Market, int, float, float]

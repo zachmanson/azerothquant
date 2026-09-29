@@ -22,6 +22,7 @@ from brain.cli import (
     watch_step,
 )
 from brain.config import Config, Era, Install
+from brain.fair_value import FairValueCache
 from brain.history import (
     Holding,
     KnownRecipe,
@@ -140,6 +141,26 @@ def test_watch_logs_how_long_an_import_took(tmp_path, caplog):
     watch_step(config, watcher, clock)  # it has settled: import
 
     assert "Import took 4.2s" in caplog.text
+
+
+def test_watch_keeps_its_fair_value_cache_from_one_pass_to_the_next(tmp_path, monkeypatch):
+    # A past Scan's Fair Values are computed once per watcher, not once per pass (#105).
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    watcher = Watcher(settle_seconds=0)
+    cache = FairValueCache()
+    passed = []
+
+    def recommend(conn, config, predictions, fair_value_cache=None):
+        passed.append(fair_value_cache)
+        return []
+
+    monkeypatch.setattr("brain.cli.recommend", recommend)
+
+    watch_step(config, watcher, fair_value_cache=cache)  # sees the file for the first time
+    watch_step(config, watcher, fair_value_cache=cache)  # it has settled: import
+
+    assert passed == [cache]
 
 
 def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_path):

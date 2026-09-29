@@ -29,6 +29,7 @@ from brain.archive import Archive
 from brain.config import Config, ConfigError, Era, load_config
 from brain.disenchant import Group, load_table
 from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
+from brain.fair_value import FairValueCache
 from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
@@ -86,12 +87,14 @@ def savedvariables_files(config: Config) -> list[Path]:
     return files
 
 
-def run_import(config: Config, paths: list[Path]) -> list[FileResult]:
+def run_import(
+    config: Config, paths: list[Path], fair_value_cache: FairValueCache | None = None
+) -> list[FileResult]:
     """Import each file into the history, in order.
 
     A file that can't be imported (say it was read while the client was still writing
     it) is reported and skipped; it doesn't stop the others. Importing is idempotent,
-    so reading a file again later is always safe.
+    so reading a file again later is always safe. `fair_value_cache` as in `recommend`.
     """
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
     results = []
@@ -109,7 +112,7 @@ def run_import(config: Config, paths: list[Path]) -> list[FileResult]:
                 results.append(FileResult(path, error=str(e)))
             else:
                 results.append(FileResult(path, report=report))
-        _write_recommendations(conn, config)
+        _write_recommendations(conn, config, fair_value_cache=fair_value_cache)
     return results
 
 
@@ -175,7 +178,9 @@ def _add_report(total: ImportReport, report: ImportReport) -> None:
             setattr(total, f.name, getattr(total, f.name) + getattr(report, f.name))
 
 
-def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
+def _write_recommendations(
+    conn: sqlite3.Connection, config: Config, fair_value_cache: FairValueCache | None = None
+) -> None:
     """Rewrite every install's Recommendations.lua from the history.
 
     Every install, not only those just imported: it is cheap, and it also fixes a file
@@ -185,7 +190,8 @@ def _write_recommendations(conn: sqlite3.Connection, config: Config) -> None:
     # not stop the file being written: the import times in it are what let the Addon prune
     # SavedVariables.
     try:
-        markets = recommend(conn, config, load_predictions(config.predictions_path))
+        predictions = load_predictions(config.predictions_path)
+        markets = recommend(conn, config, predictions, fair_value_cache=fair_value_cache)
     except (PredictionsError, GradesError) as e:
         log.error("No Recommendations written: %s", e)
         markets = []
@@ -620,18 +626,23 @@ def _money(copper: float | None) -> str:
 
 def _watch(config: Config) -> int:
     watcher = Watcher(settle_seconds=SETTLE_SECONDS)
+    # Kept for as long as the watcher runs, so each pass only computes the new Scans' (#105).
+    fair_value_cache = FairValueCache()
     folders = ", ".join(str(i.path) for i in config.installs)
     log.info("Watching %s in %s (Ctrl+C to stop)", SAVEDVARIABLES_FILE, folders)
     try:
         while True:
-            watch_step(config, watcher)
+            watch_step(config, watcher, fair_value_cache=fair_value_cache)
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         return 0
 
 
 def watch_step(
-    config: Config, watcher: Watcher, clock: Callable[[], float] = time.monotonic
+    config: Config,
+    watcher: Watcher,
+    clock: Callable[[], float] = time.monotonic,
+    fair_value_cache: FairValueCache | None = None,
 ) -> None:
     ready: list[Path] = []
     try:
@@ -640,7 +651,7 @@ def watch_step(
         ready = watcher.poll(savedvariables_files(config), now=noticed)
         if not ready:
             return
-        results = run_import(config, ready)
+        results = run_import(config, ready, fair_value_cache=fair_value_cache)
         _log_results(results)
         failed = [r.path for r in results if r.error is not None]
         if len(failed) < len(results):

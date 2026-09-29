@@ -19,7 +19,7 @@ from types import MappingProxyType
 
 from brain.config import Config
 from brain.disenchant import DisenchantTable, Group, ItemInfo, load_table
-from brain.fair_value import Supply, fair_value
+from brain.fair_value import FairValueCache, Supply, fair_value
 from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
 from brain.history import (
     Holding,
@@ -359,14 +359,29 @@ def _spend(gold: int, budget: int | None) -> int:
 
 
 def recommend(
-    conn: sqlite3.Connection, config: Config, predictions: Sequence[Prediction] = ()
+    conn: sqlite3.Connection,
+    config: Config,
+    predictions: Sequence[Prediction] = (),
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[MarketRecommendations]:
-    """Recommendations for every Market the player has Characters in."""
+    """Recommendations for every Market the player has Characters in. `fair_value_cache`
+    is the past Scans' Fair Values, kept from one pass to the next (#105)."""
+    if fair_value_cache is not None:
+        fair_value_cache.start_pass()
     result = []
     for market in character_markets(conn):
         times = scan_times(conn, market)
         if times:
-            result.append(recommend_market(conn, config, market, predictions, times[-1]))
+            result.append(
+                recommend_market(
+                    conn,
+                    config,
+                    market,
+                    predictions,
+                    times[-1],
+                    fair_value_cache=fair_value_cache,
+                )
+            )
     return result
 
 
@@ -378,10 +393,12 @@ def recommend_market(
     now: int,
     as_of: int | None = None,
     buy_under: bool = True,
+    fair_value_cache: FairValueCache | None = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings and
     gold are the latest, or as of `as_of` (a replay, #80). Without `buy_under`, the Buy
-    Unders are left out: a replay doesn't grade them (#88)."""
+    Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
+    `recommend`."""
     characters = character_markets(conn).get(market, [])
     today = date.fromtimestamp(now)
     active = [p for p in predictions if p.active_on(today)]
@@ -392,7 +409,16 @@ def recommend_market(
     seen = listings(conn, market)
     # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
     # options are alternatives, so none is assumed (#86).
-    valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings), seen)
+    valuer, _ = _valuer(
+        conn,
+        config,
+        market,
+        now,
+        set(under),
+        _unbound_units(holdings),
+        seen,
+        fair_value_cache=fair_value_cache,
+    )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
     plans = _plans(known_recipes(conn, market), now)
@@ -849,17 +875,22 @@ def _valuer(
     under: set[str] = frozenset(),
     unbound: Mapping[str, int] = MappingProxyType({}),
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
-    `_market_lots`."""
+    `_market_lots`, and `fair_value_cache` as in `recommend`."""
     seen = listings(conn, market) if seen is None else seen
     scanned = at is not None
     supply = supply_at(conn, market, at) if scanned else {}
     others = supply_at(conn, market, at, others_only=True) if scanned else {}
-    rates = sell_rates(conn, market, config, at, seen) if scanned else {}
+    rates = (
+        sell_rates(conn, market, config, at, seen, fair_value_cache=fair_value_cache)
+        if scanned
+        else {}
+    )
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = auction_cut(market, config)

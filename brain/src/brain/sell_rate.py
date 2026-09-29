@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from statistics import median
 
 from brain.config import Config
+from brain.fair_value import FairValueCache
 from brain.history import Listing, Market, listings
 from brain.observation import observation_windows_between, sell_rate_evidence, window_hours
 
@@ -35,13 +36,17 @@ def sell_rates(
     config: Config,
     now: int,
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> dict[str, SellRate]:
     """Sell Rate of every Item Key the Market has seen, from the Observation Windows
     ending in the range before `now`. Empty when there are none: no data is not 0.
-    `seen` is the Market's `listings`, when the caller has them already (#105)."""
+    `seen` is the Market's `listings`, when the caller has them already (#105), and
+    `fair_value_cache` as in `sell_rate_evidence`."""
     seen = listings(conn, market) if seen is None else seen
     since, until = _range(config, now)
-    evidence = sell_rate_evidence(conn, market, config, since, until, seen)
+    evidence = sell_rate_evidence(
+        conn, market, config, since, until, seen, fair_value_cache=fair_value_cache
+    )
     if not evidence.window_hours:
         return {}
     in_range = [x for x in seen if x.last_seen >= since and x.first_seen < until]

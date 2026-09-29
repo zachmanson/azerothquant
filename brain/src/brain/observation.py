@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from brain.config import Config
-from brain.fair_value import fair_values
+from brain.fair_value import FairValueCache
 from brain.history import Listing, Market, listings, partial_sales, scan_times
 
 
@@ -179,11 +179,14 @@ def sell_rate_evidence(
     since: int,
     until: int,
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> SellRateEvidence:
     """What Sell Rate is built from over [since, until): the Observation Windows whose
     later Scan falls in the range. Windows aren't clipped at the edges, so the hours
-    and the sales always cover the same windows. `seen` as in `disappearances`."""
+    and the sales always cover the same windows. `seen` as in `disappearances`.
+    `fair_value_cache` is the past Scans' Fair Values, when the caller keeps them."""
     seen = listings(conn, market) if seen is None else seen
+    cache = FairValueCache() if fair_value_cache is None else fair_value_cache
     windows = observation_windows_between(conn, market, config, since, until)
     window_ends = {w.end for w in windows}
     # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
@@ -204,7 +207,7 @@ def sell_rate_evidence(
     # what was up when it went missing is the unlikely story (#74). If it sold the Item
     # Key out, only the Scan it was last seen in has a Fair Value.
     scans_either_side = {at for d in pairing.sales for at in (d.last_seen, d.gone_at)}
-    fair_value_in = {at: fair_values(conn, market, config, at=at) for at in scans_either_side}
+    fair_value_in = {at: cache.fair_values(conn, market, config, at) for at in scans_either_side}
 
     def priced_like_a_sale(d: Disappearance) -> bool:
         last_seen = fair_value_in[d.last_seen][d.item_key]
