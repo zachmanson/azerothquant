@@ -8,8 +8,14 @@
 - Gotchas:
   - Grade freeze tests now monkeypatch `brain.recommend.exit_values` (`valued_at_nothing`), not `_exit_value`. `held_at_writing` still uses `_exit_value`.
 
+- Same session, after #102: the Brain looked stuck on old data because `brain watch` wasn't running (nothing imported since 19:42). A manual `brain import` fixed it. Filed #104 (the Addon warns when the Brain is behind) and #105 (a watcher pass takes 55.8 s: 10.6 s parsing SavedVariables and about 45 s in `recommend`; the profile is on the issue).
+  - A `brain watch` started by Claude dies with the session. The user runs it in their own terminal.
+  - To check whether the Brain is behind, compare the newest `requestedAt` in SavedVariables (`parse_savedvariables`) with `MAX(requested_at)` in `scan`.
+  - To profile without side effects, copy `history.sqlite` to the scratchpad and run `recommend` on it with `grades_path=None`. That doesn't write `Recommendations.lua`.
+
 Next, in order:
-1. Not at the PC: #77, #84, then triage #103.
+1. #105 first (the user asked for it): triage it, then speed up with a profile after each change, and keep the `brain recommend` output identical.
+2. Not at the PC: #77, #84, then triage #103 and #104.
 2. Next PC sitting: unchanged from "later 38", plus the #88 slice 2 and slice 3 checks on #85 (restart the client first).
 
 2026-09-28 (later 43): #101 DONE (9565f97), with /tdd then /code-review. Per day = profit / max(days, 1) in `per_day` (recommend.py) and `measures` (RecommendationTable.lua), and CONTEXT **Per day** says so. Tests: `per_day` unit tests, a Shopping List ranking test (a fast one-off Tin no longer takes a Per day top row from a bigger Linen Flip), and an Addon spec (days 0.125 shows the Profit). Both reviews came back clean apart from wording, which was fixed.
