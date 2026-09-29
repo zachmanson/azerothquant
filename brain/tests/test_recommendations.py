@@ -3,6 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from brain.config import Era
+from brain.disenchant import Group
 from brain.history import Market
 from brain.recommend import (
     Action,
@@ -474,4 +475,64 @@ def test_a_real_lua_reads_the_buy_unders(tmp_path, lua):
     assert out.splitlines() == [
         "2589	2070	Craft	12	14	7	true	2963	2996	Kash-Patel",
         "2770	833	Vendor	nil	1	7	nil	nil	nil	nil",
+    ]
+
+
+def test_a_real_lua_reads_the_disenchant_buy_unders(tmp_path, lua):
+    mats = (MatYield("10940", 1.875), MatYield("10939", 0.3))
+    buy_under = [
+        BuyUnder(
+            None,
+            1812,
+            Action.DISENCHANT,
+            units=3,
+            seen=2,
+            window_days=7,
+            disenchanter="Bob",
+            mats=mats,
+            group=Group(quality=2, kind="weapon", min_level=16, max_level=20, mats=()),
+        ),
+        BuyUnder("9999", 1700, Action.DISENCHANT, None, 1, 7, disenchanter="Bob", mats=mats),
+    ]
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, buy_under=buy_under)]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, b in ipairs(r.recommendations["Quel\'Thalas"].Horde.buyUnder) do '
+        "local g = b.group or {} "
+        "print(b.itemKey, b.price, b.way, b.units, b.disenchanter, "
+        "b.mats[1].itemKey, b.mats[1].quantity, b.mats[2].itemKey, "
+        "g.quality, g.class, g.minLevel, g.maxLevel) end",
+    )
+
+    assert out.splitlines() == [
+        "nil	1812	Disenchant	3	Bob	10940	1.875	10939	2	weapon	16	20",
+        "9999	1700	Disenchant	nil	Bob	10940	1.875	10939	nil	nil	nil	nil",
+    ]
+
+
+def test_a_real_lua_reads_what_cant_be_disenchanted(tmp_path, lua):
+    # From the data file, for the Addon to put items into Disenchant source groups live.
+    file = tmp_path / FILE_NAME
+    file.write_text(render({}), encoding="utf-8")
+
+    out = _run_in_lua(
+        lua,
+        file,
+        "local x = r.disenchantExcluded "
+        "local ids, locs = {}, {} "
+        "for id in pairs(x.itemIDs) do ids[#ids + 1] = id end "
+        "for loc in pairs(x.equipLocs) do locs[#locs + 1] = loc end "
+        "table.sort(ids) table.sort(locs) "
+        "print(table.concat(ids, ',')) print(table.concat(locs, ','))",
+    )
+
+    assert out.splitlines() == [
+        "11287,11288,11289,11290",
+        "INVTYPE_BODY,INVTYPE_NON_EQUIP_IGNORE,INVTYPE_TABARD",
     ]

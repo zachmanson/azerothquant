@@ -9,6 +9,7 @@ ns = ns or {}
 
 -- In game Money.lua loads first (see the .toc), so require, which WoW lacks, isn't reached.
 local Money = ns.Money or require("Money")
+local DisenchantGroup = ns.DisenchantGroup or require("DisenchantGroup")
 
 local RecommendationTable = {}
 
@@ -384,11 +385,19 @@ local function predictionBuyKeys(r, name, cells)
   return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss }
 end
 
--- How a Buy Under gets out (#88): Vendor, Sell, or e.g. "Craft Bolt of Linen Cloth
--- (Kash-Patel)" for a Craft it's a reagent of.
+-- How a Buy Under gets out (#88): Vendor, Sell, e.g. "Craft Bolt of Linen Cloth
+-- (Kash-Patel)" for a Craft it's a reagent of, or "Disenchant (Bob) -> Strange Dust, Greater
+-- Magic Essence" (an arrow the game fonts surely have).
 function RecommendationTable.wayOut(r, nameOf)
   if r.way == "Craft" then
     return "Craft " .. nameFor(r.output, nameOf) .. " (" .. r.crafter .. ")"
+  end
+  if r.way == "Disenchant" then
+    local mats = {}
+    for _, mat in ipairs(r.mats or {}) do
+      mats[#mats + 1] = nameFor(mat.itemKey, nameOf)
+    end
+    return "Disenchant (" .. r.disenchanter .. ") -> " .. table.concat(mats, ", ")
   end
   return r.way
 end
@@ -488,13 +497,14 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
     elseif budget and (r.cost or 0) > budget then
       over = over + 1
     else
-      local name = nameFor(r.itemKey, nameOf)
+      -- A Disenchant source group's Buy Under is for no one item (#88).
+      local name = r.group and DisenchantGroup.name(r.group) or nameFor(r.itemKey, nameOf)
       local rowCells = cells(r, name, nameOf)
       if inBags and inBags(r.itemKey) then
         rowCells[1] = RecommendationTable.BAG .. " " .. name
       end
       out.rows[#out.rows + 1] = {
-        itemString = itemString(r.itemKey),
+        itemString = r.itemKey and itemString(r.itemKey),
         cells = rowCells,
         keys = keys(r, name, rowCells),
         worth = (r.price or 0) * (r.quantity or 0),

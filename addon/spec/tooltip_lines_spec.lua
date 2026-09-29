@@ -292,6 +292,35 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Buy Under 3s: Vendor, seen 1 Scan / 7d" }, linesFor(r, "item:2592"))
   end)
 
+  it("gives the higher of an item's own Buy Under and its Disenchant source group's (#88)", function()
+    local group = {
+      group = { quality = 2, class = "armor", minLevel = 16, maxLevel = 20 },
+      price = 1812, way = "Disenchant", disenchanter = "Bob", seen = 2, windowDays = 7,
+      mats = { { itemKey = "10940", quantity = 1.875 } },
+    }
+    local own = { itemKey = "9999", price = 1500, way = "Vendor", seen = 1, windowDays = 7 }
+    local r = recs({ buyUnder = { own, group } })
+    local info = { quality = 2, itemLevel = 18, classID = 4, equipLoc = "INVTYPE_CHEST" }
+    local excluded = { itemIDs = {}, equipLocs = { INVTYPE_BODY = true } }
+    local function named(itemString)
+      return itemString == "item:10940" and "Strange Dust" or names(itemString)
+    end
+    local function lines(itemInfo)
+      return TooltipLines.forLink(r, REALM, FACTION, link("item:9999"), named, itemInfo, excluded)
+    end
+
+    assert.are.same({ "AQ: Buy Under 18s 12c: Disenchant (Bob) -> Strange Dust, seen 2 Scans / 7d" }, lines(info))
+    own.price = 2000
+    assert.are.same({ "AQ: Buy Under 20s: Vendor, seen 1 Scan / 7d" }, lines(info))
+    own.price = 1500
+    info.equipLoc = "INVTYPE_BODY"
+    assert.are.same({ "AQ: Buy Under 15s: Vendor, seen 1 Scan / 7d" }, lines(info))
+    assert.are.same({ "AQ: Buy Under 15s: Vendor, seen 1 Scan / 7d" }, lines(nil))
+    info.equipLoc = "INVTYPE_CHEST"
+    assert.are.same({ "AQ: Buy Under 18s 12c: Disenchant (Bob) -> Strange Dust, seen 2 Scans / 7d" },
+      TooltipLines.forLink(r, REALM, FACTION, link("item:8888"), named, info, excluded))
+  end)
+
   it("adds nothing without Recommendations for the Market or an item link", function()
     local r = recs({ holdings = { { itemKey = "1", action = "Sell", quantity = 1, price = 1, profit = 1 } } })
 
@@ -355,6 +384,24 @@ describe("TooltipLines.forItemName", function()
     })
 
     assert.are.same({ "AQ: Buy Under 2s 50c: Vendor, seen 2 Scans / 7d" }, linesForName(r, 15932, "Willow Belt of the Owl"))
+  end)
+
+  it("gives the item's Disenchant source group's Buy Under even before the row's name loads (#88)", function()
+    local r = recs({
+      buyUnder = {
+        {
+          group = { quality = 2, class = "armor", minLevel = 16, maxLevel = 20 },
+          price = 1812, way = "Disenchant", disenchanter = "Bob", seen = 2, windowDays = 7,
+          mats = { { itemKey = "10940", quantity = 1.875 } },
+        },
+      },
+    })
+    local info = { quality = 2, itemLevel = 18, classID = 4, equipLoc = "INVTYPE_CHEST" }
+
+    assert.are.same(
+      { "AQ: Buy Under 18s 12c: Disenchant (Bob) -> item:10940, seen 2 Scans / 7d" },
+      TooltipLines.forItemName(r, REALM, FACTION, 15932, nil, names, info, {})
+    )
   end)
 
   it("adds nothing for a name no Item Key has, or one the client hasn't loaded", function()

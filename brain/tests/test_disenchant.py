@@ -16,7 +16,7 @@ from brain.history import (
     open_history,
 )
 from brain.predictions import Prediction
-from brain.recommend import Action, exit_values, recommend
+from brain.recommend import Action, BuyUnder, MatYield, exit_values, recommend
 
 T0 = 1_790_000_000
 REALM = "Classic Beta PvP"
@@ -285,3 +285,179 @@ def test_best_exit_value_counts_the_disenchant_way(db):
     values = exit_values(db, RECOMMEND_CONFIG, MARKET, {GREEN: Holding(bags=2)}, T0 + HOUR)
 
     assert values == {GREEN: pytest.approx(2 * (1.875 * 100 + 0.3 * 200 + 0.05 * 400))}
+
+
+# --- Buy Under with the Disenchant way (#88) ---
+
+GREEN_ITEM = "item:9999::::::::20:1490"
+# A green at 50, and its mats dear enough to beat the 5s effort of buying a green.
+MAT_PRICES = {9999: 50, 10940: 1000, 10939: 2000, 10978: 4000}
+# 1.875 Strange Dust, 0.3 Greater Magic Essence, 0.05 Small Glimmering Shard.
+GREEN_MATS = (
+    MatYield("10940", 1.875),
+    MatYield("10939", 0.3),
+    MatYield("10978", 0.05),
+)
+
+
+def green_listed(*units, level=18):
+    """One Scan with Green Chests, one at each of `units`, by other players."""
+    s = scan(T0, {int(GREEN): info(level)})
+    s["listings"] = [
+        {"itemString": GREEN_ITEM, "quantity": 1, "buyout": unit, "timeLeft": 4} for unit in units
+    ]
+    return [s]
+
+
+def enchanter(enchanting=90, vendor_prices=None, recipes=()):
+    """Bob's Read: Enchanting at `enchanting`, with `recipes` known in it."""
+    r = read("Bob", T0, {ENCHANTING: enchanting})
+    r["vendorPrices"] = vendor_prices or MAT_PRICES
+    r["professions"][ENCHANTING]["recipes"] = list(recipes)
+    return r
+
+
+def buy_unders_of(db, scans, reads):
+    import_scans(db, scans, Era.BETA, RECOMMEND_CONFIG)
+    import_character_reads(db, reads, Era.BETA, RECOMMEND_CONFIG)
+    [result] = recommend(db, RECOMMEND_CONFIG)
+    return result.buy_under
+
+
+def test_an_item_buys_under_its_expected_mats_when_a_character_can_disenchant_it(db):
+    # The mats at their Vendor Prices: 1875 + 600 + 200 = 2675, less the 5s effort of
+    # buying a green (they don't stack): B = 2175 / 1.2. The mats Vendor: no limit.
+    buys = buy_unders_of(db, green_listed(1000), [enchanter()])
+
+    [green] = [b for b in buys if b.item_key == GREEN]
+    assert replace(green, mats=()) == BuyUnder(
+        GREEN,
+        1812,
+        Action.DISENCHANT,
+        units=None,
+        seen=1,
+        window_days=7,
+        listed_now=True,
+        disenchanter="Bob",
+    )
+    assert mats_of(green) == GREEN_MATS
+
+
+def mats_of(buy):
+    """A Buy Under's mats, with the expected quantities rounded off the float noise."""
+    return tuple(MatYield(m.item_key, round(m.quantity, 6)) for m in buy.mats)
+
+
+def test_a_mat_that_feeds_a_craft_brings_the_crafts_credit_to_the_disenchant_way(db):
+    # 2 Greater Magic Essence make a wand that Vendors for 1g: 5000 per Essence beats its
+    # own 2000. 1875 + 0.3 x 5000 + 200 = 3575, less the 500 effort: B = 3075 / 1.2.
+    wand = {
+        "recipeID": 1,
+        "outputItemID": 7777,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": GREATER_MAGIC, "quantity": 2, "reagentType": 1}],
+    }
+    reads = [enchanter(vendor_prices=MAT_PRICES | {7777: 10000}, recipes=[wand])]
+
+    buys = buy_unders_of(db, green_listed(1000), reads)
+
+    # Its group's Buy Under gets the same credit.
+    assert [(b.price, b.units) for b in buys if b.way is Action.DISENCHANT] == [
+        (2562, None),
+        (2562, None),
+    ]
+
+
+def test_a_disenchant_way_is_good_for_as_many_disenchants_as_its_most_limited_mat_has_room_for(
+    db,
+):
+    # 6 Strange Dust sell within the horizon, which beats their Vendor Price of 10: room
+    # for 6 / 1.875 = 3 Disenchants. The Essence and the Shard Vendor, with no limit.
+    scans = market_scans(dust_selling=True)
+    for s in scans:
+        s["listings"].append(
+            {"itemString": GREEN_ITEM, "quantity": 1, "buyout": 300, "timeLeft": 4}
+        )
+    reads = [enchanter(vendor_prices=MAT_PRICES | {10940: 10})]
+
+    buys = buy_unders_of(db, scans, reads)
+
+    # The item's and its group's alike.
+    assert [(b.way, b.units) for b in buys if b.way is Action.DISENCHANT] == [
+        (Action.DISENCHANT, 3),
+        (Action.DISENCHANT, 3),
+    ]
+
+
+def other_green(item_id, name="Other Green"):
+    return f"|cff1eff00|Hitem:{item_id}::::::::20:1490:::::::::|h[{name}]|h|r"
+
+
+def group_scans(other_unit=1500):
+    """Three Scans an hour apart, each with one green by another player: the Green Chest
+    at 1000, then another green armor piece of the same band at `other_unit`, then a green
+    shirt, which can't be Disenchanted, at 500."""
+    infos = {
+        int(GREEN): info(18),
+        9998: info(20, equip_loc="INVTYPE_LEGS"),
+        9997: info(18, equip_loc="INVTYPE_BODY"),
+    }
+    items = [
+        (GREEN_ITEM, 1000),
+        ("item:9998::::::::20:1490", other_unit),
+        ("item:9997::::::::20:1490", 500),
+    ]
+    scans = []
+    for n, (item, unit) in enumerate(items):
+        s = scan(T0 + n * HOUR, infos)
+        s["id"] = n + 1
+        s["listings"] = [{"itemString": item, "quantity": 1, "buyout": unit, "timeLeft": 4}]
+        scans.append(s)
+    return scans
+
+
+def test_a_disenchant_source_group_buys_under_its_expected_mats_seen_across_its_items(db):
+    # The same 1812 as the Green Chest's (armor, item level 16-20). Its Listing and the
+    # other piece's count as two Scans; the shirt's is in no group.
+    table = load_table()
+    buys = buy_unders_of(db, group_scans(), [enchanter()])
+
+    [group] = [b for b in buys if b.group is not None]
+    assert replace(group, mats=()) == BuyUnder(
+        None,
+        1812,
+        Action.DISENCHANT,
+        units=None,
+        seen=2,
+        window_days=7,
+        listed_now=False,
+        disenchanter="Bob",
+        group=table.group(int(GREEN), green(18)),
+    )
+    assert mats_of(group) == GREEN_MATS
+
+
+@pytest.mark.parametrize(
+    "enchanting, level",
+    [
+        (None, 18),  # no Enchanting read
+        (24, 25),  # item level 21-25 needs 25
+    ],
+)
+def test_no_group_buys_under_without_a_character_who_can_disenchant_its_items(
+    db, enchanting, level
+):
+    reader = enchanter(enchanting) if enchanting else read("Bob", T0, {})
+    reader["vendorPrices"] = MAT_PRICES
+
+    buys = buy_unders_of(db, green_listed(1000, level=level), [reader])
+
+    assert [b for b in buys if b.way is Action.DISENCHANT] == []
+
+
+def test_a_group_listing_over_its_buy_under_isnt_a_sighting(db):
+    buys = buy_unders_of(db, group_scans(other_unit=1813), [enchanter()])
+
+    assert [(b.price, b.seen) for b in buys if b.group is not None] == [(1812, 1)]

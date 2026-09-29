@@ -20,6 +20,7 @@ KnownRecipes.lua
 MerchantCosts.lua
 Prune.lua
 Nudge.lua
+DisenchantGroup.lua
 RecommendationTable.lua
 TooltipLines.lua
 BuyUnderMatch.lua

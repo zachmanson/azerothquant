@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from brain.config import Install
+from brain.disenchant import DisenchantTable, load_table
 from brain.history import (
     Market,
     latest_character_read_times,
@@ -72,7 +73,12 @@ _HEADER = (
     '-- { itemKey, price, way = "Vendor"|"Sell"|"Craft", units (nil for no limit), seen\n'
     "-- (Scans that saw a Listing at or under it), windowDays, listedNow = true when the\n"
     "-- latest Scan did }, and a Craft way's recipe (recipeID), output (Item Key) and\n"
-    "-- crafter.\n"
+    "-- crafter. A Disenchant way names its disenchanter and the expected mats of one\n"
+    "-- Disenchant as mats = { { itemKey, quantity } }. A Disenchant source group's entry\n"
+    '-- has no itemKey but group = { quality, class = "armor"|"weapon", minLevel, maxLevel }:\n'
+    "-- the most to pay for any item in it that can be Disenchanted.\n"
+    "-- disenchantExcluded is what can't be Disenchanted, whatever its group: itemIDs and\n"
+    "-- equipLocs, each a set.\n"
 )
 
 
@@ -96,6 +102,7 @@ def render(
             "lastMailboxRead": _by_realm(last_mailbox_read or {}),
             "lastCharacterRead": _by_realm(last_character_read or {}),
             "recommendations": _recommendations(markets),
+            "disenchantExcluded": _disenchant_excluded(load_table()),
         },
     )
 
@@ -176,22 +183,40 @@ def _row(row: Row) -> dict[str, object]:
 
 def _buy_under(buy: BuyUnder) -> dict[str, object]:
     out: dict[str, object] = {
-        "itemKey": buy.item_key,
         "price": buy.price,
         "way": str(buy.way),
         "seen": buy.seen,
         "windowDays": buy.window_days,
     }
     optional = {
+        "itemKey": buy.item_key,
         "units": buy.units,
         "recipe": buy.recipe_id,
         "output": buy.output,
         "crafter": buy.crafter,
+        "disenchanter": buy.disenchanter,
     }
     out |= {key: value for key, value in optional.items() if value is not None}
+    if buy.mats:
+        out["mats"] = [{"itemKey": m.item_key, "quantity": m.quantity} for m in buy.mats]
+    if buy.group:
+        g = buy.group
+        out["group"] = {
+            "quality": g.quality,
+            "class": g.kind,
+            "minLevel": g.min_level,
+            "maxLevel": g.max_level,
+        }
     if buy.listed_now:
         out["listedNow"] = True
     return out
+
+
+def _disenchant_excluded(table: DisenchantTable) -> dict[str, dict]:
+    return {
+        "itemIDs": {item_id: True for item_id in sorted(table.excluded_item_ids)},
+        "equipLocs": {loc: True for loc in sorted(table.excluded_equip_locs)},
+    }
 
 
 def _blocked(blocked: Blocked) -> dict[str, object]:

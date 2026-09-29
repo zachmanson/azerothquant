@@ -9,6 +9,7 @@ ns = ns or {}
 -- In game Money.lua loads first (see the .toc), so require, which WoW lacks, isn't reached.
 local Money = ns.Money or require("Money")
 local RecommendationTable = ns.RecommendationTable or require("RecommendationTable")
+local DisenchantGroup = ns.DisenchantGroup or require("DisenchantGroup")
 
 local TooltipLines = {}
 
@@ -97,9 +98,28 @@ local function buyUnderLine(r, nameOf)
     .. ", seen " .. RecommendationTable.seen(r)
 end
 
+-- The highest Buy Under of keys (a set of Item Keys), or of the item's Disenchant source
+-- group (#88). item is { itemID, info, excluded }, or nil to leave groups out.
+local function bestBuyUnder(entry, keys, item)
+  local best
+  for _, b in ipairs(entry.buyUnder or {}) do
+    local mine
+    if b.group then
+      mine = item ~= nil and DisenchantGroup.contains(b.group, item.itemID, item.info, item.excluded)
+    else
+      mine = keys[b.itemKey]
+    end
+    if mine and (not best or b.price > best.price) then
+      best = b
+    end
+  end
+  return best
+end
+
 -- The lines for each of keys (a set of Item Keys) in the Market's entry, in the order the
--- Recommendation Table has them, then who holds each.
-local function linesFor(entry, keys, nameOf)
+-- Recommendation Table has them, then the one Buy Under (see bestBuyUnder), then who holds
+-- each.
+local function linesFor(entry, keys, nameOf, item)
   local lines = {}
   local held = RecommendationTable.heldUnits(entry.holdings)
   local holdersOf = entry.held or {}
@@ -119,7 +139,10 @@ local function linesFor(entry, keys, nameOf)
   add(entry.holdings, holdingLine)
   add(entry.shoppingList, buyLine)
   add(entry.predictionBuys, buyLine)
-  add(entry.buyUnder or {}, buyUnderLine)
+  local buyUnder = bestBuyUnder(entry, keys, item)
+  if buyUnder then
+    lines[#lines + 1] = buyUnderLine(buyUnder, nameOf)
+  end
   local sorted = {}
   for key in pairs(keys) do
     sorted[#sorted + 1] = key
@@ -137,42 +160,51 @@ local function entryFor(recommendations, realm, faction)
   return recommendations and recommendations[realm] and recommendations[realm][faction]
 end
 
--- nameOf(itemString) names a Craft's reagents, as in the Recommendation Table.
-function TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
+-- nameOf(itemString) names a Craft's reagents, as in the Recommendation Table. info is
+-- what the client says about the item ({ quality, itemLevel, classID, equipLoc }) and
+-- excluded the Brain's disenchantExcluded, for its Disenchant source group's Buy Under;
+-- without info, groups are left out.
+function TooltipLines.forLink(recommendations, realm, faction, link, nameOf, info, excluded)
   local entry = entryFor(recommendations, realm, faction)
   local key = link and itemKey(link)
   if not entry or not key then
     return {}
   end
-  return linesFor(entry, { [key] = true }, nameOf)
+  local item = info and { itemID = tonumber(key:match("^(%d+)")), info = info, excluded = excluded }
+  return linesFor(entry, { [key] = true }, nameOf, item)
 end
 
 -- An AH browse row for a suffixed item links the plain item (#96), and one row can group
 -- several Item Keys under one name ("Items in this group may vary in stats"). So its lines
 -- are those of every Item Key in the Market with that itemID whose name, by nameOf, is the
 -- row's name.
-function TooltipLines.forItemName(recommendations, realm, faction, itemID, name, nameOf)
+-- info and excluded as in forLink.
+function TooltipLines.forItemName(recommendations, realm, faction, itemID, name, nameOf, info, excluded)
   local entry = entryFor(recommendations, realm, faction)
-  if not entry or not name then
+  if not entry then
     return {}
   end
+  -- Until the client has the row's name, only the group's Buy Under can be told.
   local keys = {}
   local prefix = tostring(itemID)
   local function consider(key)
     local id = key:match("^(%d+)")
-    if id == prefix and nameOf(RecommendationTable.itemString(key)) == name then
+    if name and id == prefix and nameOf(RecommendationTable.itemString(key)) == name then
       keys[key] = true
     end
   end
   for _, rows in ipairs({ entry.holdings, entry.shoppingList, entry.predictionBuys, entry.buyUnder }) do
     for _, r in ipairs(rows or {}) do
-      consider(r.itemKey)
+      if r.itemKey then -- a Disenchant source group's Buy Under has none (#88)
+        consider(r.itemKey)
+      end
     end
   end
   for key in pairs(entry.held or {}) do
     consider(key)
   end
-  return linesFor(entry, keys, nameOf)
+  local item = info and { itemID = itemID, info = info, excluded = excluded }
+  return linesFor(entry, keys, nameOf, item)
 end
 
 ns.TooltipLines = TooltipLines

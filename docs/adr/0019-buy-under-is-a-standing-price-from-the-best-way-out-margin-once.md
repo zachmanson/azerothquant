@@ -26,3 +26,10 @@ It shows only when at least `buy_under_min_sightings` distinct Scans in the last
 - A Craft whose output binds on craft, or whose bind type is unknown, counts only its Vendor Price.
 - The Buy Unders are sorted by profit per unit at the Buy Under price, best first.
 - Recommendations.lua carries them as `buyUnder`, for the Addon's Buy Under tab, tooltip line and Auction House highlight (#88's later slices).
+
+## Amendment: the Disenchant way and Disenchant source groups (#88, 2026-09-28)
+
+- **Disenchant is a fourth way out.** For an Item Key a Character can Disenchant (ADR-0018's skill gate), `Σ expected qty × way_out_value(mat)`. A mat's way out includes a Craft it's a reagent of, so a green whose essence feeds a Craft gets that Craft's credit. It builds on the mats' `way_out_value`, never on their Buy Under, so the margin is still charged once. A Craft output is still valued by Sell or Vendor only, never Disenchanted.
+- **A Disenchant source group has its own Buy Under**, by the same formula, less the effort of buying one unit (armor and weapons don't stack) and the margin. It's shown only when some Character's Enchanting skill meets the group's highest item level. Its evidence is distinct Scans that saw another player's Listing of any item in the group that can be Disenchanted, at or under it. This is the Buy Under that catches a green nobody has listed before.
+- **Units:** no limit when every mat's way out has none, else the fewest Disenchants any limited mat has room for (its units over its expected qty per Disenchant).
+- **The Addon matches an item by the higher of its own Buy Under and its group's.** A group entry in `buyUnder` carries its bounds (quality, class, item levels), so the Addon checks an item against it with `C_Item.GetItemInfo` and only needs `disenchantExcluded` from the data file. The spec's `disenchantBands` was dropped as a second copy nothing needed.

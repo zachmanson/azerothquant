@@ -6,6 +6,7 @@
 -- Read-only: it flags a row and nothing else. The player buys (ADR-0003).
 local _, ns = ...
 local BuyUnderMatch = ns.BuyUnderMatch
+local Scan = ns.Scan
 
 local R, G, B, A = 0.1, 1, 0.1, 0.2
 
@@ -17,13 +18,21 @@ local function nameOf(itemString)
   return (getItemInfo(itemString))
 end
 
+-- What its Disenchant source group needs to know of an item (#88), or nil until the client
+-- has it.
+local function infoOf(itemID)
+  return itemID and Scan.fromGetItemInfo(getItemInfo(itemID))
+end
+
 -- A browse row: its lowest price, and the name it shows, which tells a suffixed item's Item
 -- Keys apart (#96). Nil until the client has the name.
 local function browseListing(data)
   local info = data.itemKey and C_AuctionHouse.GetItemKeyInfo(data.itemKey)
+  local itemID = data.itemKey and data.itemKey.itemID
   return {
-    itemID = data.itemKey and data.itemKey.itemID,
+    itemID = itemID,
     name = info and info.itemName,
+    info = infoOf(itemID),
     unitPrice = data.minPrice,
   }
 end
@@ -31,9 +40,11 @@ end
 -- One Listing of an item: its link gives the Item Key. The buyout covers the Listing's
 -- quantity, which for an item (not a commodity) is nearly always 1.
 local function itemListing(data)
+  local itemID = data.itemKey and data.itemKey.itemID
   return {
     link = data.itemLink,
-    itemID = data.itemKey and data.itemKey.itemID,
+    itemID = itemID,
+    info = infoOf(itemID),
     unitPrice = data.buyoutAmount and data.buyoutAmount / math.max(data.quantity or 1, 1),
   }
 end
@@ -59,9 +70,11 @@ local function refresh(row, listingOf)
   local data = row.rowData
   local on = false
   if data then
-    local recommendations = AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations
-    on = BuyUnderMatch.under(recommendations, GetRealmName(), UnitFactionGroup("player"), listingOf(data), nameOf)
-      ~= nil
+    local saved = AzerothQuantRecommendations
+    local recommendations = saved and saved.recommendations
+    local excluded = saved and saved.disenchantExcluded
+    local realm, faction = GetRealmName(), UnitFactionGroup("player")
+    on = BuyUnderMatch.under(recommendations, realm, faction, listingOf(data), nameOf, excluded) ~= nil
   end
   flag(row, on)
 end

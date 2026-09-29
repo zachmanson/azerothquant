@@ -5,6 +5,7 @@
 -- Read-only: it adds lines and nothing else (ADR-0003).
 local _, ns = ...
 local TooltipLines = ns.TooltipLines
+local Scan = ns.Scan
 
 local R, G, B = 0.4, 0.8, 1 -- light blue, apart from the game's white and green lines
 
@@ -33,14 +34,21 @@ local function addLines(tooltip, data)
   if not tooltip.GetItem then
     return
   end
-  local recommendations = AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations
+  local saved = AzerothQuantRecommendations
+  local recommendations = saved and saved.recommendations
+  local excluded = saved and saved.disenchantExcluded
   local realm, faction = GetRealmName(), UnitFactionGroup("player")
   local _, link = tooltip:GetItem()
-  local lines = TooltipLines.forLink(recommendations, realm, faction, link, nameOf)
-  -- A suffixed item's AH browse row links the plain item (#96), so try the row's name.
   local itemID = (link and tonumber(link:match("|Hitem:(%d+)"))) or (data and data.id)
-  if #lines == 0 and itemID then
-    lines = TooltipLines.forItemName(recommendations, realm, faction, itemID, rowName(tooltip), nameOf)
+  -- What its Disenchant source group needs to know of the item (#88).
+  local info = itemID and Scan.fromGetItemInfo(getItemInfo(itemID))
+  -- A suffixed item's AH browse row links the plain item (#96), so when the Market has
+  -- nothing for its Item Key, try the row's name. Its group's Buy Under comes either way.
+  local lines
+  if #TooltipLines.forLink(recommendations, realm, faction, link, nameOf) == 0 and itemID then
+    lines = TooltipLines.forItemName(recommendations, realm, faction, itemID, rowName(tooltip), nameOf, info, excluded)
+  else
+    lines = TooltipLines.forLink(recommendations, realm, faction, link, nameOf, info, excluded)
   end
   for _, text in ipairs(lines) do
     tooltip:AddLine(text, R, G, B)

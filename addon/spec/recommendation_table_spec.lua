@@ -678,6 +678,28 @@ describe("RecommendationTable.build", function()
     )
   end)
 
+  it("shows a Disenchant source group's Buy Under by the group, with the disenchanter and mats (#88)", function()
+    local mats = { { itemKey = "10940", quantity = 1.875 }, { itemKey = "10939", quantity = 0.3 } }
+    local view = build(entry({
+      buyUnder = {
+        {
+          group = { quality = 2, class = "weapon", minLevel = 16, maxLevel = 20 },
+          price = 1812, way = "Disenchant", disenchanter = "Bob", mats = mats, units = 3, seen = 2, windowDays = 7,
+        },
+        { itemKey = "9999", price = 1700, way = "Disenchant", disenchanter = "Bob", mats = mats, seen = 1, windowDays = 7 },
+      },
+    }), AS_OF, function(itemString)
+      return ({ ["item:10940"] = "Strange Dust", ["item:10939"] = "Greater Magic Essence" })[itemString]
+    end)
+
+    local rows = view.sections[5].rows
+    local way = "Disenchant (Bob) -> Strange Dust, Greater Magic Essence"
+    assert.are.same({ "Green weapons ilvl 16-20", "18s 12c", way, "3", "2 Scans / 7d", "" }, rows[1].cells)
+    assert.is_nil(rows[1].itemString)
+    assert.are.same({ "Expect 1.88 Strange Dust", "Expect 0.30 Greater Magic Essence" }, rows[1].tooltip)
+    assert.are.same({ "item:9999", "17s", way, "no limit", "1 Scan / 7d", "" }, rows[2].cells)
+  end)
+
   it("shows a Hold's profit as unknown and the Prediction it's under, as brain recommend does", function()
     local view = build(entry({
       holdings = {

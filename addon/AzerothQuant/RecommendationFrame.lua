@@ -84,10 +84,15 @@ local function widthsFor(title)
   return widths
 end
 
--- The item, the row's tooltip lines, and any cell text clipped by its column.
+-- The item, the row's tooltip lines, and any cell text clipped by its column. A row for
+-- no one item (a Disenchant source group's Buy Under, #88) is titled by its first cell.
 local function showTooltip(line)
   GameTooltip:SetOwner(line, "ANCHOR_RIGHT")
-  GameTooltip:SetHyperlink(line.itemString)
+  if line.itemString then
+    GameTooltip:SetHyperlink(line.itemString)
+  else
+    GameTooltip:SetText(line.cells[1]:GetText())
+  end
   -- The hyperlink's item-tooltip hook (Tooltip.lua) already added the holder and
   -- reagent lines this row also has, so skip those (#94).
   local shown = {}
@@ -147,7 +152,7 @@ local function getLine(i)
     line.cells[c] = cell
   end
   line:SetScript("OnEnter", function(self)
-    if self.itemString then
+    if self.tooltip then
       showTooltip(self)
     end
   end)
@@ -173,7 +178,7 @@ local function drawLine(i, texts, widths, font, item, justify)
   line.tooltip = item and item.tooltip
   line:EnableMouse(item ~= nil)
   line.stripe:SetShown(item ~= nil and i % 2 == 0)
-  if item then
+  if item and item.itemString then
     line.icon:SetTexture(select(5, getItemInfoInstant(item.itemString)))
     line.icon:Show()
   else

@@ -18,7 +18,7 @@ from itertools import groupby
 from types import MappingProxyType
 
 from brain.config import Config
-from brain.disenchant import DisenchantTable, ItemInfo, load_table
+from brain.disenchant import DisenchantTable, Group, ItemInfo, load_table
 from brain.fair_value import Supply, fair_value
 from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
 from brain.history import (
@@ -293,14 +293,15 @@ class CharacterHolding:
 class BuyUnder:
     """The most one unit of an Item Key is worth paying on the Auction House, from its best
     way out less the Flip margin (#88). It isn't an Action: the Addon only flags Listings
-    at or under it, and the player buys (ADR-0003).
+    at or under it, and the player buys (ADR-0003). A Disenchant source group's has no
+    Item Key but the `group`: the most any item in it is worth paying to Disenchant.
 
     `units` is how many units it's good for, None for no limit. `seen` is how many
     distinct Scans in the last `window_days` saw another player's Listing at or under it,
     and `listed_now` whether the latest one did. A Craft way names its recipe, output and
-    crafter."""
+    crafter, a Disenchant way its disenchanter and the expected mats of one Disenchant."""
 
-    item_key: str
+    item_key: str | None
     price: int
     way: Action
     units: int | None
@@ -310,6 +311,9 @@ class BuyUnder:
     recipe_id: int | None = None
     output: str | None = None
     crafter: str | None = None
+    disenchanter: str | None = None
+    mats: tuple[MatYield, ...] = ()
+    group: Group | None = None
 
 
 @dataclass(frozen=True)
@@ -489,6 +493,8 @@ class _WayOut:
     way: Action
     units: int | None
     plan: "_Plan | None" = None  # a Craft way's
+    disenchanter: str | None = None  # a Disenchant way's, with the expected mats of one
+    mats: tuple[MatYield, ...] = ()
 
 
 def _buy_unders(
@@ -516,15 +522,21 @@ def _buy_unders(
         config=config,
     )
     result: list[tuple[float, BuyUnder]] = []
-    for item_key, cheapest in cheapest_seen(conn, market, now - window * 86400, now).items():
-        out = _way_out(item_key, valuer, config, sources)
+
+    def add(
+        item_key: str | None,
+        group: Group | None,
+        out: _WayOut | None,
+        effort: int,
+        cheapest: dict[int, int],
+    ) -> None:
         if out is None:
-            continue
-        net = out.value - valuer.effort(item_key)
+            return
+        net = out.value - effort
         price = _under_margin(net, config)
         seen = sum(unit <= price for unit in cheapest.values())
         if price <= 0 or seen < config.buy_under_min_sightings:
-            continue
+            return
         listed_now = cheapest.get(now, price + 1) <= price
         plan = out.plan
         buy = BuyUnder(
@@ -538,25 +550,88 @@ def _buy_unders(
             plan.recipe.recipe_id if plan else None,
             plan.output if plan else None,
             plan.character if plan else None,
+            out.disenchanter,
+            out.mats,
+            group,
         )
         result.append((net - price, buy))
+
+    seen_by_key = cheapest_seen(conn, market, now - window * 86400, now)
+    for item_key, cheapest in seen_by_key.items():
+        add(
+            item_key,
+            None,
+            _way_out(item_key, valuer, config, sources),
+            valuer.effort(item_key),
+            cheapest,
+        )
+    disenchanting = valuer.disenchanting
+    for group, cheapest in _cheapest_by_group(seen_by_key, disenchanting).items():
+        disenchanter = disenchanting.disenchanter(group) if disenchanting else None
+        if disenchanter is None:
+            continue
+        expected = {str(mat): qty for mat, qty in group.expected.items()}
+        # Armor and weapons don't stack, so buying one always costs the effort (#73).
+        effort = config.non_stacking_effort_copper
+        add(None, group, _disenchant_way(disenchanter, expected, sources, config), effort, cheapest)
     result.sort(key=lambda pair: -pair[0])
     return [buy for _, buy in result]
+
+
+def _cheapest_by_group(
+    seen_by_key: Mapping[str, Mapping[int, int]], disenchanting: "_Disenchanting | None"
+) -> dict[Group, dict[int, int]]:
+    """`cheapest_seen` by Disenchant source group: per Scan, the cheapest unit buyout of
+    any item in the group that can be Disenchanted."""
+    result: dict[Group, dict[int, int]] = {}
+    for item_key, cheapest in seen_by_key.items():
+        group = disenchanting.group(item_key) if disenchanting else None
+        if group is None:
+            continue
+        by_scan = result.setdefault(group, {})
+        for at, unit in cheapest.items():
+            by_scan[at] = min(unit, by_scan.get(at, unit))
+    return result
 
 
 def _way_out(
     item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None" = None
 ) -> _WayOut | None:
     """The best of an Item Key's ways out for one more unit, or None without any: Vendor,
-    Sell, or with `sources` a Craft it's a reagent of. A way with no units left isn't
-    one."""
+    Sell, or with `sources` a Craft it's a reagent of or Disenchant. A way with no units
+    left isn't one."""
     ways = [_sell_way(item_key, valuer, config)]
     vendor = valuer.vendor.get(item_id_of(item_key))
     if vendor is not None:
         ways.append(_WayOut(vendor, Action.VENDOR, None))
     if sources is not None:
         ways += [_craft_way(item_key, plan, sources, config) for plan in sources.uses(item_key)]
+        disenchant = valuer.disenchanting and valuer.disenchanting.way(item_key)
+        if disenchant:
+            ways.append(_disenchant_way(*disenchant, sources, config))
     return max((w for w in ways if w is not None), key=lambda w: w.value, default=None)
+
+
+def _disenchant_way(
+    disenchanter: str, expected: Mapping[str, float], sources: "_Sources", config: Config
+) -> _WayOut | None:
+    """One unit Disenchanted: its expected mats, each at its own way out (a Craft way
+    included, never another Buy Under, so the margin is charged once). It's good for no
+    limit when every mat's way out is, else for as many Disenchants as the most limited
+    mat has room for. A mat with no way out adds nothing, but is still an expected mat."""
+    value, units = 0.0, None
+    for mat, qty in expected.items():
+        out = _way_out(mat, sources.valuer, config, sources)
+        if out is None:
+            continue
+        value += qty * out.value
+        if out.units is not None:
+            room = math.floor(out.units / qty)
+            units = room if units is None else min(units, room)
+    if units == 0:
+        return None
+    mats = tuple(MatYield(mat, qty) for mat, qty in expected.items())
+    return _WayOut(value, Action.DISENCHANT, units, None, disenchanter, mats)
 
 
 def _craft_way(item_key: str, plan: "_Plan", sources: "_Sources", config: Config) -> _WayOut | None:
@@ -791,17 +866,31 @@ class _Disenchanting:
     info: Mapping[int, ItemInfo]
     skills: Mapping[str, int]  # Enchanting skill by Character
 
+    def group(self, item_key: str) -> Group | None:
+        """The Item Key's Disenchant source group, or None if it can't be Disenchanted."""
+        item_id = item_id_of(item_key)
+        info = self.info.get(item_id)
+        return self.table.group(item_id, info) if info else None
+
     def way(self, item_key: str) -> tuple[str, dict[str, float]] | None:
         """The Character to Disenchant an Item Key, and the expected mats of one
         Disenchant by Item Key, or None if nobody can."""
-        item_id = item_id_of(item_key)
-        info = self.info.get(item_id)
-        group = self.table.group(item_id, info) if info else None
+        info = self.info.get(item_id_of(item_key))
+        group = self.group(item_key)
         need = self.table.required_skill(info.item_level) if group else None
-        able = sorted(c for c, skill in self.skills.items() if need is not None and skill >= need)
+        able = self._able(need)
         if not able:
             return None
         return able[0], {str(mat): q for mat, q in group.expected.items()}
+
+    def disenchanter(self, group: Group) -> str | None:
+        """The Character to Disenchant any item in the group: one whose skill meets what
+        its highest item level needs. None if nobody can."""
+        able = self._able(self.table.required_skill(group.max_level))
+        return able[0] if able else None
+
+    def _able(self, need: int | None) -> list[str]:
+        return sorted(c for c, skill in self.skills.items() if need is not None and skill >= need)
 
 
 class _Valuer:

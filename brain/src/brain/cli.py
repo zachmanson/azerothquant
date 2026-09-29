@@ -367,6 +367,12 @@ def run_disenchants(config: Config) -> str:
 _QUALITIES = {2: "Green", 3: "Blue", 4: "Purple"}
 
 
+def _group_name(group: Group) -> str:
+    """A Disenchant source group's name, e.g. "Green armor ilvl 16-20"."""
+    kind = "armor" if group.kind == "armor" else "weapons"
+    return f"{_QUALITIES[group.quality]} {kind} ilvl {group.min_level}-{group.max_level}"
+
+
 def _render_disenchants(era: Era, count: int, check: DisenchantCheck, min_results: int) -> str:
     text = (
         f"{era.value.capitalize()}: {count} Disenchant Results, a group judged from {min_results}\n"
@@ -379,8 +385,7 @@ def _render_disenchants(era: Era, count: int, check: DisenchantCheck, min_result
     for row in check.rows:
         groups.setdefault(row.group, []).append(row)
     for group, checks in groups.items():
-        kind = "armor" if group.kind == "armor" else "weapons"
-        text += f"\n{_QUALITIES[group.quality]} {kind} ilvl {group.min_level}-{group.max_level}\n"
+        text += f"\n{_group_name(group)}\n"
         text += _table(
             ["Mat", "n", "Chance (95%)", "Table", "Qty when it drops (95%)", "Table", "Verdict"],
             [
@@ -486,7 +491,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         ["Item", "Buy Under", "Way out", "Units", "Seen"],
         [
             [
-                b.item_key,
+                _buy_under_item(b),
                 _money(b.price),
                 _way_out_label(b),
                 "no limit" if b.units is None else str(b.units),
@@ -547,9 +552,16 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
     )
 
 
+def _buy_under_item(buy: BuyUnder) -> str:
+    """The Item Key, or a Disenchant source group's name."""
+    return str(buy.item_key) if buy.group is None else _group_name(buy.group)
+
+
 def _way_out_label(buy: BuyUnder) -> str:
     if buy.way is Action.CRAFT:
         return f"Craft {buy.output} ({buy.crafter})"
+    if buy.way is Action.DISENCHANT:
+        return f"Disenchant ({buy.disenchanter})"
     return buy.way.value
 
 
