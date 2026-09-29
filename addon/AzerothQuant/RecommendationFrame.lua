@@ -6,7 +6,7 @@
 -- last picked and each Market's Budget are saved in AzerothQuantDB; open/closed is not.
 --
 -- Read-only: hover shows a tooltip, a click selects the row and shift-click links the item
--- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the right (#77).
+-- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the left (#77).
 -- The Budget box (#86) only saves what the player will spend: the table hides options over
 -- it at once, and Character.lua hands it to the Brain in the next Character Read.
 local _, ns = ...
@@ -224,8 +224,8 @@ local function drawLine(i, texts, widths, font, item, justify)
 end
 
 -- The Craft Chain panel (#77): the selected Craft row's chain as a top-down tree, docked to
--- the frame's right edge. It's the frame's child, so it closes with it. CraftChain.lua
--- shapes the lines; here they're drawn. The elbows are textures, not ├ └ │, which the
+-- the frame's left edge (over the AH: on the right it ran off the screen). It's the frame's
+-- child, so it closes with it. CraftChain.lua shapes the lines; here they're drawn. The elbows are textures, not ├ └ │, which the
 -- game's fonts may not have.
 local PANEL_WIDTH = 300
 local CHAIN_LINE_HEIGHT = 20
@@ -364,8 +364,8 @@ end
 
 local function createChainPanel()
   chainPanel = CreateFrame("Frame", "AzerothQuantCraftChainPanel", frame, "ButtonFrameTemplate")
-  chainPanel:SetPoint("TOPLEFT", frame, "TOPRIGHT", 2, 0)
-  chainPanel:SetPoint("BOTTOMLEFT", frame, "BOTTOMRIGHT", 2, 0)
+  chainPanel:SetPoint("TOPRIGHT", frame, "TOPLEFT", -2, 0)
+  chainPanel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", -2, 0)
   chainPanel:SetWidth(PANEL_WIDTH)
   chainPanel.Inset:ClearAllPoints()
   chainPanel.Inset:SetPoint("TOPLEFT", chainPanel, "TOPLEFT", 4, INSET_TOP)
