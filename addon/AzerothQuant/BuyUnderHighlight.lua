@@ -66,8 +66,7 @@ local function flag(row, on)
 end
 
 -- Flags a row, or clears one recycled from a flagged Listing.
-local function refresh(row, listingOf)
-  local data = row.rowData
+local function refresh(row, listingOf, data)
   local on = false
   if data then
     local saved = AzerothQuantRecommendations
@@ -79,16 +78,26 @@ local function refresh(row, listingOf)
   flag(row, on)
 end
 
-local browseScrollBox
+-- A row's Listing. The lists' data providers hold indexes, not Listings: the init callback
+-- gets the index before Blizzard's own init sets row.rowData, so the Listing comes from the
+-- list's entry getter. row.rowData is the fallback for a row already on show.
+local function dataOf(list, row, elementData)
+  if type(elementData) == "number" and list.getEntry then
+    return list.getEntry(elementData)
+  end
+  return row.rowData
+end
+
+local browseList
 
 -- Refreshes the rows a list has on show. A list gets its view (and rows) only once the AH
 -- sets it up, after Blizzard_AuctionHouseUI loads; before that it has no rows to refresh.
-local function refreshShown(scrollBox, listingOf)
-  if not scrollBox:GetView() then
+local function refreshShown(list, listingOf)
+  if not list.ScrollBox:GetView() then
     return
   end
-  scrollBox:ForEachFrame(function(row)
-    refresh(row, listingOf)
+  list.ScrollBox:ForEachFrame(function(row, elementData)
+    refresh(row, listingOf, dataOf(list, row, elementData))
   end)
 end
 
@@ -101,11 +110,11 @@ local function hook(list, listingOf)
   if not scrollBox or not ScrollUtil or not ScrollUtil.AddInitializedFrameCallback then
     return nil
   end
-  ScrollUtil.AddInitializedFrameCallback(scrollBox, function(_, row)
-    refresh(row, listingOf)
+  ScrollUtil.AddInitializedFrameCallback(scrollBox, function(_, row, elementData)
+    refresh(row, listingOf, dataOf(list, row, elementData))
   end, {}, false)
-  refreshShown(scrollBox, listingOf)
-  return scrollBox
+  refreshShown(list, listingOf)
+  return list
 end
 
 local hooked = false
@@ -115,7 +124,7 @@ local function hookAuctionHouse()
     return
   end
   hooked = true
-  browseScrollBox =
+  browseList =
     hook(AuctionHouseFrame.BrowseResultsFrame and AuctionHouseFrame.BrowseResultsFrame.ItemList, browseListing)
   hook(AuctionHouseFrame.ItemBuyFrame and AuctionHouseFrame.ItemBuyFrame.ItemList, itemListing)
   hook(AuctionHouseFrame.CommoditiesBuyFrame and AuctionHouseFrame.CommoditiesBuyFrame.ItemList, commodityListing)
@@ -129,8 +138,8 @@ events:RegisterEvent("ITEM_KEY_ITEM_INFO_RECEIVED")
 events:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" and name == "Blizzard_AuctionHouseUI" then
     hookAuctionHouse()
-  elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" and browseScrollBox then
-    refreshShown(browseScrollBox, browseListing)
+  elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" and browseList then
+    refreshShown(browseList, browseListing)
   end
 end)
 if isAddOnLoaded and isAddOnLoaded("Blizzard_AuctionHouseUI") then
