@@ -5,6 +5,8 @@
   - The lupa `lua -e` shim works: a `lua.bat` calling a Python script that runs `lupa.lua51.LuaRuntime().execute(argv[2])` with `print` overridden to write tab-joined `tostring`s to stdout. Point `LUA` at the .bat (Windows path) and the Recommendations.lua tests stop skipping. It's still scratchpad-only; worth adding to `scripts/` (ask first).
   - Never start a Bash command with a bare `cat > file` with no input: it waits on stdin until the 2-min timeout.
   - `Scan.fromGetItemInfo(getItemInfo(x))` is the one helper for item info in glue. Don't hand-roll the 12-return unpack again.
+  - Found on the client after the commit: the AH item lists have no view at ADDON_LOADED of Blizzard_AuctionHouseUI, so `ScrollBox:ForEachFrame` threw. Fixed in 3b9fc6d (`refreshShown` checks `GetView()`). The user confirmed that the AH opens cleanly after a /reload. The rest of the #85 checks (highlights, group rows, tooltips) are still open.
+  - The Beta client HAS a global `require` (a module loader for other addons) that throws "Invalid import". The `ns.X or require("X")` fallback, meant only for busted, throws in game whenever a new file is added and the client is only /reloaded, not restarted. The fix is a client restart. Not filed.
 
 Next, in order:
 1. Not at the PC: #101 (small, ready-for-agent), #102, #77, #84, then triage #103.
