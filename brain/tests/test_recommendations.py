@@ -10,9 +10,11 @@ from brain.recommend import (
     Blocked,
     BlockReason,
     BuyUnder,
+    ChainNode,
     CharacterHolding,
     MarketRecommendations,
     MatYield,
+    NodeKind,
     ReagentBuy,
     ReagentUse,
     Row,
@@ -380,6 +382,54 @@ def test_a_real_lua_reads_a_crafts_sub_crafts(tmp_path, lua):
     assert out.splitlines() == [
         "2840	2	Alt-One",
         "2996	1	Kash-Patel",
+    ]
+
+
+def test_a_real_lua_reads_a_crafts_chain(tmp_path, lua):
+    # #77: the exits, the last over the craft, over its sources.
+    file = tmp_path / FILE_NAME
+    blocked = Blocked(BlockReason.NO_DATA, "2320")
+    top = ChainNode(
+        NodeKind.CRAFT,
+        "2841",
+        20,
+        -3960.0,
+        (
+            ChainNode(NodeKind.BUY, "3576", 20, -2140.0, max_unit_price=110, effort=0),
+            ChainNode(NodeKind.MERCHANT, "3857", 1, -20.0),
+            ChainNode(NodeKind.USE, "2320", 1, None, blocked=blocked),
+        ),
+        crafts=20,
+        character="Alt-One",
+    )
+    sell = ChainNode(
+        NodeKind.SELL, "2841", 20, 8500.0, (top,), post_at=450, cut=450.0, deposit=50.0, effort=0
+    )
+    craft = Row("2841", Action.CRAFT, 20, profit=4540.0, character="Alt-One", chain=(sell,))
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, holdings=[craft])]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local row = r.recommendations["Quel\'Thalas"].Horde.holdings[1] '
+        "local function walk(n, depth) "
+        "  print(depth, n.kind, n.itemKey, n.quantity, n.gold, n.crafts, n.character, "
+        "    n.postAt, n.maxUnitPrice, n.cut, n.deposit, n.effort, "
+        "    n.blocked and (n.blocked.reason .. ' ' .. n.blocked.itemKey)) "
+        "  for _, c in ipairs(n.children or {}) do walk(c, depth + 1) end "
+        "end "
+        "for _, n in ipairs(row.chain) do walk(n, 0) end",
+    )
+
+    assert out.splitlines() == [
+        "0	sell	2841	20	8500	nil	nil	450	nil	450	50	0	nil",
+        "1	craft	2841	20	-3960	20	Alt-One	nil	nil	nil	nil	nil	nil",
+        "2	buy	3576	20	-2140	nil	nil	nil	110	nil	nil	0	nil",
+        "2	merchant	3857	1	-20	nil	nil	nil	nil	nil	nil	nil	nil",
+        "2	use	2320	1	nil	nil	nil	nil	nil	nil	nil	nil	noData 2320",
     ]
 
 

@@ -131,6 +131,44 @@ class Blocked:
         return "unknown bind type"
 
 
+class NodeKind(StrEnum):
+    """What a Craft Chain node does with its units (#77). DISENCHANT is reserved (#76)."""
+
+    SELL = "sell"
+    VENDOR = "vendor"
+    CRAFT = "craft"
+    USE = "use"  # held units
+    BUY = "buy"  # on the Auction House
+    MERCHANT = "merchant"
+    LEFTOVER = "leftover"  # a Sub-craft's units beyond what's short
+    DISENCHANT = "disenchant"
+
+
+@dataclass(frozen=True)
+class ChainNode:
+    """One node of a Craft row's Craft Chain (#77): `quantity` units of an Item Key, the
+    row's total, and their signed `gold`. A source costs what `_Sources.cost` counts for
+    it, a `leftover` brings its worth and an exit its net after the cut and deposits. A
+    `craft` node's gold is the sum of the sources under it, so every node but a craft
+    adds up to the row's Profit. `children` are what feed it."""
+
+    kind: NodeKind
+    item_key: str
+    quantity: int
+    gold: float | None  # None where it's unknown, on a blocked row
+    children: tuple["ChainNode", ...] = ()
+    crafts: int | None = None  # a craft's
+    character: str = ""  # a craft's
+    post_at: float | None = None  # a sell's
+    max_unit_price: float | None = None  # a buy's, on the Auction House
+    # The gold's breakdown: a sell's cut and deposits, and the effort of buying or posting
+    # units that don't stack (#73).
+    cut: float | None = None
+    deposit: float | None = None
+    effort: float | None = None
+    blocked: Blocked | None = None
+
+
 @dataclass(frozen=True)
 class Row:
     """One line of the table: what to do with `quantity` units of an Item Key."""
@@ -163,6 +201,9 @@ class Row:
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
     blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
     via: tuple[SubCraft, ...] = ()  # a Craft's Sub-crafts, deepest first (#33)
+    # A Craft's Craft Chain (#77): its exits, the last over the craft and its sources. Not
+    # compared, so rows are checked on it apart.
+    chain: tuple[ChainNode, ...] = field(default=(), compare=False)
     # A Craft Action's gold spent at merchants, and a Flip to Craft's output, for the
     # replay (#80). Plumbing, not part of the Recommendation: not written to
     # Recommendations.lua, nor compared.
@@ -1416,6 +1457,102 @@ def _holding_rows(
 BOUND_ON_CRAFT = {1, 4}
 
 
+# A Craft Chain node: the craft it feeds (`_Part.at`), its kind and its Item Key.
+_NodeId = tuple[tuple[str, ...], NodeKind, str]
+
+
+@dataclass(frozen=True)
+class _Part:
+    """Some crafts' share of one Craft Chain node (#77). `at` is the craft it feeds, as
+    the Item Keys from the top output down, or () for an exit."""
+
+    at: tuple[str, ...]
+    kind: NodeKind
+    item_key: str
+    quantity: int
+    gold: float = 0.0
+    crafts: int = 0
+    character: str = ""
+    max_unit_price: float | None = None
+    post_at: float | None = None
+    cut: float = 0.0
+    deposit: float = 0.0
+    effort: float = 0.0
+
+    @property
+    def id(self) -> "_NodeId":
+        return self.at, self.kind, self.item_key
+
+    def plus(self, other: "_Part") -> "_Part":
+        return replace(
+            self,
+            quantity=self.quantity + other.quantity,
+            gold=self.gold + other.gold,
+            crafts=self.crafts + other.crafts,
+            max_unit_price=max(
+                (p for p in (self.max_unit_price, other.max_unit_price) if p is not None),
+                default=None,
+            ),
+            post_at=other.post_at if other.post_at is not None else self.post_at,
+            cut=self.cut + other.cut,
+            deposit=self.deposit + other.deposit,
+            effort=self.effort + other.effort,
+        )
+
+    def node(self, children: tuple[ChainNode, ...] = ()) -> ChainNode:
+        kind = self.kind
+        return ChainNode(
+            kind,
+            self.item_key,
+            self.quantity,
+            sum(c.gold for c in children) if kind is NodeKind.CRAFT else self.gold,
+            children,
+            crafts=self.crafts if kind is NodeKind.CRAFT else None,
+            character=self.character,
+            post_at=self.post_at,
+            max_unit_price=self.max_unit_price,
+            cut=self.cut if kind is NodeKind.SELL else None,
+            deposit=self.deposit if kind is NodeKind.SELL else None,
+            effort=self.effort if kind in (NodeKind.SELL, NodeKind.BUY) else None,
+        )
+
+
+def _exits(
+    item_key: str,
+    units: int,
+    selling: int,
+    sold: float,
+    vendored: float,
+    post_at: float | None,
+    resale: float | None,
+    effort: int,
+) -> list[_Part]:
+    """A craft's exit parts: `selling` of its `units` bring `sold`, posted at `post_at`
+    and `resale` after the cut, less the `effort` of posting each, and the rest bring
+    `vendored`."""
+    if selling == units:
+        sold, vendored = sold + vendored, 0.0
+    parts = []
+    if selling and post_at is not None and resale is not None:
+        gross, cut, posting = selling * post_at, selling * (post_at - resale), selling * effort
+        parts.append(
+            _Part(
+                (),
+                NodeKind.SELL,
+                item_key,
+                selling,
+                sold,
+                post_at=post_at,
+                cut=cut,
+                deposit=gross - cut - posting - sold,
+                effort=posting,
+            )
+        )
+    if units - selling:
+        parts.append(_Part((), NodeKind.VENDOR, item_key, units - selling, vendored))
+    return parts
+
+
 @dataclass
 class _Plan:
     """The crafts chosen so far of one Known Recipe."""
@@ -1434,6 +1571,8 @@ class _Plan:
     # The Sub-crafts by (Item Key, Character), with the deepest each was made at.
     via: dict[tuple[str, str], SubCraft] = field(default_factory=dict)
     via_depth: Counter[tuple[str, str]] = field(default_factory=Counter)
+    # The Craft Chain's parts across the crafts, by node (#77).
+    parts: dict[_NodeId, _Part] = field(default_factory=dict)
 
     @property
     def output(self) -> str:
@@ -1446,8 +1585,11 @@ class _Plan:
             needs[str(reagent.item_id)] += reagent.quantity
         return needs
 
-    def add(self, chain: "_Chain") -> None:
-        """Count one more craft's chain into the row."""
+    def add(self, chain: "_Chain", parts: list[_Part]) -> None:
+        """Count one more craft's chain, and its Craft Chain `parts`, into the row."""
+        for part in parts:
+            had = self.parts.get(part.id)
+            self.parts[part.id] = part if had is None else had.plus(part)
         for key in chain.taken:
             bought = chain.bought(key)
             if chain.taken[key] + bought:
@@ -1485,8 +1627,35 @@ class _Plan:
                 if n > self.bought[key]
             ),
             via=via,
+            chain=self.chain(),
             merchant_gold=self.gold,
         )
+
+    def chain(self) -> tuple[ChainNode, ...]:
+        """The Craft Chain (#77): the exits, the last over the craft and its sources."""
+        exits = [p.node() for p in self.parts.values() if not p.at]
+        if not exits:
+            return ()
+        return (*exits[:-1], replace(exits[-1], children=(self.top(),)))
+
+    def top(self) -> ChainNode:
+        """The Craft Chain's craft node, over its sources."""
+        return self._node(
+            _Part(
+                (),
+                NodeKind.CRAFT,
+                self.output,
+                self.crafts * self.recipe.quantity_min,
+                crafts=self.crafts,
+                character=self.character,
+            )
+        )
+
+    def _node(self, part: _Part) -> ChainNode:
+        if part.kind is not NodeKind.CRAFT:
+            return part.node()
+        below = (*part.at, part.item_key)
+        return part.node(tuple(self._node(p) for p in self.parts.values() if p.at == below))
 
 
 def _plans(recipes: list[KnownRecipe], now: int) -> list[_Plan]:
@@ -1587,6 +1756,7 @@ def _crafts(
                     note=f"on {plan.character}: {reason}",
                     character=plan.character,
                     blocked=why_blocked,
+                    chain=_blocked_chain(plan, why_blocked, sources),
                 )
             )
     while True:
@@ -1603,7 +1773,7 @@ def _crafts(
         plan.crafts += 1
         plan.gain += gain
         plan.gold += sources.gold(chain)
-        plan.add(chain)
+        plan.add(chain, sources.parts(chain) + _held_exits(plan, sources))
         sources.commit(plan, chain)
         crafted[plan.output] = _crafted(plan, crafted.get(plan.output, Holding()))
     rows = [p.row() for p in craftable if p.crafts]
@@ -1625,6 +1795,25 @@ def _blocked(plan: _Plan, sources: "_Sources") -> Blocked | None:
         ):
             return Blocked(BlockReason.NO_DATA, key)
     return None
+
+
+def _blocked_chain(plan: _Plan, why: Blocked | None, sources: "_Sources") -> tuple[ChainNode, ...]:
+    """A blocked Craft row's Craft Chain (#77): one craft as it would be sourced, with no
+    exit. A reagent without data is used with no gold, and blocks it; an unknown bind type
+    blocks the craft itself."""
+    key = why.item_key if why else ""
+    chain = sources.chain_without(plan, key) if key else sources.chain(plan)
+    if chain is None:
+        return ()
+    one = _Plan(plan.recipe, plan.character, crafts=1)
+    one.add(chain, sources.parts(chain))
+    top = one.top()
+    if key:
+        use = ChainNode(NodeKind.USE, key, plan.needs[key], None, blocked=why)
+        top = replace(top, gold=None, children=(*top.children, use))
+    elif why:
+        top = replace(top, blocked=why)
+    return (top,)
 
 
 def _on_hand(
@@ -1653,6 +1842,38 @@ def _step(plan: _Plan, sources: "_Sources") -> tuple[float, "_Chain"] | None:
     return gain - sources.cost(chain), chain
 
 
+def _held_exits(plan: _Plan, sources: "_Sources") -> list[_Part]:
+    """One more Craft Action's exit parts (#77): the units its output adds to what Sells
+    and what's Vendored, and what each brings, as `_step` gains them."""
+    out, valuer = plan.output, sources.valuer
+    now = _plus(sources.held.get(out, Holding()), sources.crafted.get(out, Holding()))
+    after = _crafted(plan, now)
+
+    def sells(holding: Holding) -> tuple[int, float, float | None]:
+        """The units that Sell, what they bring, and their post price."""
+        rows = [r for r in valuer.rows(out, holding) if r.action is Action.SELL]
+        return (
+            sum(r.quantity for r in rows),
+            sum(r.profit or 0.0 for r in rows),
+            rows[0].price if rows else None,
+        )
+
+    # Held units Sell first, so one more craft's units only add to what Sells.
+    (selling_now, sold_now, _), (selling_after, sold_after, post_at) = sells(now), sells(after)
+    sold = sold_after - sold_now
+    gain = valuer.worth(out, after) - valuer.worth(out, now)
+    return _exits(
+        out,
+        plan.recipe.quantity_min,
+        selling_after - selling_now,
+        sold,
+        gain - sold,
+        post_at,
+        None if post_at is None else post_at * (1 - valuer.cut),
+        effort=0,  # Holdings never pay it (#73)
+    )
+
+
 @dataclass
 class _Chain:
     """One craft's reagents, sourced (ADR-0014), down through its Sub-crafts."""
@@ -1663,6 +1884,8 @@ class _Chain:
     via: list[tuple[int, SubCraft]] = field(default_factory=list)  # with how deep
     leftovers: dict[str, Holding] = field(default_factory=dict)
     recipes: Counter[int] = field(default_factory=Counter)  # Sub-crafts per recipe
+    # Its Craft Chain parts (#77), held units and leftovers not valued yet (_Sources.parts).
+    parts: list[_Part] = field(default_factory=list)
 
     def copy(self) -> "_Chain":
         return _Chain(
@@ -1672,6 +1895,7 @@ class _Chain:
             list(self.via),
             dict(self.leftovers),
             Counter(self.recipes),
+            list(self.parts),
         )
 
     def bought(self, key: str) -> int:
@@ -1723,7 +1947,7 @@ class _Sources:
 
     def chain(self, plan: _Plan) -> _Chain | None:
         """One craft of `plan` with its reagents sourced; None if they can't be."""
-        return self._craft(plan, 1, 1, frozenset({plan.output}), _Chain())
+        return self._craft(plan, 1, 1, frozenset({plan.output}), _Chain(), (plan.output,))
 
     def chain_without(self, plan: _Plan, item_key: str) -> _Chain | None:
         """One craft of `plan` with every reagent but `item_key` sourced, and `item_key`
@@ -1733,42 +1957,61 @@ class _Sources:
         path = frozenset({plan.output, item_key})
         for key, n in plan.needs.items():
             if key != item_key and chain is not None:
-                chain = self._source(key, n, 1, path, chain)
+                chain = self._source(key, n, 1, path, chain, (plan.output,))
         return chain
 
     def _craft(
-        self, plan: _Plan, crafts: int, depth: int, path: frozenset[str], chain: _Chain
+        self,
+        plan: _Plan,
+        crafts: int,
+        depth: int,
+        path: frozenset[str],
+        chain: _Chain,
+        at: tuple[str, ...],
     ) -> _Chain | None:
+        """`crafts` crafts of `plan` with their reagents sourced, `at` being the Item Keys
+        from the top output down to this one."""
         for key, n in plan.needs.items():
-            chain = self._source(key, n * crafts, depth, path, chain)
+            chain = self._source(key, n * crafts, depth, path, chain, at)
             if chain is None:
                 return None
         return chain
 
     def _source(
-        self, key: str, n: int, depth: int, path: frozenset[str], chain: _Chain
+        self,
+        key: str,
+        n: int,
+        depth: int,
+        path: frozenset[str],
+        chain: _Chain,
+        at: tuple[str, ...],
     ) -> _Chain | None:
         chain = chain.copy()
         have = Holding() if key in self.under else self.held.get(key, Holding())
         left = _units(have) - chain.taken[key]
         if key in self.merchant:
-            take = min(n, left)
+            take, cost = min(n, left), self.merchant[key]
             chain.taken[key] += take
             chain.merchant[key] += n - take
+            for kind, units in ((NodeKind.USE, take), (NodeKind.MERCHANT, n - take)):
+                if units:
+                    chain.parts.append(_Part(at, kind, key, units, -units * cost))
             return chain
         take = min(n, left) if self.valuer.has_data(key) else 0
         chain.taken[key] += take
+        if take:
+            chain.parts.append(_Part(at, NodeKind.USE, key, take))
         short = n - take
         if not short:
             return chain
-        options = [self._bought(key, short, chain)] + [
-            self._subcrafted(maker, key, short, depth, path, chain)
+        options = [self._bought(key, short, chain, at)] + [
+            self._subcrafted(maker, key, short, depth, path, chain, at)
             for maker in self.makers.get(key, [])
         ]
         options = [option for option in options if option is not None]
         return min(options, key=self.cost) if options else None
 
-    def _bought(self, key: str, short: int, chain: _Chain) -> _Chain | None:
+    def _bought(self, key: str, short: int, chain: _Chain, at: tuple[str, ...]) -> _Chain | None:
         if self.asks is None or key in self.under:
             return None
         bought = cheapest(without(self.asks.get(key, []), chain.asks.get(key, [])), short)
@@ -1776,6 +2019,18 @@ class _Sources:
             return None
         chain = chain.copy()
         chain.asks.setdefault(key, []).extend(bought)
+        effort = self.valuer.effort(key) * short
+        chain.parts.append(
+            _Part(
+                at,
+                NodeKind.BUY,
+                key,
+                short,
+                -(sum(unit * n for unit, n in bought) + effort),
+                max_unit_price=max(unit for unit, _ in bought),
+                effort=effort,
+            )
+        )
         return chain
 
     def may_use(
@@ -1792,19 +2047,31 @@ class _Sources:
         return maker.limit is None or spent + crafts <= maker.limit
 
     def _subcrafted(
-        self, maker: _Plan, key: str, short: int, depth: int, path: frozenset[str], chain: _Chain
+        self,
+        maker: _Plan,
+        key: str,
+        short: int,
+        depth: int,
+        path: frozenset[str],
+        chain: _Chain,
+        at: tuple[str, ...],
     ) -> _Chain | None:
         crafts = math.ceil(short / maker.recipe.quantity_min)
         recipe_id = maker.recipe.recipe_id
         if not self.may_use(maker, key, crafts, depth, path, chain.recipes[recipe_id]):
             return None
-        chain = self._craft(maker, crafts, depth + 1, path | {key}, chain)
+        chain = self._craft(maker, crafts, depth + 1, path | {key}, chain, (*at, key))
         if chain is None:
             return None
         chain.recipes[recipe_id] += crafts
         chain.via.append((depth + 1, SubCraft(key, crafts, maker.character)))
-        leftover = crafts * maker.recipe.quantity_min - short
+        made = crafts * maker.recipe.quantity_min
+        chain.parts.append(
+            _Part(at, NodeKind.CRAFT, key, made, crafts=crafts, character=maker.character)
+        )
+        leftover = made - short
         if leftover:
+            chain.parts.append(_Part((*at, key), NodeKind.LEFTOVER, key, leftover))
             # One whose bind type is unknown counts as bound: it may not sell.
             bound = maker.recipe.bind_type is None or maker.recipe.bind_type in BOUND_ON_CRAFT
             h = Holding(bags_bound=leftover) if bound else Holding(bags=leftover)
@@ -1831,10 +2098,39 @@ class _Sources:
                 continue
             if not chain.taken[key] and key not in chain.leftovers:
                 continue
-            now = _plus(self.held.get(key, Holding()), self.crafted.get(key, Holding()))
-            after = _plus(_take(now, chain.taken[key]), chain.leftovers.get(key, Holding()))
-            cost += self.valuer.worth(key, now) - self.valuer.worth(key, after)
+            given_up, left = self._held_worth(chain, key)
+            cost += given_up - left
         return cost
+
+    def _held_worth(self, chain: _Chain, key: str) -> tuple[float, float]:
+        """What the held units of `key` the chain uses would have brought, and what its
+        leftovers of `key` bring."""
+        now = _plus(self.held.get(key, Holding()), self.crafted.get(key, Holding()))
+        kept = _take(now, chain.taken[key])
+        after = _plus(kept, chain.leftovers.get(key, Holding()))
+        worth = self.valuer.worth(key, kept)
+        return self.valuer.worth(key, now) - worth, self.valuer.worth(key, after) - worth
+
+    def parts(self, chain: _Chain) -> list[_Part]:
+        """The chain's Craft Chain parts, each as `cost` counts it (#77): held units at
+        what they'd have brought and leftovers at what they bring, split across an Item
+        Key's nodes by their units."""
+        worth = {
+            key: self._held_worth(chain, key)
+            for key in {*chain.taken, *chain.leftovers}
+            if key not in self.merchant
+        }
+        parts = []
+        for part in chain.parts:
+            key = part.item_key
+            if part.kind is NodeKind.USE and key in worth:
+                share = part.quantity / chain.taken[key]
+                part = replace(part, gold=-worth[key][0] * share)
+            elif part.kind is NodeKind.LEFTOVER:
+                share = part.quantity / _units(chain.leftovers[key])
+                part = replace(part, gold=worth[key][1] * share)
+            parts.append(part)
+        return parts
 
     def commit(self, plan: _Plan, chain: _Chain) -> None:
         """Take one more craft of `plan` by `chain` out of the live state."""
@@ -1931,6 +2227,7 @@ class _CraftBuy:
     buys: tuple[ReagentBuy, ...]
     selling: int  # output units that Sell
     post_at: float | None  # what they're posted at
+    parts: list[_Part]  # its share of the Craft Chain (#77)
 
     @property
     def per_gold(self) -> float:
@@ -2008,9 +2305,28 @@ def _flip_step(plan: _Plan, sources: _Sources, outlet: _Outlet) -> _CraftBuy | N
         if chain.asks.get(key):
             units = chain.asks[key]
             buys.append(ReagentBuy(key, sum(n for _, n in units), max(unit for unit, _ in units)))
-    value, selling = outlet.value(plan.recipe.quantity_min)
+    units = plan.recipe.quantity_min
+    value, selling = outlet.value(units)
+    vendored = (units - selling) * outlet.vendor_price
+    exits = _exits(
+        plan.output,
+        units,
+        selling,
+        value - vendored,
+        vendored,
+        outlet.post_at,
+        outlet.resale,
+        outlet.effort,
+    )
     return _CraftBuy(
-        plan, gold, value - sources.cost(chain), chain, tuple(buys), selling, outlet.post_at
+        plan,
+        gold,
+        value - sources.cost(chain),
+        chain,
+        tuple(buys),
+        selling,
+        outlet.post_at,
+        sources.parts(chain) + exits,
     )
 
 
@@ -2571,7 +2887,7 @@ def _option(
             plan = plans.setdefault(recipe_id, _Plan(buy.plan.recipe, buy.plan.character))
             plan.crafts += 1
             plan.gain += buy.profit
-            plan.add(buy.chain)
+            plan.add(buy.chain, buy.parts)
             r = rows.get(recipe_id, replace(plan.row(), cost=0))
             selling = buy.selling + (r.made.selling if r.made else 0)
             made = CraftOutput(plan.crafts * plan.recipe.quantity_min, selling, buy.post_at)

@@ -667,6 +667,26 @@ def test_recommend_prints_crafts_with_the_character_and_reagents(tmp_path):
     assert ["2996", "Sell", "1", "9s 99c", "9s 49c", "1", "incl. 1 crafted"] in lines
 
 
+def test_recommend_chain_prints_an_item_keys_craft_chains_as_trees(tmp_path):
+    # #77: the same numbers as the Craft row above, as its Craft Chain.
+    config = _bolts_and_linen(tmp_path)
+    text = run_recommend(config, chain="2996")
+
+    assert text.splitlines()[1:] == [
+        "Holdings: Craft 1 of 2996",
+        "  Sell 1 2996 @ 9s 99c               +9s 49c",
+        "  `- Craft 1 2996 on Kash-Patel x 1  -1s 88c",
+        "     `- Use 2 2589 held              -1s 88c",
+        "  Profit                             +7s 61c",
+    ]
+
+
+def test_recommend_chain_says_when_nothing_crafts_the_item_key(tmp_path):
+    config = _bolts_and_linen(tmp_path)
+
+    assert "No Craft row of 2589." in run_recommend(config, chain="2589")
+
+
 def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),

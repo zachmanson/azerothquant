@@ -20,8 +20,10 @@ from brain.recommend import (
     Blocked,
     BlockReason,
     BuyUnder,
+    ChainNode,
     CharacterHolding,
     Grade,
+    NodeKind,
     ReagentBuy,
     ReagentUse,
     Row,
@@ -2497,6 +2499,194 @@ def test_a_reagent_without_market_data_that_cant_be_sub_crafted_blocks_the_recip
 
     [craft] = [r for r in result[MARKET].holdings if r.item_key == BOLT_KEY]
     assert craft.blocked == Blocked(BlockReason.NO_DATA, BAR_KEY)
+
+
+# --- Craft Chain (#77) ---
+
+
+def contributions(nodes):
+    """The gold of every node but a Craft, which only sums its sources: these add up to
+    the row's Profit."""
+    return sum(
+        (0 if n.kind is NodeKind.CRAFT else n.gold) + contributions(n.children) for n in nodes
+    )
+
+
+def test_a_craft_actions_chain_is_its_exit_over_the_craft_over_the_held_reagents(db):
+    # As in test_held_reagents_are_crafted_when_the_output_is_worth_more.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), vendor_prices={2589: 10}, recipes=[recipe()])],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    use = ChainNode(NodeKind.USE, LINEN_KEY, 2, pytest.approx(-2 * 94.05))
+    top = ChainNode(
+        NodeKind.CRAFT,
+        BOLT_KEY,
+        1,
+        pytest.approx(-2 * 94.05),
+        (use,),
+        crafts=1,
+        character="Kash-Patel",
+    )
+    assert craft.chain == (
+        ChainNode(
+            NodeKind.SELL,
+            BOLT_KEY,
+            1,
+            pytest.approx(949.05),
+            (top,),
+            post_at=999,
+            cut=pytest.approx(999 * 0.05),
+            deposit=pytest.approx(0),
+            effort=0,
+        ),
+    )
+    assert contributions(craft.chain) == pytest.approx(craft.profit)
+
+
+def test_a_flip_to_crafts_chain_uses_the_held_reagents_and_buys_the_rest(db):
+    # As in test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(), money=GOLD, recipes=[recipe()])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    [sell] = craft.chain
+    assert (sell.kind, sell.quantity, sell.post_at) == (NodeKind.SELL, 6, 999)
+    assert sell.gold == pytest.approx(6 * 949.05)
+    [top] = sell.children
+    assert (top.kind, top.quantity, top.crafts) == (NodeKind.CRAFT, 6, 6)
+    assert [(n.kind, n.item_key, n.quantity, n.max_unit_price) for n in top.children] == [
+        (NodeKind.USE, LINEN_KEY, 1, None),
+        (NodeKind.BUY, LINEN_KEY, 11, 100),
+    ]
+    assert [n.gold for n in top.children] == [pytest.approx(-94.05), -1100]
+    assert contributions(craft.chain) == pytest.approx(craft.profit)
+
+
+def test_a_craft_whose_output_outruns_the_sale_horizon_exits_by_sell_and_vendor(db):
+    # A made-up recipe makes 10 Bolts from 2 Linen: 6 Sell within the horizon, 4 Vendor.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=2),
+                vendor_prices={2589: 10, 2996: 15},
+                recipes=[recipe(quantity=10)],
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    sell, vendor = craft.chain
+    assert (sell.kind, sell.quantity, sell.children) == (NodeKind.SELL, 6, ())
+    assert sell.gold == pytest.approx(6 * 949.05)
+    assert (vendor.kind, vendor.quantity, vendor.gold) == (NodeKind.VENDOR, 4, 60)
+    [top] = vendor.children
+    assert (top.kind, top.quantity, top.crafts) == (NodeKind.CRAFT, 10, 1)
+    assert contributions(craft.chain) == pytest.approx(craft.profit)
+
+
+def test_a_sub_craft_is_a_craft_node_over_its_own_sources_and_leftover(db):
+    # As in test_a_sub_crafts_leftover_joins_the_crafted_holdings: the smelt makes 2 Bars
+    # from the held Ore, 1 goes into the Bolt and the other Sells for 46.55.
+    result = run(
+        db,
+        selling((ORE, 100), (BAR, 50), (BOLT, 1000)),
+        [character_read(item(ORE_LINK), recipes=[SMELT_TWO, BOLT_FROM_BAR])],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    [sell] = craft.chain
+    [top] = sell.children
+    [smelt] = top.children
+    assert (smelt.kind, smelt.item_key, smelt.quantity, smelt.crafts, smelt.character) == (
+        NodeKind.CRAFT,
+        BAR_KEY,
+        2,
+        1,
+        "Kash-Patel",
+    )
+    assert [(n.kind, n.item_key, n.quantity) for n in smelt.children] == [
+        (NodeKind.USE, ORE_KEY, 1),
+        (NodeKind.LEFTOVER, BAR_KEY, 1),
+    ]
+    assert [n.gold for n in smelt.children] == [pytest.approx(-94.05), pytest.approx(46.55)]
+    assert smelt.gold == top.gold == pytest.approx(-94.05 + 46.55)
+    assert contributions(craft.chain) == pytest.approx(craft.profit)
+
+
+def test_a_merchant_reagents_held_and_bought_units_are_a_use_and_a_merchant_node(db):
+    # As in test_merchant_reagents_cost_their_merchant_cost_and_missing_ones_are_bought.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                item(count=4),
+                item(THREAD_LINK),
+                recipes=[recipe(reagents=LINEN_AND_THREAD)],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    [top] = craft.chain[0].children
+    assert [(n.kind, n.item_key, n.quantity, n.gold) for n in top.children] == [
+        (NodeKind.USE, LINEN_KEY, 4, pytest.approx(-4 * 94.05)),
+        (NodeKind.USE, THREAD_KEY, 1, -10),
+        (NodeKind.MERCHANT, THREAD_KEY, 1, -10),
+    ]
+    assert contributions(craft.chain) == pytest.approx(craft.profit)
+
+
+def test_a_blocked_crafts_chain_is_one_craft_with_the_blocking_reagent_marked(db):
+    # As in test_a_reagent_without_market_data_that_cant_be_sub_crafted_blocks_the_recipe.
+    result = run(
+        db,
+        selling((ORE, 100), (BOLT, 1000)),
+        [character_read(item(BAR_LINK, count=2), recipes=[BOLT_FROM_BARS])],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.item_key == BOLT_KEY]
+    blocked = Blocked(BlockReason.NO_DATA, BAR_KEY)
+    assert craft.chain == (
+        ChainNode(
+            NodeKind.CRAFT,
+            BOLT_KEY,
+            1,
+            None,
+            (ChainNode(NodeKind.USE, BAR_KEY, 2, None, blocked=blocked),),
+            crafts=1,
+            character="Kash-Patel",
+        ),
+    )
+
+
+def test_a_craft_of_unknown_bind_type_is_blocked_on_its_craft_node(db):
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(count=2), recipes=[recipe(bind_type=None)])],
+    )
+
+    [craft] = [r for r in result[MARKET].holdings if r.action is Action.CRAFT]
+    [top] = craft.chain
+    assert (top.kind, top.crafts, top.blocked) == (
+        NodeKind.CRAFT,
+        1,
+        Blocked(BlockReason.UNKNOWN_BIND_TYPE),
+    )
+    [use] = top.children
+    assert (use.kind, use.quantity, use.gold) == (NodeKind.USE, 2, pytest.approx(-2 * 94.05))
+    assert top.gold == use.gold
 
 
 # --- Predictions (#26) ---

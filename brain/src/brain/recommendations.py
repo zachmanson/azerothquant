@@ -37,6 +37,7 @@ from brain.recommend import (
     Action,
     Blocked,
     BuyUnder,
+    ChainNode,
     MarketRecommendations,
     ReagentBuy,
     Row,
@@ -64,6 +65,14 @@ _HEADER = (
     '-- blocked = { reason = "noData", itemKey } or { reason = "unknownBindType" }.\n'
     "-- A Craft that crafts a short reagent first lists those Sub-crafts, deepest first,\n"
     "-- as via = { { itemKey, crafts, character } }; uses and buys cover the whole chain.\n"
+    "-- Every Craft row has its Craft Chain as chain = { node }: its exits (sell or vendor),\n"
+    "-- the last with the craft as its one child, over the sources that feed it. A node is\n"
+    '-- { kind = "sell"|"vendor"|"craft"|"use"|"buy"|"merchant"|"leftover", itemKey,\n'
+    "-- quantity (the row's total), gold (signed; nil where unknown), children }. A craft\n"
+    "-- also has crafts and character, a sell postAt, cut, deposit and effort, a buy\n"
+    "-- maxUnitPrice and effort, and the node that blocks a row blocked. Every node's gold\n"
+    "-- but a craft's (the sum of its children's) adds up to the row's profit. A blocked\n"
+    "-- row's chain is one craft, as it would be sourced, with no exit.\n"
     "-- A Holdings Sell or Vendor row whose units were bought on the Auction House has\n"
     "-- paid (per unit), paidUnits (how many units that covers), roi (a share, after\n"
     "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
@@ -178,6 +187,34 @@ def _row(row: Row) -> dict[str, object]:
         out["via"] = [
             {"itemKey": v.item_key, "crafts": v.crafts, "character": v.character} for v in row.via
         ]
+    if row.chain:
+        out["chain"] = [_node(n) for n in row.chain]
+    return out
+
+
+_NODE_KEYS = {
+    "quantity": "quantity",
+    "gold": "gold",
+    "crafts": "crafts",
+    "character": "character",
+    "post_at": "postAt",
+    "max_unit_price": "maxUnitPrice",
+    "cut": "cut",
+    "deposit": "deposit",
+    "effort": "effort",
+}
+
+
+def _node(node: ChainNode) -> dict[str, object]:
+    out: dict[str, object] = {"kind": str(node.kind), "itemKey": node.item_key}
+    for field, key in _NODE_KEYS.items():
+        value = getattr(node, field)
+        if value is not None and value != "":
+            out[key] = value
+    if node.blocked:
+        out["blocked"] = _blocked(node.blocked)
+    if node.children:
+        out["children"] = [_node(c) for c in node.children]
     return out
 
 

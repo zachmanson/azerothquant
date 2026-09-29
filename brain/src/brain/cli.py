@@ -19,7 +19,7 @@ import os
 import sqlite3
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -46,7 +46,9 @@ from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import (
     Action,
     BuyUnder,
+    ChainNode,
     MarketRecommendations,
+    NodeKind,
     Row,
     held_units,
     per_click,
@@ -243,12 +245,12 @@ def _import_once(config: Config) -> int:
     return 1 if any(r.error is not None for r in results) else 0
 
 
-def _recommend(config: Config) -> int:
+def _recommend(config: Config, chain: str | None = None) -> int:
     if not config.history_path.exists():
         log.error("No history at %s yet; run `brain import` first", config.history_path)
         return 1
     try:
-        text = run_recommend(config)
+        text = run_recommend(config, chain)
     except sqlite3.Error as e:
         log.error("Couldn't read the history: %s", e)
         return 1
@@ -419,13 +421,16 @@ def _mean_qty(c: MatCheck) -> str:
     return f"{c.qty:.2f} ({low:.2f} to {high:.2f})"
 
 
-def run_recommend(config: Config) -> str:
-    """The Recommendations for every Market the player has Characters in, as text."""
+def run_recommend(config: Config, chain: str | None = None) -> str:
+    """The Recommendations for every Market the player has Characters in, as text, or
+    with `chain` an Item Key's Craft rows as their Craft Chains (#77)."""
     predictions = load_predictions(config.predictions_path)
     with closing(open_history(config.history_path)) as conn:
         markets = recommend(conn, config, predictions)
     if not markets:
         return "No Character has a Market with a Scan yet.\n"
+    if chain is not None:
+        return "\n".join(_render_chains(m, chain) for m in markets)
     range_days = config.sell_rate_range_seconds // 86400
     return "\n".join(_render_market(m, range_days) for m in markets)
 
@@ -544,6 +549,62 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         f"{record}\n"
         f"{graded}"
     )
+
+
+def _render_chains(m: MarketRecommendations, item_key: str) -> str:
+    market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})\n"
+    crafts = [
+        (where, r)
+        for where, rows in (("Holdings", m.holdings), ("Shopping List", m.shopping_list))
+        for r in rows
+        if r.item_key == item_key and r.action is Action.CRAFT
+    ]
+    if not crafts:
+        return f"{market}No Craft row of {item_key}.\n"
+    return market + "\n".join(
+        _render_chain(f"{where}: Craft {r.quantity} of {item_key}", r) for where, r in crafts
+    )
+
+
+def _render_chain(title: str, row: Row) -> str:
+    """A Craft row's Craft Chain as a tree, as the Addon's panel draws it (#77)."""
+    lines: list[tuple[str, str]] = []
+
+    def walk(nodes: Sequence[ChainNode], indent: str, connected: bool) -> None:
+        for i, node in enumerate(nodes):
+            last = i == len(nodes) - 1
+            connector = ("`- " if last else "|- ") if connected else ""
+            lines.append((indent + connector + _node_label(node), _signed(node.gold)))
+            below = indent + (("   " if last else "|  ") if connected else "")
+            walk(node.children, below, True)
+
+    walk(row.chain, "", False)
+    lines.append(("Profit", _signed(row.profit)))
+    width = max(len(label) for label, _ in lines)
+    return f"{title}\n" + "".join(
+        f"  {label.ljust(width)}  {gold}".rstrip() + "\n" for label, gold in lines
+    )
+
+
+def _node_label(node: ChainNode) -> str:
+    what = f"{node.quantity} {node.item_key}"
+    label = {
+        NodeKind.SELL: f"Sell {what} @ {_money(node.post_at)}",
+        NodeKind.VENDOR: f"Vendor {what}",
+        NodeKind.CRAFT: f"Craft {what} on {node.character} x {node.crafts}",
+        NodeKind.USE: f"Use {what} held",
+        NodeKind.BUY: f"Buy {what} AH <= {_money(node.max_unit_price)}",
+        NodeKind.MERCHANT: f"Merchant {what}",
+        NodeKind.LEFTOVER: f"Leftover {what}",
+        NodeKind.DISENCHANT: f"Disenchant {what}",
+    }[node.kind]
+    return f"{label} (blocked: {node.blocked})" if node.blocked else label
+
+
+def _signed(copper: float | None) -> str:
+    if copper is None:
+        return "?"
+    return _money(copper) if copper < 0 else "+" + _money(copper)
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> str:
@@ -675,7 +736,12 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("import", help="import every SavedVariables file once")
     commands.add_parser("watch", help="import SavedVariables files whenever they change")
     commands.add_parser("rebuild", help="recreate the history database from the Archive")
-    commands.add_parser("recommend", help="print what to do with Holdings, and what to buy")
+    recommending = commands.add_parser(
+        "recommend", help="print what to do with Holdings, and what to buy"
+    )
+    recommending.add_argument(
+        "--chain", metavar="ITEM_KEY", help="print the Craft Chains of an Item Key's Craft rows"
+    )
     replaying = commands.add_parser(
         "replay", help="grade the Brain against Auctionator and emulated TSM on past Scans"
     )
@@ -698,7 +764,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rebuild":
         return _rebuild(config)
     if args.command == "recommend":
-        return _recommend(config)
+        return _recommend(config, args.chain)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
     if args.command == "disenchants":

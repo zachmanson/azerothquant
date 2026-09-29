@@ -24,6 +24,8 @@ The reagent-source function (`_Sources` in recommend.py) is where a Disenchant s
 
 **Rows.** One Craft row per top recipe. Its `via` lists the Sub-crafts, deepest first, as `{ itemKey, crafts, character }`. `uses` and `buys` aggregate the raw held and bought reagents across the whole chain, and the profit sits on the top row: Sub-crafts aren't rows of their own. The CLI note reads `on X: uses 20 of 2770, via 10 of 2840 on Y`. The Addon shows `Craft 10 Copper Bar on Y` lines before the Use/Buy lines in both tooltips; the Note cell is unchanged.
 
+*Amended by #77:* every Craft row also carries its Craft Chain as `chain`: a tree of nodes (`kind` sell/vendor/craft/use/buy/merchant/leftover, `itemKey`, row-total `quantity`, signed `gold`, `children`), built from the sourcing as it's chosen, so the Addon never rebuilds it from `via`/`uses`/`buys`. Those stay, because the tooltips and the Mail lines read them. Every node's gold but a craft's adds up to the row's profit. `brain recommend --chain <itemKey>` prints the same tree.
+
 ## Considered Options
 
 - **Forward valuation**: an output is worth max(Sell/Vendor, crafting it further). What the glossary's Best Exit Value first promised, but it breaks the marginal Sell-room valuation: an output's worth would depend on crafts that compete for the same room and reagents, and every row's reasoning would reach into other rows.
