@@ -3,12 +3,14 @@
 -- All shaping happens in RecommendationTable.lua; this file only draws it and talks to the
 -- WoW API. It opens next to a faction Auction House (not a Neutral one, whose Market the
 -- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, the tab
--- last picked and each Market's Budget are saved in AzerothQuantDB; open/closed is not.
+-- last picked and each Market's Budget and Days to Sell are saved in AzerothQuantDB;
+-- open/closed is not.
 --
 -- Read-only: hover shows a tooltip, a click selects the row and shift-click links the item
 -- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the left (#77).
 -- The Budget box (#86) only saves what the player will spend: the table hides options over
--- it at once, and Character.lua hands it to the Brain in the next Character Read.
+-- it at once, and Character.lua hands it to the Brain in the next Character Read. The Days
+-- to Sell box (#109) is saved and handed over the same way, and changes nothing until then.
 local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
 local CraftChain = ns.CraftChain
@@ -62,14 +64,19 @@ local selectedId
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local getItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
 
--- Where the logged-in Character's Market's Budget is saved in AzerothQuantDB.budgets.
-local function budgetKey()
-  return RecommendationTable.budgetKey(GetRealmName(), UnitFactionGroup("player") or "")
+-- The logged-in Character's Market's key in AzerothQuantDB.budgets and .daysToSell.
+local function marketKey()
+  return RecommendationTable.marketKey(GetRealmName(), UnitFactionGroup("player") or "")
 end
 
 -- That Budget in copper, or nil for all the gold.
 local function savedBudget()
-  return db.budgets and db.budgets[budgetKey()]
+  return db.budgets and db.budgets[marketKey()]
+end
+
+-- The Market's Days to Sell, saved under the same key in AzerothQuantDB.daysToSell, or nil.
+local function savedDaysToSell()
+  return db.daysToSell and db.daysToSell[marketKey()]
 end
 
 -- The item's name, or nil until the client has loaded it (GET_ITEM_INFO_RECEIVED follows).
@@ -640,42 +647,79 @@ end
 local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Prediction buys. "
   .. "Blank for all your gold. Options over it hide now; Reload to re-size the rest."
 
--- Left of the Reload button. Enter saves it (blank clears it); Escape puts it back.
-local function createBudgetBox(button)
+local DAYS_TIP = "Most days a unit you buy to Sell may take to sell: caps Flips to Sell, "
+  .. "Flips to Craft and Buy Unders. Blank for the Sale Horizon, never more than it. "
+  .. "Reload to re-size."
+
+-- A box left of `anchor` for one per-Market setting. Enter saves it (blank clears it);
+-- Escape puts it back. setting: { label, width, tip, hint, parse, text, saved, save },
+-- where parse(text) returns the value and whether it's ok, and text(value) shows it.
+local function createSettingBox(anchor, setting)
   local box = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
-  box:SetSize(60, 20)
+  box:SetSize(setting.width, 20)
   box:SetAutoFocus(false)
   box:SetMaxLetters(10)
-  box:SetPoint("RIGHT", button, "LEFT", -10, 0)
+  box:SetPoint("RIGHT", anchor, "LEFT", -10, 0)
   box.label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   box.label:SetPoint("RIGHT", box, "LEFT", -8, 0)
-  box.label:SetText("Budget (g)")
+  box.label:SetText(setting.label)
   box:SetScript("OnEnterPressed", function(self)
-    local copper, ok = Money.parseGold(self:GetText())
+    local value, ok = setting.parse(self:GetText())
     if ok then
-      db.budgets = db.budgets or {}
-      db.budgets[budgetKey()] = copper
-      redraw()
+      setting.save(value)
     else
-      Chat.say("Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.")
+      Chat.say(setting.hint)
     end
-    self:SetText(Money.goldText(savedBudget()))
+    self:SetText(setting.text(setting.saved()))
     self:ClearFocus()
   end)
   box:SetScript("OnEscapePressed", function(self)
-    self:SetText(Money.goldText(savedBudget()))
+    self:SetText(setting.text(setting.saved()))
     self:ClearFocus()
   end)
   box:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText(BUDGET_TIP, 1, 1, 1, 1, true)
+    GameTooltip:SetText(setting.tip, 1, 1, 1, 1, true)
     GameTooltip:Show()
   end)
   box:SetScript("OnLeave", GameTooltip_Hide)
   box:SetScript("OnShow", function(self)
-    self:SetText(Money.goldText(savedBudget()))
+    self:SetText(setting.text(setting.saved()))
   end)
-  frame.budget = box
+  return box
+end
+
+local function createBudgetBox(button)
+  frame.budget = createSettingBox(button, {
+    label = "Budget (g)",
+    width = 60,
+    tip = BUDGET_TIP,
+    hint = "Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.",
+    parse = Money.parseGold,
+    text = Money.goldText,
+    saved = savedBudget,
+    save = function(copper)
+      db.budgets = db.budgets or {}
+      db.budgets[marketKey()] = copper
+      redraw()
+    end,
+  })
+end
+
+local function createDaysToSellBox()
+  frame.daysToSell = createSettingBox(frame.budget.label, {
+    label = "Days to Sell",
+    width = 36,
+    tip = DAYS_TIP,
+    hint = "Days to Sell: type days over 0, like 2 or 0.5, or leave it blank for the Sale Horizon.",
+    parse = RecommendationTable.parseDays,
+    text = RecommendationTable.daysText,
+    saved = savedDaysToSell,
+    save = function(days)
+      db.daysToSell = db.daysToSell or {}
+      db.daysToSell[marketKey()] = days
+    end,
+  })
 end
 
 local function createReloadButton()
@@ -693,11 +737,12 @@ local function createReloadButton()
   end)
   button:SetScript("OnLeave", GameTooltip_Hide)
   createBudgetBox(button)
+  createDaysToSellBox()
 
-  -- Scans the table doesn't reflect yet, in orange left of the Budget box, and the button
-  -- lights up.
+  -- Scans the table doesn't reflect yet, in orange left of the Days to Sell box, and the
+  -- button lights up.
   local note = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  note:SetPoint("RIGHT", frame.budget.label, "LEFT", -8, 0)
+  note:SetPoint("RIGHT", frame.daysToSell.label, "LEFT", -8, 0)
   note:SetTextColor(1, 0.5, 0.25)
 
   -- Pulses once the Brain should have imported the Scans saved at load (#71).

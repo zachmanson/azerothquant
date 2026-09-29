@@ -67,8 +67,9 @@ local function itemInfo(slotLists)
   return infos
 end
 
--- who: { readAt, realm, character, faction, money, budget }, where budget is the copper the
--- player will spend in this Character's Market (#86), or nil for all its gold.
+-- who: { readAt, realm, character, faction, money, budget, daysToSell }, where budget is the
+-- copper the player will spend in this Character's Market (#86), or nil for all its gold,
+-- and daysToSell the days a unit bought to Sell may take to sell there (#109), or nil.
 -- bagSlots: one per slot, { bag, slot, info, sellPrice, itemInfo }, where info is what
 -- C_Container.GetContainerItemInfo returns (nil for an empty slot), sellPrice is the
 -- item's Vendor Price and itemInfo its { quality, itemLevel, classID, equipLoc }, both
@@ -93,6 +94,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList, m
     faction = who.faction,
     money = who.money,
     budget = who.budget,
+    daysToSell = who.daysToSell,
     bags = items(bagSlots),
     bankReadAt = bank and bank.readAt,
     bank = bank and items(bank.slots),

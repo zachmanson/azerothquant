@@ -108,6 +108,7 @@ def character_read(
     professions=(TAILORING,),
     bank=None,
     budget=None,
+    days_to_sell=None,
 ):
     read = {
         "readAt": at,
@@ -130,6 +131,8 @@ def character_read(
         read |= {"bankReadAt": at, "bank": list(bank)}
     if budget is not None:
         read["budget"] = budget
+    if days_to_sell is not None:
+        read["daysToSell"] = days_to_sell
     return read
 
 
@@ -927,6 +930,70 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
         ("2770", None, None),
         ("6303", None, None),
     ]
+
+
+# --- Days to Sell (#109, ADR-0020) ---
+
+
+@pytest.mark.parametrize(
+    ("days_to_sell", "bought"), [(None, 7 * 48 - 2), (1, 48 - 2), (30, 7 * 48 - 2)]
+)
+def test_days_to_sell_caps_a_flip_to_sell_at_what_sells_in_it_after_the_held_units(
+    db, days_to_sell, bought
+):
+    # 48 Linen sell a day. With a 7-day Sale Horizon a Flip to Sell buys a week of them
+    # less the 2 held, the 200s and 400s; Days to Sell of 1 buys a day's, the 200s only.
+    # One over the Sale Horizon is the Sale Horizon.
+    ladder = (row(quantity=46, unit=200), row(quantity=288, unit=400))
+    result = run(
+        db,
+        selling_two_linen_an_hour(*ladder, unit=1000),
+        [character_read(item(count=2), money=GOLD, days_to_sell=days_to_sell)],
+        config=replace(CONFIG, sale_horizon_seconds=7 * DAY),
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity) == (Action.SELL, bought)
+
+
+def test_days_to_sell_leaves_the_held_units_on_the_sale_horizon(db, other_db):
+    # 6 of the 10 held Linen sell within the 3 h Sale Horizon, the rest Vendor, whatever
+    # Days to Sell says: it only caps buys (ADR-0020).
+    def holdings(conn, days_to_sell):
+        reads = [
+            character_read(item(count=10), vendor_prices={2589: 10}, days_to_sell=days_to_sell)
+        ]
+        return run(conn, selling_two_linen_an_hour(), reads)[MARKET].holdings
+
+    assert holdings(db, 1 / 24) == holdings(other_db, None)
+    assert [(r.action, r.quantity) for r in holdings(other_db, None)] == [
+        (Action.SELL, 6),
+        (Action.VENDOR, 4),
+    ]
+
+
+def test_days_to_sell_caps_a_flip_to_crafts_sell_room(db):
+    # 6 Bolts sell within the 3 h Sale Horizon, but only 3 in Days to Sell of 1.5 h. Past
+    # it they'd Vendor, and they have no Vendor Price.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(item(), money=GOLD, recipes=[recipe()], days_to_sell=1.5 / 24)],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.action, craft.quantity) == (Action.CRAFT, 3)
+
+
+def test_days_to_sell_caps_a_buy_unders_sell_units(db):
+    # 7 Linen sell an hour and 5 are held: 16 in the 3 h Sale Horizon, 2 in 1 h.
+    result = run(
+        db,
+        linen_sold_under_1000(),
+        [character_read(item(count=5), days_to_sell=1 / 24)],
+    )
+
+    assert [(b.way, b.units) for b in result[MARKET].buy_under] == [(Action.SELL, 2)]
 
 
 # --- Per click, Per day and ROI (#98) ---

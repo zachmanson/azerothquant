@@ -195,6 +195,39 @@ def test_the_brains_flips_to_sell_are_graded_by_what_they_resell_for(db):
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(5 * 999 * 0.95 - 5 * 200)
 
 
+def test_the_brain_buys_with_the_days_to_sell_set_as_of_each_replayed_scan(db):
+    # #109: Days to Sell of 1 h at the replayed Scan: 2 Linen sell in it, so the 200s are
+    # bought and posted under the 500s. It's cleared by a Read after the Scan, which the
+    # replay doesn't see.
+    result = run(
+        db,
+        linen_selling_then_crashing(
+            row(quantity=2, unit=200), row(quantity=3, unit=500), unit=1000
+        ),
+        [
+            character_read(money=10_000, vendor_prices={2589: 10}) | {"daysToSell": 1 / 24},
+            character_read(money=10_000, vendor_prices={2589: 10}, at=T0 + 2 * HOUR),
+        ],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(2 * 499 * 0.95 - 2 * 200)
+
+
+def test_days_to_sell_leaves_the_held_units_graded_over_the_sale_horizon(db):
+    # As without it: the 6 held units that sell within 3 h are posted and all 6 sell.
+    result = run(
+        db,
+        linen_selling_then_crashing(),
+        [character_read(item(count=10), vendor_prices={2589: 10}) | {"daysToSell": 1 / 24}],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(6 * 99 * 0.95 - 6 * 19 * 0.95)
+
+
 ORE = "item:2770::::::::20:1490"
 
 

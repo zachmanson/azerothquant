@@ -33,6 +33,16 @@ describe("CharacterRead.build", function()
     assert.is_nil(CharacterRead.build(WHO, {}).budget)
   end)
 
+  it("carries the Market's Days to Sell when the player set one (#109)", function()
+    local who = { daysToSell = 0.5 }
+    for k, v in pairs(WHO) do
+      who[k] = v
+    end
+
+    assert.are.equal(0.5, CharacterRead.build(who, {}).daysToSell)
+    assert.is_nil(CharacterRead.build(WHO, {}).daysToSell)
+  end)
+
   it("keeps each filled slot's link, count and whether it's bound, and skips empty slots", function()
     local read = CharacterRead.build(WHO, {
       { bag = 0, slot = 1, info = { hyperlink = LINEN, stackCount = 20, isBound = false, iconFileID = 132889 } },

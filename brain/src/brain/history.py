@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS character_read (
     bank_read_at INTEGER,      -- when the bank was last read while open
     has_profession_list INTEGER NOT NULL DEFAULT 0, -- 0 or 1: the client said which
     budget INTEGER,            -- copper: the Market's Budget as set then; NULL for none
+    days_to_sell REAL,         -- the Market's Days to Sell as set then; NULL for none
     UNIQUE (era, realm, character, read_at)
 );
 
@@ -379,6 +380,7 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     _add_column(conn, "character_read", "has_profession_list", "INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "auction_mail", "deposit", "INTEGER")  # #78
     _add_column(conn, "character_read", "budget", "INTEGER")  # #86
+    _add_column(conn, "character_read", "days_to_sell", "REAL")  # #109
     _add_column(conn, "known_profession", "skill_level", "INTEGER")  # #76
     _add_column(conn, "known_profession", "max_skill_level", "INTEGER")  # #76
     return conn
@@ -754,13 +756,20 @@ def _import_character_read(
     budget = raw.get("budget")
     if isinstance(budget, bool) or not isinstance(budget, int) or budget < 0:
         budget = None
+    days_to_sell = raw.get("daysToSell")
+    if (
+        isinstance(days_to_sell, bool)
+        or not isinstance(days_to_sell, (int, float))
+        or not 0 < days_to_sell < math.inf
+    ):
+        days_to_sell = None
     if not isinstance(faction, str) or not isinstance(money, int) or isinstance(money, bool):
         # Kept, with its items, but its gold can't be pooled.
         faction = money = None
     cursor = conn.execute(
         "INSERT OR IGNORE INTO character_read (era, realm, character, read_at, faction,"
-        " money, has_bank, bank_read_at, has_profession_list, budget)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " money, has_bank, bank_read_at, has_profession_list, budget, days_to_sell)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             era.value,
             raw["realm"],
@@ -772,6 +781,7 @@ def _import_character_read(
             raw.get("bankReadAt") if has_bank else None,
             profession_ids is not None,
             budget,
+            days_to_sell,
         ),
     )
     if not cursor.rowcount:
@@ -1304,6 +1314,19 @@ def market_budget(
         (era.value, realm, faction, at, at),
     ).fetchone()
     return row[0] if row else None
+
+
+def market_days_to_sell(
+    conn: sqlite3.Connection, era: Era, realm: str, faction: str, at: int | None = None
+) -> int | None:
+    """The Days to Sell the player set for the realm and faction, in seconds, as the
+    Market's latest Character Read (up to `at`) carried it (#109). None means not set."""
+    row = conn.execute(
+        "SELECT days_to_sell FROM character_read WHERE era = ? AND realm = ? AND faction = ?"
+        " AND (? IS NULL OR read_at <= ?) ORDER BY read_at DESC, id DESC LIMIT 1",
+        (era.value, realm, faction, at, at),
+    ).fetchone()
+    return None if row is None or row[0] is None else round(row[0] * 86400)
 
 
 def character_markets(conn: sqlite3.Connection) -> dict[Market, list[str]]:

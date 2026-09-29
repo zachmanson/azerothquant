@@ -196,6 +196,17 @@ class Config:
     # ADR-0015). Always on outside it: not read from config.toml.
     flips_to_craft: bool = True
     deposits: bool = True
+    # The Market's Days to Sell, set in game and read per Market with the Budget (#109,
+    # ADR-0020); None for not set. Not read from config.toml.
+    days_to_sell_seconds: int | None = None
+
+    @property
+    def days_to_sell_or_horizon_seconds(self) -> int:
+        """How long a unit bought to Sell may take to sell: Days to Sell, clamped to the
+        Sale Horizon, which it is when not set."""
+        if self.days_to_sell_seconds is None:
+            return self.sale_horizon_seconds
+        return min(self.days_to_sell_seconds, self.sale_horizon_seconds)
 
 
 def load_config(path: Path) -> Config:

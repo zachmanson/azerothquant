@@ -34,6 +34,7 @@ from brain.history import (
     known_recipes,
     listings,
     market_budget,
+    market_days_to_sell,
     merchant_costs,
     outcomes,
     pooled_gold,
@@ -451,6 +452,8 @@ def recommend_market(
     `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
     the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click."""
     characters = character_markets(conn).get(market, [])
+    days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
+    config = replace(config, days_to_sell_seconds=days_to_sell)
     today = date.fromtimestamp(now)
     active = [p for p in predictions if p.active_on(today)]
     under = {k: p.name for p in active for k in p.item_keys}
@@ -742,12 +745,12 @@ def _craft_way(item_key: str, plan: "_Plan", sources: "_Sources", config: Config
 def _sell_way(item_key: str, valuer: "_Valuer", config: Config) -> _WayOut | None:
     """One more unit posted as a Flip would post it (`_Valuer.flip_post_at`), after the
     cut, the effort of posting it and the deposits it's expected to lose queued behind the
-    unbound held units. It's good for what sells within the Sale Horizon after them,
-    counting only the Sale Events at or above that price (#107)."""
+    unbound held units. It's good for what sells within Days to Sell (#109) after
+    them, counting only the Sale Events at or above that price (#107)."""
     held = valuer.held.get(item_key, 0)
     post_at = valuer.flip_post_at(item_key)
     demand = _demand_at(valuer.rates.get(item_key), post_at)
-    room = _flip_room(demand, config) - held
+    room = _flip_room(demand, config, config.days_to_sell_or_horizon_seconds) - held
     if room <= 0:
         return None
     lost = _flip_queue(valuer.queue(item_key, flips=True), demand, config).lost(held)
@@ -2193,16 +2196,16 @@ def _outlet(
     config: Config,
     pricer: Callable[[int | None], float | None] | None = None,
 ) -> _Outlet:
-    """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
-    within the Sale Horizon under the Flip priors, less the `held` units, counting only
-    the Sale Events at or above its post price (#107), and its units wait in the `queue`
-    at that rate. It resells like them, posted under the cheapest other Listing, as if the
-    Flip to Craft were the only buy (#86), and never above what a merchant charges (#63).
-    `others` is other players' asks. A `pricer` (`_Valuer.priced`) sets the post price
-    instead, with no room limit (#84)."""
+    """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells within
+    Days to Sell (#109) under the Flip priors, less the `held` units,
+    counting only the Sale Events at or above its post price (#107), and its units wait in
+    the `queue` at that rate. It resells like them, posted under the cheapest other Listing,
+    as if the Flip to Craft were the only buy (#86), and never above what a merchant charges
+    (#63). `others` is other players' asks. A `pricer` (`_Valuer.priced`) sets the post
+    price instead, with no room limit (#84)."""
     if pricer is None:
         post_at = _post_at(supply, others, [], config, merchant_cost)
-        room = _flip_room(_demand_at(rate, post_at), config)
+        room = _flip_room(_demand_at(rate, post_at), config, config.days_to_sell_or_horizon_seconds)
     else:
         post_at = pricer(min((unit for unit, _ in others), default=None))
         room = 0 if post_at is None else math.inf
@@ -2551,19 +2554,19 @@ def _flips(
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
 
-    Buy to Sell takes no more than sells within the Sale Horizon after the `held`
-    unbound units, which take it first (#67), and posts just under the cheapest other
-    player's Listing left once they're bought (`_post_at`), so they sell first. A cheap
-    Listing that would undercut the resale is worth buying through, so every run of the
-    cheapest offers is tried, and the one with the most profit whose every unit clears
-    the Flip margin is bought (#62); the shorter runs that clear it are kept for when
-    gold can't buy that one (ADR-0011). Each run counts only the Sale Events at or above
-    its post price (#107), both for the minimum of Sale Events for a Flip (#57) and for
-    what sells within the Sale Horizon, so a lone ask far above every sale isn't taken at
-    its word (#41). The post price never falls as a run grows, so neither does the room
-    grow. The resale is never above what a merchant charges (#63). Anything else under
-    the Vendor Price is bought to Vendor. Each unit bought costs the `effort` of buying
-    it, and one bought to Sell the effort of posting it too (#73), and the deposits it's
+    Buy to Sell takes no more than sells within Days to Sell (#109) after
+    the `held` unbound units, which take it first (#67), and posts just under the cheapest
+    other player's Listing left once they're bought (`_post_at`), so they sell first. A
+    cheap Listing that would undercut the resale is worth buying through, so every run of
+    the cheapest offers is tried, and the one with the most profit whose every unit clears
+    the Flip margin is bought (#62); the shorter runs that clear it are kept for when gold
+    can't buy that one (ADR-0011). Each run counts only the Sale Events at or above its post
+    price (#107), both for the minimum of Sale Events for a Flip (#57) and for what sells
+    within Days to Sell (#109), so a lone ask far above every sale isn't
+    taken at its word (#41). The post price never falls as a run grows, so neither does the
+    room grow. The resale is never above what a merchant charges (#63). Anything else under
+    the Vendor Price is bought to Vendor. Each unit bought costs the `effort` of buying it,
+    and one bought to Sell the effort of posting it too (#73), and the deposits it's
     expected to lose waiting its turn in the `queue` after the `held` units (#78), at the
     Sell Rate at its post price.
 
@@ -2586,7 +2589,9 @@ def _flips(
                 bought,
                 _undercut(after[i + 1], own, config, merchant_cost),
                 _undercut(unit, own, config, merchant_cost),
-                lambda price: _room_at(rate, price, held, config),
+                lambda price: _room_at(
+                    rate, price, held, config, config.days_to_sell_or_horizon_seconds
+                ),
             )
         else:
             take, post_at = quantity, pricer(after[i + 1])
@@ -2662,7 +2667,7 @@ def _hold_buys(
                 queued - held,
                 _post_at(supply, offers, [*bought, (unit, quantity)], config, merchant_cost),
                 _post_at(supply, offers, [*bought, (unit, quantity - 1)], config, merchant_cost),
-                lambda price: _room_at(rate, price, held, config),
+                lambda price: _room_at(rate, price, held, config, config.sale_horizon_seconds),
             )
         resale = post_at * (1 - cut) if take else 0
         at_price = _flip_queue(queue, _demand_at(rate, post_at), config)
@@ -2726,10 +2731,12 @@ def _demand_at(rate: SellRate | None, post_at: float | None) -> SellRate | None:
     return None if rate is None or post_at is None else rate.at_or_above(post_at)
 
 
-def _room_at(rate: SellRate | None, post_at: float | None, held: int, config: Config) -> int:
-    """Units bought to Sell at `post_at` that should sell within the Sale Horizon after the
+def _room_at(
+    rate: SellRate | None, post_at: float | None, held: int, config: Config, horizon_seconds: int
+) -> int:
+    """Units bought at `post_at` that should sell within `horizon_seconds` after the
     `held` ones, from the demand at that price (`_demand_at`, `_flip_room`)."""
-    return max(0, _flip_room(_demand_at(rate, post_at), config) - held)
+    return max(0, _flip_room(_demand_at(rate, post_at), config, horizon_seconds) - held)
 
 
 def _flip_queue(queue: _Queue, demand: SellRate | None, config: Config) -> _Queue:
@@ -2740,17 +2747,19 @@ def _flip_queue(queue: _Queue, demand: SellRate | None, config: Config) -> _Queu
     return replace(queue, units_per_hour=per_day / 24)
 
 
-def _flip_room(rate: SellRate | None, config: Config) -> int:
-    """Units bought to resell that should sell within the Sale Horizon, judged under the
-    Flip priors. None unless the Sell Rate rests on the minimum of Sale Events for a
-    Flip: one or two Disappearances can be one seller cancelling (#57)."""
+def _flip_room(rate: SellRate | None, config: Config, horizon_seconds: int) -> int:
+    """Units bought to resell that should sell within `horizon_seconds`, judged under the
+    Flip priors. That's Days to Sell (`Config.days_to_sell_or_horizon_seconds`, #109) for
+    a unit bought to Sell, and the Sale Horizon for one bought to Hold. None unless the Sell Rate
+    rests on the minimum of Sale Events for a Flip: one or two Disappearances can be one
+    seller cancelling (#57)."""
     if rate is None or rate.sale_events < config.flip_min_sale_events:
         return 0
     return sellable_units(
         rate,
         config.sell_rate_prior_hours_flips,
         config.sale_size_prior_events_flips,
-        config.sale_horizon_seconds,
+        horizon_seconds,
     )
 
 

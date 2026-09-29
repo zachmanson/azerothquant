@@ -199,13 +199,15 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     end
     disenchants:flush()
     local realm, faction = GetRealmName(), UnitFactionGroup("player")
+    local market = faction and RecommendationTable.marketKey(realm, faction)
     local read = CharacterRead.build({
       readAt = time(),
       realm = realm,
       character = table.concat({ UnitFullName("player") }, "-"),
       faction = faction,
       money = carried.money,
-      budget = faction and db.budgets and db.budgets[RecommendationTable.budgetKey(realm, faction)],
+      budget = market and db.budgets and db.budgets[market],
+      daysToSell = market and db.daysToSell and db.daysToSell[market],
     }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs(), disenchants.results)
     table.insert(db.characterReads, read)
   end

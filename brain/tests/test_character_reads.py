@@ -1,4 +1,5 @@
 import dataclasses
+import math
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from brain.history import (
     holdings,
     import_character_reads,
     known_recipes,
+    market_days_to_sell,
     merchant_costs,
     open_history,
     pooled_gold,
@@ -236,6 +238,31 @@ def test_a_character_counts_toward_the_faction_of_its_latest_read(db):
 
     assert pooled_gold(db, Era.BETA, REALM, "Alliance") == 0
     assert pooled_gold(db, Era.BETA, REALM, "Horde") == 300
+
+
+# --- Days to Sell ---
+
+
+def test_days_to_sell_is_the_markets_latest_read_as_of_a_moment_in_seconds(db):
+    # #109: carried like the Budget. 0.5 days is 12 hours.
+    run(
+        db,
+        character_read(T0, "Kash-Patel") | {"daysToSell": 2},
+        character_read(T0 + 60, "Alt-Patel") | {"daysToSell": 0.5},
+        character_read(T0 + 120, "Horde-Patel", faction="Horde") | {"daysToSell": 5},
+    )
+
+    assert market_days_to_sell(db, Era.BETA, REALM, "Alliance") == 12 * 3600
+    assert market_days_to_sell(db, Era.BETA, REALM, "Alliance", T0 + 59) == 2 * 86400
+    assert market_days_to_sell(db, Era.BETA, REALM, "Horde") == 5 * 86400
+    assert market_days_to_sell(db, Era.BETA, REALM, "Alliance", T0 - 1) is None
+
+
+@pytest.mark.parametrize("bad", [0, -1, "2", True, None, math.inf])
+def test_a_days_to_sell_that_isnt_a_positive_number_is_not_set(db, bad):
+    run(db, character_read(T0) | {"daysToSell": 2}, character_read(T0 + 60) | {"daysToSell": bad})
+
+    assert market_days_to_sell(db, Era.BETA, REALM, "Alliance") is None
 
 
 # --- Holdings ---

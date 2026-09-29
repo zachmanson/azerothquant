@@ -571,10 +571,34 @@ function RecommendationTable.waitingNote(unsaved, unimported, behind)
   return scans .. " waiting: " .. step
 end
 
--- The key of a Market's Budget in AzerothQuantDB.budgets (#86): gold pools per realm and
--- faction, so that's what a Budget covers.
-function RecommendationTable.budgetKey(realm, faction)
+-- The key of a Market's Budget and Days to Sell in AzerothQuantDB (#86, #109): gold pools
+-- per realm and faction, so that's what each covers.
+function RecommendationTable.marketKey(realm, faction)
   return realm .. "-" .. faction
+end
+
+-- What the player typed in the Days to Sell box (#109), e.g. "2", "0.5" or "1d", as days.
+-- A blank box is nil (not set) and still ok; zero or anything else is nil and not ok.
+-- Saved per Market (`marketKey`) in AzerothQuantDB.daysToSell.
+function RecommendationTable.parseDays(text)
+  local trimmed = text:lower():match("^%s*(.-)%s*$")
+  if trimmed == "" then
+    return nil, true
+  end
+  local number = trimmed:match("^(%d+%.?%d*)%s*d?$") or trimmed:match("^(%.%d+)%s*d?$")
+  local days = number and tonumber(number)
+  if not days or days <= 0 then
+    return nil, false
+  end
+  return days, true
+end
+
+-- Days as the player would type them back, e.g. 0.5 -> "0.5"; "" for nil.
+function RecommendationTable.daysText(days)
+  if not days then
+    return ""
+  end
+  return (string.format("%.4f", days):gsub("0+$", ""):gsub("%.$", ""))
 end
 
 -- character: the logged-in Character, as the Brain names it ("Name-Realm"). budget: the

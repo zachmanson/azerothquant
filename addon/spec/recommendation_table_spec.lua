@@ -349,7 +349,27 @@ describe("RecommendationTable.build", function()
   end)
 
   it("keys the saved Budgets by Market, since gold pools per realm and faction", function()
-    assert.are.equal("Classic Beta PvP-Alliance", RecommendationTable.budgetKey(REALM, FACTION))
+    assert.are.equal("Classic Beta PvP-Alliance", RecommendationTable.marketKey(REALM, FACTION))
+  end)
+
+  it("reads the Days to Sell box as days over zero, blank for not set (#109)", function()
+    assert.are.equal(2, RecommendationTable.parseDays("2"))
+    assert.are.equal(0.5, RecommendationTable.parseDays(" 0.5 "))
+    assert.are.equal(0.5, RecommendationTable.parseDays(".5d"))
+    local days, ok = RecommendationTable.parseDays("  ")
+    assert.is_nil(days)
+    assert.is_true(ok)
+    for _, text in ipairs({ "0", "0.0", "-1", "abc", "1.2.3", "2 days" }) do
+      days, ok = RecommendationTable.parseDays(text)
+      assert.is_nil(days)
+      assert.is_false(ok)
+    end
+  end)
+
+  it("shows a saved Days to Sell as the player would type it", function()
+    assert.are.equal("2", RecommendationTable.daysText(2))
+    assert.are.equal("0.5", RecommendationTable.daysText(0.5))
+    assert.are.equal("", RecommendationTable.daysText(nil))
   end)
 
   it("folds Shopping List options that cost more than the Budget into a count (#86)", function()
