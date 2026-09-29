@@ -1,3 +1,16 @@
+2026-09-29 (later 11): #109 BUILT (fa56555), with /tdd then /code-review. It stays open for the in-game check, which is now on #85 (see the comment there). The Days to Sell box is saved per Market in `AzerothQuantDB.daysToSell` and sent as `daysToSell` in the Character Read. The Brain side is `character_read.days_to_sell` and `market_days_to_sell`. `recommend_market` puts it on `Config.days_to_sell_seconds`, and `Config.days_to_sell_or_horizon_seconds` clamps it to the Sale Horizon. `_flip_room`/`_room_at` now take the horizon explicitly. With the setting unset, `brain recommend` output is byte-identical to HEAD on the real history. The full summary is on #109.
+
+Next, in order:
+1. Not at the PC: #108 (`brain recommend --why-not`), per its agent brief. Then #88 and #76.
+2. At the PC: #85's list, now with the #109 check: set Days to Sell to 2, /reload, and after the import the big rows shrink. Also check that the Budget box still works (it moved onto the shared `createSettingBox`).
+
+- Gotchas:
+  - #108: use `_room_at(..., config.days_to_sell_or_horizon_seconds)` for the Flip room, as `_flips` does. Prediction buys pass `sale_horizon_seconds`, so a "why not" that ignores Days to Sell will disagree with the Shopping List.
+  - CONTEXT.md avoids "buy horizon": say Days to Sell.
+  - Review leftovers, not done: `market_days_to_sell` repeats `market_budget`'s SQL. `parseDays`/`daysText` repeat the shape of `Money.parseGold`/`goldText`.
+  - `budgetKey` is now `RecommendationTable.marketKey`.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 10): TRIAGE. #109 and #108 are both ready-for-agent + later, with agent briefs on the issues. #109 became **Days to Sell** (CONTEXT.md, ADR-0020, amends ADR-0017): a per-Market Addon box next to Budget, carried in the Character Read, that caps only buys exiting through Sell (Flip to Sell run, Flip to Craft output Sell room, Buy Under Sell units), clamped to the Sale Horizon. The Sale Horizon is left alone: Holdings, Best Exit Value, Predictions and the replay's grading stay on it. #108 became `brain recommend --why-not [ITEM]`: CLI only, the first check each candidate fails (Sale Events, Room, Flip margin, Budget, row cap) plus its gap, with the Flip-margin gap measured against the Buy Under way value. No Flips to Craft.
 
 Next, in order:
