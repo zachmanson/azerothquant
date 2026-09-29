@@ -1,3 +1,13 @@
+2026-09-29 (later 13): QUEUE CLEANUP, nothing built. The "#88, then #76" item was stale: #88 (bd7f467, 9886c89, 8fda1f3, 3b9fc6d) and #76 (e8da1ea, ac81a0b) were already built and are open only for their #85 checks. #88, #76, #108 and #109 moved from `ready-for-agent` to `needs-pc`, so `ready-for-agent` now lists only unbuilt work (currently none).
+
+Next, in order:
+1. Not at the PC: triage + fix #93 (an all-folded tab shows "No <tab> right now" above "N over the Budget"; RecommendationTable.lua, busted). Then triage the rest of needs-triage. #92 looks fixed by #105 (recommend 45 s to 10 s); check the latest `Import took` lines and close it if so. #106 is blocked on its in-game LoadOnDemand spike, so add that spike to #85.
+2. At the PC: #85's list, including #108's check (`brain recommend --why-not` vs the Shopping List) and #109's Days to Sell = 2 check.
+
+- Gotchas:
+  - Before building an issue from this queue, check `git log --grep '#N'` and the issue's last comment: a stale queue line cost this session.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 12): #108 BUILT (c0c7021), with /tdd then /code-review. It stays open for the human check at the PC. `recommend(..., why_not=True)` fills `MarketRecommendations.why_not` (`WhyNot`, `Check` in recommend.py) from `_why_not`, which reuses `_room_at` (Days to Sell), `_way_out` and `_under_margin`. `_options` is now `_flip_options` + `_best_ranks`, which the Row cap check shares. Two changes from the brief, agreed in session:
 - Names come only from own Listings, Purchases and linked Outcomes (`lots.item_names`). Scans don't carry other players' item names, so most rows show "?".
 - The Flip margin, Sale Events and Room are all priced as if the cheapest Listing were bought, so posting under the NEXT ask, as `_flips`' first run does. The plain Buy Under value made a lone cheap Listing under a wall look 41% short when it was really 1c short.
