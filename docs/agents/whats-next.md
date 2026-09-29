@@ -1,3 +1,16 @@
+2026-09-28 (later 46): #105 SLICE 2 DONE (8d8810c), with /diagnosing-bugs (perf branch) then /code-review. `FairValueCache` (fair_value.py) is created in `_watch` and passed as `fair_value_cache=` through `watch_step` → `run_import` → `_write_recommendations` → `recommend` → `recommend_market` → `_valuer` → `sell_rates` → `sell_rate_evidence`. The key is (Market, requested_at, fair_value_slice_share, fair_value_outlier_share). `recommend` calls `start_pass()`, and a pass keeps only the Scans the previous pass used. Pass 2 went from 19.5 s to 10.2 s, and the output is byte-identical. The re-profile is in a comment on #105.
+- Review notes left as they are:
+  - `brain rebuild` while watching could leave the cache stale until the watcher restarts. Rebuild already says to stop watch first.
+  - `seen, fair_value_cache` now travel together through `_valuer`/`sell_rates`/`sell_rate_evidence` (a data clump, like `seen` in slice 1). If a third per-pass input shows up, bundle them.
+  - The replay and one-shot `brain recommend` don't use the cache (without one, each `sell_rate_evidence` builds its own).
+  - `fair_values()` hands back the cached dict itself. Callers only read it.
+- Gotchas:
+  - Bench harness (scratchpad `bench.py`, write it again): copy history.sqlite, `dataclasses.replace(load_config(...), history_path=copy, grades_path=None, archive_dir=None)`, run `recommend` twice in one process with one `FairValueCache`. Modes `time`, `out <file>` (repr of both passes + `run_recommend` text, compare with `cmp`), `prof N` (pass 2). Check that it really passes the cache: the first run here silently didn't (the parameter name was wrong).
+
+Next, in order:
+1. #105 slice 3, only if the user wants more: `cheapest_seen` (3.5 s) could read per-Scan data, or look at the parse time (8.2 MB, 5.8 s). Or close #105 and take #71's reload-ready guess once the user has run a real watch pass with the new build (`Import took` in the log).
+2. Not at the PC: #77, #84, then triage #103 and #104.
+
 2026-09-28 (later 45): #105 SLICE 1 DONE (28c2d69), with /diagnosing-bugs (perf branch) then /code-review. On the real history, `recommend` went from 49.7 s to 18.3 s, and the output is byte-identical. `recommend_market` loads `listings` once and passes an optional `seen` down to `_valuer`, `_market_lots`, `_lot_costs`, `sell_rates`, `non_stacking`, `sell_rate_evidence` and `disappearances`. `_flips` prices each run in one pass (`_undercut`, `_cheapest`, `_cheapest_from`). The re-profile and the next design question are in a comment on #105.
 - Review notes left as they are:
   - `seen` isn't shared yet with `grades` → `_market_lots`/`exit_values`, with `deposit_of`, or with the replay.
