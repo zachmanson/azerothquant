@@ -1,3 +1,12 @@
+2026-09-28 (later 39): TRIAGED #101 and #102. No code. Both are now bug + ready-for-agent + later, with agent briefs as comments on the issues.
+- #101 Per day: floor at 1 day, not the Sale Horizon (a Sale Horizon floor would make Per day = Profit/7 for nearly every Flip). The Addon computes Per day on its own in RecommendationTable.lua `measures`, so fix it there too, plus CONTEXT **Per day**.
+- #102: item 1 (bound units only Disenchanted by the Character holding them) and item 2 (Best Exit Value values Disenchant mats jointly across all held Item Keys; the user chose to fix it, not accept it). Item 3 is split out as #103 (needs-triage): `known_recipes` and `enchanting_skills` have no as-of, so the replay and Grades use today's recipes and skills. Item Info as-of doesn't matter.
+- #88 wasn't started: triage filled the session budget.
+
+Next, in order:
+1. Not at the PC: #88 Buy Under (/tdd; spec comment and hooks comment on #88), then #101 (small), #102, #77, #84, then triage #103.
+2. Next PC sitting: unchanged from "later 38".
+
 2026-09-28 (later 38): #76 SLICE 2 DONE (ac81a0b), with /tdd then /code-review. Disenchant Results: `DisenchantCapture.lua` (plain Lua, busted specs) is fed by Character.lua on UNIT_SPELLCAST_START/SUCCEEDED 13262 and LOOT_READY. The item is the bag diff from cast start; a Result waits up to 5 s of bag reads for the item to leave, then falls back to mats only. Results ride on Character Reads as `disenchantResults` into the Brain tables `disenchant_result` + `disenchant_result_mat`. `brain disenchants` (`disenchant_check.py`) runs Wilson + exact t-intervals (A&S 26.7.3/4, no new deps), with `disenchant_check_min_results` = 20. CONTEXT "Disenchant Result" and the ADR-0018 amendment are done. The event-order probe is a comment on #85. #76 stays open only for its PC check. Its Buy Under parts are #88, Flip to Disenchant is #89, and the chain node is #77.
 - New tool: `scripts/busted.py` runs addon/spec on lupa's Lua 5.1 (`pip install lupa`, then `python ../scripts/busted.py` from addon/). It only knows the busted API the specs use; add to it when a spec needs more. CI still runs real busted.
 - Gotchas:
