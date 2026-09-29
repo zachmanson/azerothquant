@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -27,6 +28,7 @@ from brain.recommend import (
     SubCraft,
     grades,
     held_at_writing,
+    per_day,
     recommend,
     sellable_units,
 )
@@ -901,6 +903,26 @@ def test_a_flip_to_vendor_has_no_wait(db):
     assert (flip.action, flip.days) == (Action.VENDOR, None)
 
 
+def test_a_flip_to_sell_that_sells_within_a_day_makes_its_profit_per_day():
+    # #101: a one-off Flip whose unit sells in 3 h can't be repeated all day.
+    flip = Row(LINEN_KEY, Action.SELL, 1, profit=371, days=0.125)
+
+    assert per_day(flip) == 371
+
+
+def test_a_flip_to_sell_slower_than_a_day_splits_its_profit_over_its_days():
+    # 900 over 2.5 days.
+    flip = Row(LINEN_KEY, Action.SELL, 5, profit=900, days=2.5)
+
+    assert per_day(flip) == 360
+
+
+def test_a_flip_to_vendor_makes_its_profit_now():
+    flip = Row(ORE_KEY, Action.VENDOR, 4, profit=20)
+
+    assert per_day(flip) == math.inf
+
+
 def test_an_option_in_the_top_rows_only_by_profit_per_click_is_kept(db):
     # shopping_list_rows = 1. The Ore makes the most profit (10 x 5 over 5 Listings, 10
     # a click), and its ROI (50 on 50) beats the Tin's (12 on 18). But the Tin's one
@@ -935,6 +957,33 @@ def test_a_flip_to_vendor_never_takes_a_top_per_day_row(db):
             )
         ],
         [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=replace(CONFIG, shopping_list_rows=1),
+    )
+
+    assert [(r.item_key, r.action) for r in result[MARKET].shopping_list] == [
+        (LINEN_KEY, Action.SELL),
+    ]
+
+
+def test_a_one_off_fast_flip_doesnt_beat_a_bigger_flip_that_sells_within_a_day(db):
+    # shopping_list_rows = 1. 10 Tin sell an hour, 2 Linen. The one Tin bought sells in
+    # minutes, the 5 Linen in 2.5 h: both within a day, so Per day is their Profit (#101),
+    # and the Linen wins it as it wins Profit, Per click and ROI. Unfloored, the Tin's few
+    # coppers over a few minutes would top Per day.
+    tin = "item:2771::::::::20:1490"
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=1000), row(tin, quantity=20, unit=1000)),
+            scan(
+                T0 + HOUR,
+                row(quantity=18, unit=1000),
+                row(quantity=5, unit=500),
+                row(tin, quantity=10, unit=1000),
+                row(tin, unit=780),
+            ),
+        ],
+        [character_read(money=GOLD)],
         config=replace(CONFIG, shopping_list_rows=1),
     )
 

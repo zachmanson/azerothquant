@@ -2437,9 +2437,10 @@ def per_click(row: Row) -> float:
 
 
 def per_day(row: Row) -> float:
-    """A Flip's Profit for each day until its last unit sells: a Flip to Vendor sells now,
-    before any Flip to Sell (#98)."""
-    return math.inf if row.days is None else row.profit / row.days
+    """A Flip's Profit for each day until its last unit sells, at least a day (#101): a
+    one-off Flip that sells in an hour can't be made again all day. A Flip to Vendor sells
+    now, before any Flip to Sell (#98)."""
+    return math.inf if row.days is None else row.profit / max(row.days, 1)
 
 
 def return_on_cost(row: Row) -> float:

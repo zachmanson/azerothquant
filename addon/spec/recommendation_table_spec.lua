@@ -574,6 +574,16 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "1 Listing + 1 post, sells in ~3 h" }, view.sections[2].rows[1].tooltip)
   end)
 
+  it("gives a Flip that sells within a day its Profit as Per day (#101)", function()
+    local view = build(entry({
+      shoppingList = {
+        { itemKey = "9749", action = "Sell", quantity = 1, price = 100, profit = 50, cost = 100, listings = 1, posts = 1, days = 0.125 },
+      },
+    }))
+
+    assert.are.equal("50c", view.sections[2].rows[1].cells[8])
+  end)
+
   it("leaves the Flips to Craft tab's columns as they were (#98)", function()
     local view = build(entry({ shoppingList = { flipToCraft() } }))
 

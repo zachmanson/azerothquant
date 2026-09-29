@@ -213,7 +213,7 @@ A Flip to Sell's or Flip to Vendor's Profit for each click it takes: each Listin
 _Avoid_: profit per action, effort
 
 **Per day**:
-A Flip to Sell's Profit for each day until its last unit sells: the unbound held units ahead of it and its own units, at the Sell Rate under the Flip priors, the same queue the Deposits use. A Flip to Vendor sells now, so it comes before any Flip to Sell.
+A Flip to Sell's Profit for each day until its last unit sells: the unbound held units ahead of it and its own units, at the Sell Rate under the Flip priors, the same queue the Deposits use. The days are at least one, so a Flip that sells within a day has its Profit as its Per day: a one-off Flip that sells in an hour can't be made again all day. A Flip to Vendor sells now, so it comes before any Flip to Sell.
 _Avoid_: profit per hour, velocity
 
 **Budget**:

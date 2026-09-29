@@ -345,14 +345,14 @@ local function shoppingKeys(r, name, cells)
   return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.postAt, r.profit, r.cost, cells[8]:lower() }
 end
 
--- A Flip's Profit per Listing bought and stack posted, per day until its last unit sells
--- (a Flip to Vendor's sells now, so it sorts first), and on its Cost (#98). nil each for a
--- row the Brain wrote no counts for.
+-- A Flip's Profit per Listing bought and stack posted, per day until its last unit sells,
+-- and on its Cost (#98). The days are at least one (#101). A Flip to Vendor sells now, so
+-- it sorts first per day. nil each for a row the Brain wrote no counts for.
 local function measures(r)
   if not r.listings then
     return nil, nil, nil
   end
-  local perDay = r.days and r.profit / r.days or math.huge
+  local perDay = r.days and r.profit / math.max(r.days, 1) or math.huge
   return r.profit / (r.listings + r.posts), perDay, r.profit / r.cost
 end
 
