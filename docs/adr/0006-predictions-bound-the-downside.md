@@ -20,3 +20,10 @@ Both were worked out again from history on every run, so any change to how Best 
 
 - Not a table in the history database: that is rebuilt from the Archive (ADR-0005), and a Grade kept only there would be lost or recomputed on `brain rebuild`.
 - Not the pricing rule versioned by date: the code would keep every old rule forever.
+
+## Amendment: No Prediction buy above the Merchant Cost after the cut (#91)
+
+A Prediction never looks at the upside, but an Item Key an NPC merchant sells in unlimited stock has a known one: nobody pays more on the Auction House than the Merchant Cost, so that's the ceiling on every Sell. Without a check, a Prediction on Black Lotus (50g at the Black Market's Mister Graphed) would let the player buy one at 48g, which can fetch at most 47.5g after the Auction House cut: a certain loss. So a Prediction buy is allowed only below the Item Key's Merchant Cost after the cut. There's no margin beyond that: demanding room under the ceiling would be pricing the upside, which this ADR rules out. An Item Key with no Merchant Cost seen in its Market has no cap.
+
+- Not dropping merchant-sold Item Keys from Predictions: the player still wants to buy them cheap on the Auction House ahead of a Catalyst.
+- Not a hand-kept list of which items a merchant sells: Merchant Cost is already read in game, per realm and faction.

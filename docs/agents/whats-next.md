@@ -1,3 +1,18 @@
+2026-09-29 (later 19): NOT AT THE PC. Grilled #90 and #91; both are now ready-for-agent. Filed #110.
+- #90 Beta Prior: display only (the Brain never reads it), shown as a grey "Beta" column plus a tooltip on every tab. Raw median Sale Event price (Beta's last 14 days, at least 3 Sale Events), or else the median daily Fair Value (last 7 days), marked "listed, not sold". It comes from the same-faction Beta Market, or else Alliance. `beta_column_days` = 14 from the Live Market's first Scan. The Brain writes it into Recommendations.lua. Full spec in the comment on #90. CONTEXT.md and ADR-0015 are updated (d3e6dd6).
+- #110 (needs-triage): Beta as an engine prior. Split out of #90.
+- #91: four Predictions (one per group), Catalyst = raids unlock Dec 9, lapse Dec 23. The Max Loss rule stays. The one code change: no Prediction buy at or above the Merchant Cost after the 5% cut (ADR-0006 amendment). Mister Graphed (the Black Market) is already a Merchant Cost since #65.
+
+Next, in order:
+1. Not at the PC: build #90 (deadline Nov 4).
+2. Not at the PC: build #91's Merchant Cost cap (before Dec 9).
+3. Grill #106's open questions.
+
+- Gotchas:
+  - On Nov 4 at the PC, in this order: open Mister Graphed's window with a Live Character, read the Item Keys of #91's list in game, then write the four Predictions in `predictions.toml` before buying anything.
+  - #90's column needs an in-game check (RecommendationFrame.lua has no busted seam). The only Beta Market is Classic Beta PvP Alliance, so it can be tested on Beta data before Oct 21.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 18): AT THE PC. #85's Buy Under checks done; #88 closed. One fix (6fec61b).
 - The AH green wash never fired: the ScrollBox init callback gets an index as elementData, and row.rowData is still nil then. The Listing now comes from `list.getEntry(index)`. Checked on all three lists (browse, item, commodity), scrolling included.
 - The Disenchant group Buy Unders are correct but empty on real data: Beta mats are too cheap for any group to pay (numbers on #85). The Addon half was checked with a test group row.
