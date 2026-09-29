@@ -3,7 +3,7 @@ only (ADR-0004)."""
 
 import sqlite3
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from statistics import median
 
@@ -30,15 +30,20 @@ class SellRate:
 
 
 def sell_rates(
-    conn: sqlite3.Connection, market: Market, config: Config, now: int
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    now: int,
+    seen: Sequence[Listing] | None = None,
 ) -> dict[str, SellRate]:
     """Sell Rate of every Item Key the Market has seen, from the Observation Windows
-    ending in the range before `now`. Empty when there are none: no data is not 0."""
+    ending in the range before `now`. Empty when there are none: no data is not 0.
+    `seen` is the Market's `listings`, when the caller has them already (#105)."""
+    seen = listings(conn, market) if seen is None else seen
     since, until = _range(config, now)
-    evidence = sell_rate_evidence(conn, market, config, since, until)
+    evidence = sell_rate_evidence(conn, market, config, since, until, seen)
     if not evidence.window_hours:
         return {}
-    seen = listings(conn, market)
     in_range = [x for x in seen if x.last_seen >= since and x.first_seen < until]
     quantities: dict[str, list[int]] = defaultdict(list)
     for listing in in_range:
@@ -71,11 +76,13 @@ def sell_rates(
     }
 
 
-def non_stacking(conn: sqlite3.Connection, market: Market) -> frozenset[str]:
+def non_stacking(
+    conn: sqlite3.Connection, market: Market, seen: Sequence[Listing] | None = None
+) -> frozenset[str]:
     """Item Keys that don't stack (#73): no Listing of them ever seen in the Market had
     more than one unit. Sell Rate's usual Sale Event size uses the same test over its
-    range only."""
-    seen = listings(conn, market)
+    range only. `seen` as in `sell_rates`."""
+    seen = listings(conn, market) if seen is None else seen
     return frozenset({listing.item_key for listing in seen} - _stacking(seen))
 
 

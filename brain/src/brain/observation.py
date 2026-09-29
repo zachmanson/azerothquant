@@ -10,6 +10,7 @@ here is computed from the raw history on read, so changing the cap recomputes th
 import sqlite3
 from bisect import bisect_right
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 
@@ -49,12 +50,19 @@ class Disappearance:
     expiry_possible: bool  # the gap was long enough for its bucket to run out
 
 
-def disappearances(conn: sqlite3.Connection, market: Market, config: Config) -> list[Disappearance]:
+def disappearances(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    seen: Sequence[Listing] | None = None,
+) -> list[Disappearance]:
     """Every Listing that was in one Scan of the Market and missing from the next, in
-    the order the Listings were first seen."""
+    the order the Listings were first seen. `seen` is the Market's `listings`, when the
+    caller has them already (#105)."""
+    seen = listings(conn, market) if seen is None else seen
     times = scan_times(conn, market)
     result = []
-    for listing in listings(conn, market):
+    for listing in seen:
         after = bisect_right(times, listing.last_seen)
         if after == len(times):
             continue  # still in the latest Scan
@@ -165,11 +173,17 @@ def window_hours(windows: list[ObservationWindow]) -> float:
 
 
 def sell_rate_evidence(
-    conn: sqlite3.Connection, market: Market, config: Config, since: int, until: int
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    since: int,
+    until: int,
+    seen: Sequence[Listing] | None = None,
 ) -> SellRateEvidence:
     """What Sell Rate is built from over [since, until): the Observation Windows whose
     later Scan falls in the range. Windows aren't clipped at the edges, so the hours
-    and the sales always cover the same windows."""
+    and the sales always cover the same windows. `seen` as in `disappearances`."""
+    seen = listings(conn, market) if seen is None else seen
     windows = observation_windows_between(conn, market, config, since, until)
     window_ends = {w.end for w in windows}
     # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
@@ -180,10 +194,10 @@ def sell_rate_evidence(
     ]
     candidates = [
         d
-        for d in disappearances(conn, market, config)
+        for d in disappearances(conn, market, config, seen)
         if d.gone_at in window_ends and not d.expiry_possible
     ]
-    new = [n for n in listings(conn, market) if n.first_seen in window_ends]
+    new = [n for n in seen if n.first_seen in window_ends]
     pairing = _pair_reposts(candidates, new)
     # Priced by the Scans either side of the sale, not today's: a sale is judged against
     # the market it sold into. The lower Fair Value wins, since a buyer paying well over

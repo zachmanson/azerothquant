@@ -24,6 +24,7 @@ from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
 from brain.history import (
     Holding,
     KnownRecipe,
+    Listing,
     Market,
     character_markets,
     cheapest_seen,
@@ -387,9 +388,11 @@ def recommend_market(
     under = {k: p.name for p in active for k in p.item_keys}
     by_character = _by_character(conn, market, characters, as_of)
     holdings = _pooled(by_character)
+    # Loaded once for the whole pass: the Market's every Listing is the bulk of it (#105).
+    seen = listings(conn, market)
     # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
     # options are alternatives, so none is assumed (#86).
-    valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings))
+    valuer, _ = _valuer(conn, config, market, now, set(under), _unbound_units(holdings), seen)
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
     plans = _plans(known_recipes(conn, market), now)
@@ -460,12 +463,13 @@ def recommend_market(
     pooled = pooled_return(graded)
     caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
     bound = {k: _bound(h) for k, h in held.items()}
-    rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
-    rows = _with_roi(rows, _market_lots(conn, config, market, predictions), cut, config)
+    lot_costs = _lot_costs(conn, config, market, active, seen)
+    rows = _hold(rows, active, bound, vendor, caps, lot_costs)
+    rows = _with_roi(rows, _market_lots(conn, config, market, predictions, seen), cut, config)
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
     prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
-    linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
+    linked = link_sales(outcomes(conn, market), seen, purchases(conn, market))
     return MarketRecommendations(
         market,
         now,
@@ -747,23 +751,33 @@ def grades(
 
 
 def _market_lots(
-    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    seen: Sequence[Listing] | None = None,
 ) -> list[Lot]:
+    """`seen` is the Market's `listings`, when the caller has them already (#105)."""
+    seen = listings(conn, market) if seen is None else seen
     market_purchases = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), listings(conn, market), market_purchases)
+    linked = link_sales(outcomes(conn, market), seen, market_purchases)
     held = held_at_writing(conn, config, market, predictions)
     return lots(market_purchases, linked, predictions, held)
 
 
 def _lot_costs(
-    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    seen: Sequence[Listing] | None = None,
 ) -> dict[tuple[str, str], list[tuple[float, int]]]:
     """The open units of each Prediction's Lots and what each of them cost, oldest Lot
-    first, by (Prediction, Item Key)."""
+    first, by (Prediction, Item Key). `seen` as in `_market_lots`."""
     if not predictions:
         return {}
     result: dict[tuple[str, str], list[tuple[float, int]]] = {}
-    for lot in _market_lots(conn, config, market, predictions):
+    for lot in _market_lots(conn, config, market, predictions, seen):
         if lot.prediction is not None and lot.open_units:
             result.setdefault((lot.prediction, lot.item_key), []).append(
                 (lot.cost / lot.units, lot.open_units)
@@ -834,20 +848,23 @@ def _valuer(
     at: int | None,
     under: set[str] = frozenset(),
     unbound: Mapping[str, int] = MappingProxyType({}),
+    seen: Sequence[Listing] | None = None,
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
-    which take the Sale Horizon before any Flip to Sell (#67)."""
+    which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
+    `_market_lots`."""
+    seen = listings(conn, market) if seen is None else seen
     scanned = at is not None
     supply = supply_at(conn, market, at) if scanned else {}
     others = supply_at(conn, market, at, others_only=True) if scanned else {}
-    rates = sell_rates(conn, market, config, at) if scanned else {}
+    rates = sell_rates(conn, market, config, at, seen) if scanned else {}
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = auction_cut(market, config)
     # Like Vendor Prices, the latest seen: a deposit rate doesn't move.
-    linked = link_sales(outcomes(conn, market), listings(conn, market), purchases(conn, market))
+    linked = link_sales(outcomes(conn, market), seen, purchases(conn, market))
     valuer = _Valuer(
         supply,
         others,
@@ -856,7 +873,7 @@ def _valuer(
         vendor,
         merchant,
         cut,
-        non_stacking(conn, market),
+        non_stacking(conn, market, seen),
         deposits(linked),
         config,
         disenchanting=_Disenchanting(
@@ -2136,17 +2153,23 @@ def _flips(
     prefix: Supply = []
     room = max(0, _flip_room(rate, config) - held)
     cap = _ceiling(rate.max_sale_price if rate else None, merchant_cost)
-    for unit, quantity in offers:
+    # What `_post_at` works out for each run, without rebuilding the supply per run (#105):
+    # the player's own Listings don't change, and the cheapest offer left is this one if
+    # it's only partly bought, else the cheapest one after it.
+    own = _cheapest(without(supply, offers))
+    after = _cheapest_from(offers)
+    bought = 0
+    for i, (unit, quantity) in enumerate(offers):
         take = min(quantity, room)
         if not take:
             break
         prefix = [*prefix, (unit, take)]
         room -= take
-        post_at = _post_at(supply, offers, prefix, config, cap)
+        bought += take
+        post_at = _undercut(unit if take < quantity else after[i + 1], own, config, cap)
         resale = None if post_at is None else post_at * (1 - cut)
         # Offers are cheapest first and the last unit waits longest, so if the dearest unit
         # clears the margin after its deposits, all do.
-        bought = sum(n for _, n in prefix)
         if not _resells(resale, unit, vendor_price, effort, queue.lost(held + bought - 1), config):
             continue
         profit = sum((resale - 2 * effort - u) * n for u, n in prefix) - queue.lost_by(held, bought)
@@ -2313,14 +2336,36 @@ def _post_at(
     (#62): just under the cheapest of them left, so it sells first, or `cap` if that's
     lower. The player's own Listings, the rest of `supply`, are matched rather than
     undercut. None if no Listing is left to price against."""
-    left = without(others, bought)
-    own = without(supply, others)
-    prices = [left[0][0] - config.post_undercut_copper] if left else []
-    prices += [own[0][0]] if own else []
+    return _undercut(
+        _cheapest(without(others, bought)), _cheapest(without(supply, others)), config, cap
+    )
+
+
+def _undercut(
+    other: int | None, own: int | None, config: Config, cap: float | None
+) -> float | None:
+    """`_post_at` from the cheapest `other` player's unit price left and the cheapest of
+    the player's `own`, either None when there's none."""
+    prices = [other - config.post_undercut_copper] if other is not None else []
+    prices += [own] if own is not None else []
     if not prices:
         return None
     value = min(prices)
     return value if cap is None else min(value, cap)
+
+
+def _cheapest(supply: Supply) -> int | None:
+    """The cheapest unit price in a `without`-shaped supply, or None if it's empty."""
+    return supply[0][0] if supply else None
+
+
+def _cheapest_from(offers: Supply) -> list[int | None]:
+    """For each index into `offers` (sorted, cheapest first), and one past the end, the
+    cheapest unit price with a unit on offer from there on."""
+    cheapest: list[int | None] = [None]
+    for unit, quantity in reversed(offers):
+        cheapest.append(unit if quantity > 0 else cheapest[-1])
+    return cheapest[::-1]
 
 
 def _ceiling(*caps: float | None) -> float | None:
