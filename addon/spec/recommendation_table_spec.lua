@@ -421,6 +421,30 @@ describe("RecommendationTable.build", function()
     assert.are.equal("1 over the Budget (Reload to re-size)", crafts.more)
   end)
 
+  it("doesn't call a tab empty when its options are only over the Budget (#93)", function()
+    local dear = flipToCraft()
+    dear.cost = 3000
+    local view = build(
+      entry({
+        shoppingList = {
+          dear,
+          { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 3000 },
+          { itemKey = "2589", action = "Vendor", quantity = 2, price = 100, profit = 0, cost = 200 },
+        },
+      }),
+      AS_OF,
+      nil,
+      nil,
+      2000
+    )
+
+    local shopping, crafts = view.sections[2], view.sections[3]
+    assert.is_nil(crafts.empty)
+    assert.are.equal("1 over the Budget (Reload to re-size)", crafts.more)
+    assert.is_nil(shopping.empty)
+    assert.are.equal("1 more (worth 0c or no data), 1 over the Budget (Reload to re-size)", shopping.more)
+  end)
+
   it("formats the time with WoW's global date, since the client has no os library", function()
     local realOs = os
     _G.date, _G.os = realOs.date, nil

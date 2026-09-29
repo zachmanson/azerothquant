@@ -519,7 +519,9 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
   end
   RecommendationTable.sort(out, default)
   out.tab = title .. " (" .. #out.rows .. ")"
-  if #out.rows == 0 then
+  -- A tab whose options are all over the Budget isn't empty: its more line says so (#93).
+  -- Low-value rows aren't options, so a tab of only those still says it's empty.
+  if #out.rows == 0 and over == 0 then
     out.empty = NOTHING[title]
   end
   local more = {}
