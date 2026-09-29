@@ -1,3 +1,14 @@
+2026-09-29 (later 10): TRIAGE. #109 and #108 are both ready-for-agent + later, with agent briefs on the issues. #109 became **Days to Sell** (CONTEXT.md, ADR-0020, amends ADR-0017): a per-Market Addon box next to Budget, carried in the Character Read, that caps only buys exiting through Sell (Flip to Sell run, Flip to Craft output Sell room, Buy Under Sell units), clamped to the Sale Horizon. The Sale Horizon is left alone: Holdings, Best Exit Value, Predictions and the replay's grading stay on it. #108 became `brain recommend --why-not [ITEM]`: CLI only, the first check each candidate fails (Sale Events, Room, Flip margin, Budget, row cap) plus its gap, with the Flip-margin gap measured against the Buy Under way value. No Flips to Craft.
+
+Next, in order:
+1. Not at the PC: #109 (the user cares most about it), per its agent brief. It's Brain + Addon, so the in-game check goes on #85's list. Then #108, then #88 and #76.
+2. At the PC, still open on #85: a blocked/empty Craft Chain (#77/#75, needs a blocked Craft row to exist), #33 chained rows, #50, the `brain rebuild` for #78, the #80 replay (Oct 3+ for 7 days of history), and the Booty Bay Broker follow-up. Once #109 is built, also set Days to Sell = 2 and confirm the big rows shrink.
+
+- Gotchas:
+  - #109: with Days to Sell unset, every recommend and replay output must come out byte-identical. That's the regression net.
+  - #108 should use the same check helpers as the real Shopping List (`_room_at`, `_resells`, the Buy Under way value) rather than copying them, or the diagnostic will drift from what the Brain actually does.
+  - The gotchas in the entry below still apply (screenshots, `brain watch`, Recommendations.lua stays uncommitted).
+
 2026-09-29 (later 9): PC SITTING. #77 CLOSED: the in-game check passed, and the Craft Chain panel now docks LEFT of the table, over the AH (c1a2b4b), because on the right it ran off a 1920px screen. #71 tuned: `RELOAD_READY_AFTER` 50 -> 30 s (bbc4282), from 11-23 s imports, and checked in game. #104 CLOSED: the in-game check passed (warning line + header note with watch stopped, both gone after restart). Filed #108 (Shopping List "why not" diagnostic) and #109 (player-set stock horizon for Buy Qty: the user dislikes 100-200 unit buys but doesn't want to force it on everyone). Both are needs-triage.
 
 Next, in order:

@@ -205,7 +205,7 @@ The Addon's in-game view of one Market's Recommendations (Holdings, Shopping Lis
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:
-How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it. Held units take it first: a Flip to Sell gets only the room left after the held units that aren't bound (after the Craft Actions), even ones that end up Vendored, since their gold is already spent and a Flip is optional. Best Exit Value follows the same rule.
+How long the player is willing to wait for held units to sell. Only the units Sell Rate says will sell within it are worth Selling; the rest go to the next best Action, and a Flip never buys more than will sell within it (nor within the Days to Sell, if shorter). Held units take it first: a Flip to Sell gets only the room left after the held units that aren't bound (after the Craft Actions), even ones that end up Vendored, since their gold is already spent and a Flip is optional. Best Exit Value follows the same rule.
 _Avoid_: timeout, patience
 
 **Shopping List**:
@@ -223,6 +223,10 @@ _Avoid_: profit per hour, velocity
 **Budget**:
 The most gold the player will spend in a Market, set in the Recommendation Table and carried to the Brain in each Character Read. Each Shopping List option, and the Prediction buys, spend up to the lesser of it and the pooled gold. None set means all the gold. The Prediction caps stay shares of the pooled gold (ADR-0006).
 _Avoid_: bankroll, allowance
+
+**Days to Sell**:
+The most days a buy that exits through Sell should take to sell, set per Market in the Recommendation Table next to the Budget and carried to the Brain in each Character Read. It caps how many units a Flip to Sell buys, a Flip to Craft's output Sells, and a Buy Under's Sell way is good for, after the held units ahead of them. None set, or more than the Sale Horizon, means the Sale Horizon. It doesn't touch Holdings, Best Exit Value, Prediction buys or grading, which stay on the Sale Horizon: that's how long the player will wait for what they already own, this is how much new stock they'll take on (ADR-0020).
+_Avoid_: stock horizon, buy horizon, max stock
 
 **Holdings**:
 Every Item Key the player's Characters own in bags and banks, each with its Recommendation. Built from each Character's latest Character Read, taking the bank from the latest Read that has one. Keyring, equipped gear and unclaimed mail are not Holdings. Held units a Craft Action uses show only on that craft's row, not as their own Holdings row. Held units a Shopping List Flip to Craft would use keep their Holdings row too, since that Flip is only an option (ADR-0017). Recommendations pool the Characters of a Market, but the Recommendation Table shows which Characters hold each Item Key, and what to mail a crafter (ADR-0009).
