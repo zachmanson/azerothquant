@@ -288,6 +288,17 @@ def test_best_exit_value_counts_the_disenchant_way(db):
     assert values == {GREEN: pytest.approx(2 * (1.875 * 100 + 0.3 * 200 + 0.05 * 400))}
 
 
+def test_an_enchanting_skill_raised_later_does_not_gate_best_exit_value_before(db):
+    # Item level 22 needs 25: Bob has 20 at the moment and trains to 90 after it.
+    import_scans(db, market_scans(22), Era.BETA, RECOMMEND_CONFIG)
+    trained = read("Bob", T0 + 2 * HOUR, {ENCHANTING: 90})
+    import_character_reads(db, [holder(enchanting=20), trained], Era.BETA, RECOMMEND_CONFIG)
+
+    values = exit_values(db, RECOMMEND_CONFIG, MARKET, {GREEN: Holding(bags=2)}, T0 + HOUR)
+
+    assert values == {GREEN: 2 * 50}
+
+
 OTHER = "9998"  # another green armor piece of the Green Chest's band
 DUST_KEY = "10940"
 # Dust Vendors for 10, so past the 6 that sell in the horizon it's worth little.

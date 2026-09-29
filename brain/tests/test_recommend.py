@@ -30,6 +30,7 @@ from brain.recommend import (
     held_at_writing,
     per_day,
     recommend,
+    recommend_market,
     sellable_units,
 )
 from brain.sell_rate import SellRate
@@ -1494,6 +1495,18 @@ def test_held_reagents_are_crafted_when_the_output_is_worth_more(db):
             uses=(ReagentUse(LINEN_KEY, 2),),
         ),
     ]
+
+
+def test_a_recipe_learned_after_a_moment_is_not_crafted_as_of_it(db):
+    reads = [
+        character_read(item(count=2), vendor_prices={2589: 10}, recipes=[]),
+        character_read(item(count=2), at=T0 + 2 * HOUR, recipes=[recipe()]),
+    ]
+    run(db, linen_and_bolts_selling(), reads)
+
+    then = recommend_market(db, CONFIG, MARKET, [], T0 + HOUR, as_of=T0 + HOUR)
+
+    assert [(r.item_key, r.action) for r in then.holdings] == [(LINEN_KEY, Action.SELL)]
 
 
 def test_crafting_stops_once_more_output_would_not_sell_within_the_horizon(db):

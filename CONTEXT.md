@@ -113,7 +113,7 @@ _Avoid_: posting fee, AH fee, cut
 ## Crafting
 
 **Known Recipe**:
-A recipe the player already has, read from the profession window, with its output item, output quantity, reagents, cooldown and whether its output binds on pickup. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes.
+A recipe the player already has, read from the profession window, with its output item, output quantity, reagents, cooldown and whether its output binds on pickup. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes. At a past moment (a replay, a Grade's Best Exit Value), the Known Recipes and Enchanting skill are the ones the Character Reads up to that moment show, not today's.
 
 **Learnable Recipe**:
 A recipe the player doesn't have yet but could get, and which costs something to acquire.

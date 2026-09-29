@@ -395,8 +395,9 @@ def recommend_market(
     buy_under: bool = True,
     fair_value_cache: FairValueCache | None = None,
 ) -> MarketRecommendations:
-    """The Market's Recommendations as of its Scan requested at `now`. The Holdings and
-    gold are the latest, or as of `as_of` (a replay, #80). Without `buy_under`, the Buy
+    """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
+    Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
+    #103). Without `buy_under`, the Buy
     Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
     `recommend`."""
     characters = character_markets(conn).get(market, [])
@@ -418,10 +419,11 @@ def recommend_market(
         _unbound_units(holdings),
         seen,
         fair_value_cache=fair_value_cache,
+        skills_as_of=as_of,
     )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
-    plans = _plans(known_recipes(conn, market), now)
+    plans = _plans(known_recipes(conn, market, as_of), now)
     crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
     held = crafting.after
     # The crafts change what's held, so the Flips are sized again after them (#67).
@@ -849,7 +851,9 @@ def exit_values(
     bound units (`_disenchants`); without it, none is Disenchanted."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
-    valuer, _ = _valuer(conn, config, market, scan, unbound=_unbound_units(dict(held)))
+    valuer, _ = _valuer(
+        conn, config, market, scan, unbound=_unbound_units(dict(held)), skills_as_of=at
+    )
     rows, left = _disenchants(held, valuer, bound=bound)
     proceeds: Counter[str] = Counter()
     for row in rows:
@@ -878,12 +882,14 @@ def _valuer(
     unbound: Mapping[str, int] = MappingProxyType({}),
     seen: Sequence[Listing] | None = None,
     fair_value_cache: FairValueCache | None = None,
+    skills_as_of: int | None = None,
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
-    `_market_lots`, and `fair_value_cache` as in `recommend`."""
+    `_market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
+    the latest, or as of `skills_as_of` (#103)."""
     seen = listings(conn, market) if seen is None else seen
     scanned = at is not None
     supply = supply_at(conn, market, at) if scanned else {}
@@ -910,7 +916,9 @@ def _valuer(
         deposits(linked),
         config,
         disenchanting=_Disenchanting(
-            _disenchant_table(), item_info(conn, market.era), enchanting_skills(conn, market)
+            _disenchant_table(),
+            item_info(conn, market.era),
+            enchanting_skills(conn, market, skills_as_of),
         ),
     )
     return valuer.flips(under, unbound)

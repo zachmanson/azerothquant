@@ -453,6 +453,40 @@ def test_a_dropped_professions_recipes_are_not_current(db):
     assert known_recipes(db, ALLIANCE) == []
 
 
+def test_a_profession_dropped_after_a_moment_still_has_its_recipes_as_of_it(db):
+    mining = 186
+    run(
+        db,
+        character_read(
+            T0,
+            professions=[profession([recipe(2963, output=2996)], at=T0 - 10)],
+            profession_list=[TAILORING, mining],
+        ),
+        character_read(T0 + 60, profession_list=[mining]),
+    )
+
+    assert [r.recipe_id for r in known_recipes(db, ALLIANCE, as_of=T0 + 30)] == [2963]
+    assert known_recipes(db, ALLIANCE, as_of=T0 + 90) == []
+
+
+def test_known_recipes_as_of_a_moment_are_those_of_the_reads_up_to_it(db):
+    run(
+        db,
+        character_read(
+            T0, professions=[profession([recipe(2963, output=2996)])], profession_list=[TAILORING]
+        ),
+        # Learned a recipe after the moment.
+        character_read(
+            T0 + 60,
+            professions=[profession([recipe(2963, output=2996), recipe(2964, output=2997)])],
+            profession_list=[TAILORING],
+        ),
+    )
+
+    assert [r.recipe_id for r in known_recipes(db, ALLIANCE, as_of=T0 + 30)] == [2963]
+    assert [r.recipe_id for r in known_recipes(db, ALLIANCE)] == [2963, 2964]
+
+
 def test_a_read_that_cant_say_which_professions_defers_to_the_one_before(db):
     run(
         db,
@@ -493,6 +527,22 @@ def test_known_recipes_are_those_of_the_characters_in_the_market(db):
         ("Kash-Patel", 1),
         ("Turn-Patel", 5),
     ]
+
+
+def test_known_recipes_as_of_a_moment_are_of_the_characters_in_the_market_then(db):
+    run(
+        db,
+        character_read(
+            T0,
+            "Turn-Patel",
+            professions=[profession([recipe(2963, output=2996)])],
+            profession_list=[TAILORING],
+        ),
+        character_read(T0 + 60, "Turn-Patel", faction="Horde", profession_list=[TAILORING]),
+    )
+
+    assert [r.recipe_id for r in known_recipes(db, ALLIANCE, as_of=T0 + 30)] == [2963]
+    assert known_recipes(db, ALLIANCE) == []
 
 
 def test_a_profession_read_with_no_time_of_its_own_is_as_of_its_character_read(db):

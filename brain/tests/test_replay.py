@@ -383,6 +383,34 @@ def test_tsm_crafts_while_db_market_beats_the_reagents_db_min_buyout(db):
     assert result[MARKET].graded[Policy.TSM] == pytest.approx(tsm)
 
 
+def test_a_recipe_learned_after_a_replayed_scan_is_not_used_at_it():
+    def replayed(later_recipes, learned_at=T0 + 2 * HOUR):
+        conn = open_history(":memory:")
+        # The later Read holds the same, so only the recipes change.
+        reads = [
+            character_read(
+                item(count=4),
+                money=10_000,
+                vendor_prices={2589: 10},
+                at=at,
+                recipes=recipes,
+                merchant_costs={2320: 10},
+            )
+            for at, recipes in [(T0, []), (learned_at, later_recipes)]
+        ]
+        try:
+            graded = run(conn, linen_selling_then_crashing(bolts=True), reads, until=T0 + HOUR)
+            return graded[MARKET].graded
+        finally:
+            conn.close()
+
+    bolt = [recipe(reagents=((2589, 2), (2320, 1)))]
+
+    assert replayed(bolt) == replayed([])
+    # Learned by the replayed Scan instead, TSM crafts with it.
+    assert replayed(bolt, learned_at=T0 + HOUR) != replayed([])
+
+
 # --- Ablations: the Brain with one feature switched off ---
 
 

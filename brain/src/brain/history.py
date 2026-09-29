@@ -1277,14 +1277,6 @@ def purchases(conn: sqlite3.Connection, market: Market) -> list[Purchase]:
     ]
 
 
-# Each Character's latest Character Read in the Era, as a subquery over character_read.
-_LATEST_CHARACTER_READS = (
-    "SELECT * FROM character_read r WHERE era = ? AND read_at = ("
-    " SELECT MAX(read_at) FROM character_read"
-    " WHERE era = r.era AND realm = r.realm AND character = r.character)"
-)
-
-
 def pooled_gold(
     conn: sqlite3.Connection, era: Era, realm: str, faction: str, at: int | None = None
 ) -> int:
@@ -1366,11 +1358,17 @@ def disenchant_results(conn: sqlite3.Connection, era: Era) -> list[DisenchantRes
     ]
 
 
-def _market_characters(conn: sqlite3.Connection, market: Market) -> set[str]:
-    """The Characters in the Market, by the faction of each one's latest Character Read."""
+def _market_characters(
+    conn: sqlite3.Connection, market: Market, as_of: int | None = None
+) -> set[str]:
+    """The Characters in the Market, by the faction of each one's latest Character Read
+    (up to `as_of`)."""
     rows = conn.execute(
-        f"SELECT character FROM ({_LATEST_CHARACTER_READS}) WHERE realm = ? AND faction = ?",
-        (market.era.value, market.realm, market.faction),
+        "SELECT character FROM character_read r"
+        " WHERE era = ? AND realm = ? AND faction = ? AND read_at = ("
+        " SELECT MAX(read_at) FROM character_read WHERE era = r.era AND realm = r.realm"
+        " AND character = r.character AND (? IS NULL OR read_at <= ?))",
+        (market.era.value, market.realm, market.faction, as_of, as_of),
     )
     return {character for (character,) in rows}
 
@@ -1395,17 +1393,21 @@ def merchant_costs(conn: sqlite3.Connection, market: Market) -> dict[int, float]
     return lowest
 
 
-def enchanting_skills(conn: sqlite3.Connection, market: Market) -> dict[str, int]:
+def enchanting_skills(
+    conn: sqlite3.Connection, market: Market, as_of: int | None = None
+) -> dict[str, int]:
     """The Enchanting skill of each of the Market's Characters that still has Enchanting,
-    from its latest Character Read with an Enchanting window that says it."""
-    has = _professions(conn, market)
-    characters = _market_characters(conn, market)
+    from its latest Character Read with an Enchanting window that says it. With `as_of`,
+    only Reads taken up to that moment count."""
+    has = _professions(conn, market, as_of)
+    characters = _market_characters(conn, market, as_of)
     latest: dict[str, tuple[int, int]] = {}
     for character, read_at, skill in conn.execute(
         "SELECT r.character, r.read_at, p.skill_level"
         " FROM known_profession p JOIN character_read r ON p.character_read_id = r.id"
-        " WHERE r.realm = ? AND r.era = ? AND p.profession_id = ? AND p.skill_level IS NOT NULL",
-        (market.realm, market.era.value, ENCHANTING),
+        " WHERE r.realm = ? AND r.era = ? AND p.profession_id = ? AND p.skill_level IS NOT NULL"
+        " AND (? IS NULL OR r.read_at <= ?)",
+        (market.realm, market.era.value, ENCHANTING, as_of, as_of),
     ):
         if character not in latest or read_at > latest[character][0]:
             latest[character] = (read_at, skill)
@@ -1416,34 +1418,40 @@ def enchanting_skills(conn: sqlite3.Connection, market: Market) -> dict[str, int
     }
 
 
-def _professions(conn: sqlite3.Connection, market: Market) -> dict[str, set[int]]:
-    """The professionIDs each Character has, as of its latest Read that could say."""
+def _professions(
+    conn: sqlite3.Connection, market: Market, as_of: int | None = None
+) -> dict[str, set[int]]:
+    """The professionIDs each Character has, as of its latest Read that could say (up to
+    `as_of`)."""
     has: dict[str, set[int]] = {}
     for character, profession_id in conn.execute(
         "SELECT r.character, c.profession_id FROM character_read r"
         " LEFT JOIN character_profession c ON c.character_read_id = r.id"
         " WHERE r.realm = ? AND r.era = ? AND r.has_profession_list AND r.read_at = ("
         " SELECT MAX(read_at) FROM character_read WHERE era = r.era AND realm = r.realm"
-        " AND character = r.character AND has_profession_list)",
-        (market.realm, market.era.value),
+        " AND character = r.character AND has_profession_list AND (? IS NULL OR read_at <= ?))",
+        (market.realm, market.era.value, as_of, as_of),
     ):
         has.setdefault(character, set()).add(profession_id)
     return has
 
 
-def known_recipes(conn: sqlite3.Connection, market: Market) -> list[KnownRecipe]:
-    """The current Known Recipes of every Character in the Market: for each profession,
+def known_recipes(
+    conn: sqlite3.Connection, market: Market, as_of: int | None = None
+) -> list[KnownRecipe]:
+    """The Known Recipes of every Character in the Market: for each profession,
     the ones in the latest Character Read that has that profession's window read. Only
     the professions the Character has as of its latest Read that could say count, so a
-    dropped profession's recipes don't come back."""
-    characters = _market_characters(conn, market)
-    has = _professions(conn, market)
+    dropped profession's recipes don't come back. With `as_of`, only Reads taken up to
+    that moment count."""
+    characters = _market_characters(conn, market, as_of)
+    has = _professions(conn, market, as_of)
     current: dict[tuple[str, int], tuple[int, int, int]] = {}
     for character, profession_id, row, read_at, character_read_at in conn.execute(
         "SELECT r.character, p.profession_id, p.id, p.read_at, r.read_at"
         " FROM known_profession p JOIN character_read r ON p.character_read_id = r.id"
-        " WHERE r.realm = ? AND r.era = ?",
-        (market.realm, market.era.value),
+        " WHERE r.realm = ? AND r.era = ? AND (? IS NULL OR r.read_at <= ?)",
+        (market.realm, market.era.value, as_of, as_of),
     ):
         if character not in characters:
             continue

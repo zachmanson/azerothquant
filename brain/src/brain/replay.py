@@ -200,7 +200,6 @@ def replay(
         deposit = deposit_of(conn, config, market)
         vendor = vendor_prices(conn, market.era)
         cut = auction_cut(market, config)
-        recipes = known_recipes(conn, market)
         merchant = {str(i): cost for i, cost in merchant_costs(conn, market).items()}
         scan_values: dict[int, dict[str, float]] = {}
         graded: Counter[Policy] = Counter()
@@ -211,6 +210,7 @@ def replay(
             untouched = sum(exit_values(conn, config, market, held, t + horizon, bound).values())
             others = supply_at(conn, market, t, others_only=True)
             gold = pooled_gold(conn, market.era, market.realm, market.faction, t)
+            recipes = known_recipes(conn, market, as_of=t)
             moves = {
                 policy: _brain(
                     recommend_market(
