@@ -1,3 +1,15 @@
+2026-09-29 (later 5): #103 DONE and closed (1d39004), with /tdd then /code-review. `known_recipes`, `enchanting_skills`, `_professions` and `_market_characters` take an optional `as_of` (only Character Reads up to it count). `recommend_market(as_of)` passes it to `known_recipes` and to `_valuer(..., skills_as_of=)`. `exit_values(at)` passes `at`. The replay reads Known Recipes per replayed Scan. `_LATEST_CHARACTER_READS` is gone (inlined into `_market_characters`). CONTEXT (Known Recipe) says so. Replay on beta (24 h, 23 Scans): Brain 5g 67s 00c before, 5g 64s 29c after. TSM went from -286g 31s to -249g 73s, since it no longer crafts at a loss with recipes learned later (tables on #103).
+
+Next, in order:
+1. At the PC: #71's tune and #104's in-game check (both as in the entry below).
+2. Not at the PC: #77, #84.
+
+- Gotchas:
+  - `_valuer`'s `at` is the Scan time (live, the latest Scan). Don't bound Character-Read facts by it: live Reads after the latest Scan must still count. That's why `skills_as_of` is its own argument.
+  - Still no as-of: `merchant_costs` and `vendor_prices` (latest seen). Fine for now: they barely move.
+  - Review leftovers, not done: the "latest Read per Character up to a moment" SQL is now copied in `pooled_gold`, `_market_characters` and `_professions`, and could share a helper. The as-of argument is named `at`, `as_of` or `skills_as_of` depending on the function.
+  - Don't `git stash push -- <path>` here. It broke the index (everything showed as staged-deleted plus untracked). `git reset` fixed it without touching files.
+
 2026-09-29 (later 4): #104 BUILT (f6d2021), with /tdd then /code-review. It stays open for the in-game check. `Nudge.stampSaved` runs at PLAYER_LOGOUT. `Nudge.brainBehind` gives the oldest behind Scan's age. `Nudge.whenReloadReady` is now `Nudge.afterLoad(scans, now, after, ready, say)`, which either says `BRAIN_BEHIND_LINE` or starts the timer, and returns whether the Brain is behind. `waitingNote(unsaved, unimported, behind)` still puts unsaved Scans first. The review notes are on #104.
 
 Next, in order:
