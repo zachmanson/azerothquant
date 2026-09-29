@@ -116,7 +116,7 @@ def test_each_sell_rate_carries_its_evidence(db):
         reposts=0,
         coincidences=1,
         sale_units=6,
-        max_sale_price=100,
+        sale_prices=((100, 6),),
     )
     assert rates[SILK_KEY] == SellRate(
         units_per_day=0, sale_events=0, window_hours=0.5, reposts=1, coincidences=0
@@ -136,6 +136,32 @@ def test_the_max_sale_price_is_the_dearest_of_the_sale_events(db):
 
     assert rates[LINEN_KEY].sale_events == 1
     assert rates[LINEN_KEY].max_sale_price == 110
+
+
+def test_the_sell_rate_at_a_price_counts_only_the_sale_events_at_or_above_it():
+    # #107: 3 Sale Events over 10 h. At 100, the two at 100 and 150 count, 5 units of 6.
+    rate = SellRate(
+        units_per_day=6 / 10 * 24,
+        sale_events=3,
+        window_hours=10,
+        reposts=1,
+        coincidences=0,
+        sale_units=6,
+        typical_sale_size=2,
+        sale_prices=((99, 1), (100, 2), (150, 3)),
+    )
+
+    assert rate.at_or_above(100) == SellRate(
+        units_per_day=5 / 10 * 24,
+        sale_events=2,
+        window_hours=10,
+        reposts=1,
+        coincidences=0,
+        sale_units=5,
+        typical_sale_size=2,
+        sale_prices=((100, 2), (150, 3)),
+    )
+    assert rate.at_or_above(151).sale_events == 0
 
 
 @pytest.mark.parametrize(("ended_ago", "counted"), [(14 * DAY - 1, True), (14 * DAY, False)])

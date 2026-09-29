@@ -200,6 +200,7 @@ class _SellRun:
     post_at: float
     profit: float
     days: float  # until its last unit sells, behind the held units (#98)
+    sale_events: int  # the Sale Events at or above `post_at` it counts on (#107)
 
     @property
     def cost(self) -> int:
@@ -228,7 +229,6 @@ class _FlipToSell:
 
     item_key: str
     runs: tuple[_SellRun, ...]
-    sale_events: int
     stack: float  # the units posted per stack: the usual Sale Event size (#98)
 
     @property
@@ -686,15 +686,17 @@ def _craft_way(item_key: str, plan: "_Plan", sources: "_Sources", config: Config
 
 
 def _sell_way(item_key: str, valuer: "_Valuer", config: Config) -> _WayOut | None:
-    """One more unit posted as a Flip would post it (`_Valuer.post_at`), after the cut,
-    the effort of posting it and the deposits it's expected to lose queued behind the
-    unbound held units. It's good for what sells within the Sale Horizon after them."""
+    """One more unit posted as a Flip would post it (`_Valuer.flip_post_at`), after the
+    cut, the effort of posting it and the deposits it's expected to lose queued behind the
+    unbound held units. It's good for what sells within the Sale Horizon after them,
+    counting only the Sale Events at or above that price (#107)."""
     held = valuer.held.get(item_key, 0)
-    room = _flip_room(valuer.rates.get(item_key), config) - held
-    post_at = valuer.post_at(item_key)
-    if room <= 0 or post_at is None:
+    post_at = valuer.flip_post_at(item_key)
+    demand = _demand_at(valuer.rates.get(item_key), post_at)
+    room = _flip_room(demand, config) - held
+    if room <= 0:
         return None
-    lost, _ = valuer.flip_lost(item_key, 1)
+    lost = _flip_queue(valuer.queue(item_key, flips=True), demand, config).lost(held)
     value = post_at * (1 - valuer.cut) - valuer.effort(item_key) - lost
     return _WayOut(value, Action.SELL, room)
 
@@ -1024,12 +1026,6 @@ class _Valuer:
         per_day = _units_per_day(self.rates.get(item_key), *priors)
         return _Queue(per_day / 24, self.deposit(item_key), c.post_duration_hours)
 
-    def flip_lost(self, item_key: str, units: int) -> tuple[float, float]:
-        """The deposits the last of `units` Flipped to Sell is expected to lose, and all of
-        them, queued behind the unbound `held` units (#78)."""
-        queue, held = self.queue(item_key, flips=True), self.held.get(item_key, 0)
-        return queue.lost(held + units - 1), queue.lost_by(held, units)
-
     def effort(self, item_key: str) -> int:
         """What a Flip is charged for each unit of an Item Key it buys, and again for each
         it posts: nothing unless it doesn't stack (#73)."""
@@ -1071,14 +1067,23 @@ class _Valuer:
         return _sale_size(self.rates.get(item_key), self._config.sale_size_prior_events_flips)
 
     def post_at(self, item_key: str) -> float | None:
-        """The price to post one unit at once `flipped` is bought (`_post_at`)."""
+        """The price to post one held unit at once `flipped` is bought (`_post_at`), never
+        above the dearest Sale Event (#41)."""
         rate = self.rates.get(item_key)
+        return self._post_at_or_under(item_key, rate.max_sale_price if rate else None)
+
+    def flip_post_at(self, item_key: str) -> float | None:
+        """The price to post one unit bought to Sell at once `flipped` is bought. Only a
+        merchant caps it: the demand at the price does the rest (#107)."""
+        return self._post_at_or_under(item_key, None)
+
+    def _post_at_or_under(self, item_key: str, cap: float | None) -> float | None:
         return _post_at(
             self.supply.get(item_key, []),
             self.others.get(item_key, []),
             self.flipped.get(item_key, []),
             self._config,
-            _ceiling(rate.max_sale_price if rate else None, self.merchant.get(item_key)),
+            _ceiling(cap, self.merchant.get(item_key)),
         )
 
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
@@ -1837,17 +1842,21 @@ def _outlet(
     config: Config,
 ) -> _Outlet:
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
-    within the Sale Horizon under the Flip priors, less the `held` units. It resells like
-    them, posted under the cheapest other Listing, as if the Flip to Craft were the only
-    buy (#86), and never above what a merchant charges (#63). `others` is other players'
-    asks."""
-    room, post_at, queued = _flip_room(rate, config), None, held
+    within the Sale Horizon under the Flip priors, less the `held` units, counting only
+    the Sale Events at or above its post price (#107), and its units wait in the `queue`
+    at that rate. It resells like them, posted under the cheapest other Listing, as if the
+    Flip to Craft were the only buy (#86), and never above what a merchant charges (#63).
+    `others` is other players' asks."""
+    post_at = _post_at(supply, others, [], config, merchant_cost)
+    demand = _demand_at(rate, post_at)
+    room = _flip_room(demand, config)
     if room:
-        room = max(0, room - queued)
-        cap = _ceiling(rate.max_sale_price, merchant_cost)
-        post_at = _post_at(supply, others, [], config, cap)
+        room = max(0, room - held)
+        queue = _flip_queue(queue, demand, config)
+    else:
+        post_at = None
     resale = None if post_at is None else post_at * (1 - cut)
-    return _Outlet(room, post_at, resale, vendor_price or 0, bound, effort, queue, queued)
+    return _Outlet(room, post_at, resale, vendor_price or 0, bound, effort, queue, held)
 
 
 @dataclass(frozen=True)
@@ -2170,20 +2179,19 @@ def _flips(
     Listing that would undercut the resale is worth buying through, so every run of the
     cheapest offers is tried, and the one with the most profit whose every unit clears
     the Flip margin is bought (#62); the shorter runs that clear it are kept for when
-    gold can't buy that one (ADR-0011). The resale is never above the
-    dearest Sale Event behind the Sell Rate, so a lone ask far above every sale isn't
-    taken at its word (#41), nor above what a merchant charges for it (#63). Nothing is
-    bought to Sell unless the Sell Rate rests on the minimum of Sale Events for a Flip
-    (#57). Anything else under the Vendor Price is bought to Vendor. Each unit bought
-    costs the `effort` of buying it, and one bought to Sell the effort of posting it too
-    (#73), and the deposits it's expected to lose waiting its turn in the `queue` after
-    the `held` units (#78).
+    gold can't buy that one (ADR-0011). Each run counts only the Sale Events at or above
+    its post price (#107), both for the minimum of Sale Events for a Flip (#57) and for
+    what sells within the Sale Horizon, so a lone ask far above every sale isn't taken at
+    its word (#41). The post price never falls as a run grows, so neither does the room
+    grow. The resale is never above what a merchant charges (#63). Anything else under
+    the Vendor Price is bought to Vendor. Each unit bought costs the `effort` of buying
+    it, and one bought to Sell the effort of posting it too (#73), and the deposits it's
+    expected to lose waiting its turn in the `queue` after the `held` units (#78), at the
+    Sell Rate at its post price.
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
     prefix: Supply = []
-    room = max(0, _flip_room(rate, config) - held)
-    cap = _ceiling(rate.max_sale_price if rate else None, merchant_cost)
     # What `_post_at` works out for each run, without rebuilding the supply per run (#105):
     # the player's own Listings don't change, and the cheapest offer left is this one if
     # it's only partly bought, else the cheapest one after it.
@@ -2191,25 +2199,34 @@ def _flips(
     after = _cheapest_from(offers)
     bought = 0
     for i, (unit, quantity) in enumerate(offers):
-        take = min(quantity, room)
+        take, post_at = _sell_take(
+            quantity,
+            bought,
+            _undercut(after[i + 1], own, config, merchant_cost),
+            _undercut(unit, own, config, merchant_cost),
+            lambda price: _room_at(rate, price, held, config),
+        )
         if not take:
             break
         prefix = [*prefix, (unit, take)]
-        room -= take
         bought += take
-        post_at = _undercut(unit if take < quantity else after[i + 1], own, config, cap)
-        resale = None if post_at is None else post_at * (1 - cut)
+        demand = _demand_at(rate, post_at)
+        at_price = _flip_queue(queue, demand, config)
+        resale = post_at * (1 - cut)
         # Offers are cheapest first and the last unit waits longest, so if the dearest unit
         # clears the margin after its deposits, all do.
-        if not _resells(resale, unit, vendor_price, effort, queue.lost(held + bought - 1), config):
-            continue
-        profit = sum((resale - 2 * effort - u) * n for u, n in prefix) - queue.lost_by(held, bought)
-        days = (held + bought) / (queue.units_per_hour * 24)
-        runs.append(_SellRun(prefix, post_at, profit, days))
+        lost = at_price.lost(held + bought - 1)
+        if _resells(resale, unit, vendor_price, effort, lost, config):
+            profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
+            profit -= at_price.lost_by(held, bought)
+            days = (held + bought) / (at_price.units_per_hour * 24)
+            runs.append(_SellRun(prefix, post_at, profit, days, demand.sale_events))
+        if take < quantity:
+            break  # the rest of this Listing is left, so no longer run buys past it
     buys: list[_VendorBuy | _FlipToSell] = []
     to_sell: Supply = []
     if runs:
-        flip = _FlipToSell(item_key, tuple(runs), rate.sale_events, stack)
+        flip = _FlipToSell(item_key, tuple(runs), stack)
         buys.append(flip)
         to_sell = flip.whole.units
     if vendor_price is not None:
@@ -2240,24 +2257,30 @@ def _hold_buys(
 
     A unit's Max Loss is its buyout less its exit without the Prediction. That's Sell, at
     the resale a Flip would get, for the units that would sell within the Sale Horizon if
-    the Prediction were wrong, after the `held` ones, judged as strictly as a Flip and
-    never above what a merchant charges (#63), less the deposits each is expected to lose
-    waiting its turn in the `queue` (#78). The rest can only be Vendored, or are worth
-    nothing without a Vendor Price.
+    the Prediction were wrong, after the `held` ones, judged as strictly as a Flip: only
+    the Sale Events at or above the resale's post price count (#107), and it's never
+    above what a merchant charges (#63). Each is less the deposits it's expected to lose
+    waiting its turn in the `queue` at that rate (#78). The rest can only be Vendored, or
+    are worth nothing without a Vendor Price.
     """
-    room = max(0, _flip_room(rate, config) - held)
     bought: Supply = []
     buys = []
+    selling = True  # until a Listing is only partly taken: the rest of it stays up
     for unit, quantity in sorted(offers):
-        take = min(quantity, room)
-        resale = (
-            _resale(supply, offers, [*bought, (unit, take)], cut, config, merchant_cost)
-            if take
-            else None
-        )
         queued = held + sum(n for _, n in bought)
+        take, post_at = 0, None
+        if selling:
+            take, post_at = _sell_take(
+                quantity,
+                queued - held,
+                _post_at(supply, offers, [*bought, (unit, quantity)], config, merchant_cost),
+                _post_at(supply, offers, [*bought, (unit, quantity - 1)], config, merchant_cost),
+                lambda price: _room_at(rate, price, held, config),
+            )
+        resale = post_at * (1 - cut) if take else 0
+        at_price = _flip_queue(queue, _demand_at(rate, post_at), config)
         exits = [
-            max((resale or 0) - queue.lost(queued + i), vendor_price or 0) for i in range(take)
+            max(resale - at_price.lost(queued + i), vendor_price or 0) for i in range(take)
         ] + [vendor_price or 0] * (quantity - take)
         parts = [(len(list(same)), exit_value) for exit_value, same in groupby(exits)]
         for n, exit_value in parts:
@@ -2266,7 +2289,7 @@ def _hold_buys(
                 return buys
             buys.append(_HoldBuy(item_key, prediction, unit, n, max_loss))
         bought.append((unit, take))
-        room -= take
+        selling = selling and take == quantity
     return buys
 
 
@@ -2292,6 +2315,42 @@ def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[
             max_loss=r.max_loss + quantity * buy.unit_max_loss,
         )
     return list(rows.values())
+
+
+def _sell_take(
+    quantity: int,
+    bought: int,
+    post_if_all: float | None,
+    post_if_part: float | None,
+    room_at: Callable[[float | None], int],
+) -> tuple[int, float | None]:
+    """How many units of the next Listing a buy to Sell takes after `bought` units, and the
+    price they're all posted at (#107). The whole Listing if the room at the price that
+    leaves, `post_if_all`, has space for it. Else part of it, posted under what's left of
+    it at `post_if_part`, which is never dearer and so never has less room."""
+    if bought + quantity <= room_at(post_if_all):
+        return quantity, post_if_all
+    return max(0, min(quantity - 1, room_at(post_if_part) - bought)), post_if_part
+
+
+def _demand_at(rate: SellRate | None, post_at: float | None) -> SellRate | None:
+    """The Sell Rate a unit bought to Sell counts on when posted at `post_at` (#107): only
+    the Sale Events at or above it. None without a Sell Rate or a price."""
+    return None if rate is None or post_at is None else rate.at_or_above(post_at)
+
+
+def _room_at(rate: SellRate | None, post_at: float | None, held: int, config: Config) -> int:
+    """Units bought to Sell at `post_at` that should sell within the Sale Horizon after the
+    `held` ones, from the demand at that price (`_demand_at`, `_flip_room`)."""
+    return max(0, _flip_room(_demand_at(rate, post_at), config) - held)
+
+
+def _flip_queue(queue: _Queue, demand: SellRate | None, config: Config) -> _Queue:
+    """`queue` moving at the `demand` Sell Rate under the Flip priors (#107)."""
+    per_day = _units_per_day(
+        demand, config.sell_rate_prior_hours_flips, config.sale_size_prior_events_flips
+    )
+    return replace(queue, units_per_hour=per_day / 24)
 
 
 def _flip_room(rate: SellRate | None, config: Config) -> int:
@@ -2345,19 +2404,6 @@ def _sale_size(rate: SellRate | None, prior_events: float) -> float:
     return (rate.sale_units + prior_events * rate.typical_sale_size) / (
         rate.sale_events + prior_events
     )
-
-
-def _resale(
-    supply: Supply,
-    others: Supply,
-    bought: Supply,
-    cut: float,
-    config: Config,
-    cap: float | None = None,
-) -> float | None:
-    """What one unit brings in after the cut, posted at `_post_at`."""
-    value = _post_at(supply, others, bought, config, cap)
-    return None if value is None else value * (1 - cut)
 
 
 def _post_at(
@@ -2475,7 +2521,7 @@ def _option(
                 run.dearest,
                 run.profit,
                 post_at=run.post_at,
-                sale_events=buy.sale_events,
+                sale_events=run.sale_events,
                 cost=run.cost,
                 listings=run.listings,
                 # A hair under, so 4 units in stacks of 2.0000001 are still 2 posts.

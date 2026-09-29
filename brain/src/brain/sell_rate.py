@@ -4,7 +4,7 @@ only (ADR-0004)."""
 import sqlite3
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import median
 
 from brain.config import Config
@@ -25,9 +25,29 @@ class SellRate:
     # of one to shrink their average size toward.
     sale_units: int = 0
     typical_sale_size: float = 1.0
-    # The dearest unit buyout among those Sale Events, so a Flip never counts on reselling
-    # above what's been seen to sell (#41). None without any.
-    max_sale_price: int | None = None
+    # Each Sale Event's (dearest unit buyout, units), so a buy to Sell can count only the
+    # demand at the price it would post at (#107).
+    sale_prices: tuple[tuple[int, int], ...] = ()
+
+    @property
+    def max_sale_price(self) -> int | None:
+        """The dearest unit buyout among the Sale Events, so held units are never counted
+        on selling above what's been seen to sell (#41). None without any."""
+        return max((price for price, _ in self.sale_prices), default=None)
+
+    def at_or_above(self, price: float) -> "SellRate":
+        """This Sell Rate from only the Sale Events priced at or above `price` (#107): the
+        demand a unit posted at `price` can count on. The window hours and the typical
+        sale size stay the Market's and the Item Key's."""
+        kept = tuple((p, units) for p, units in self.sale_prices if p >= price)
+        units = sum(n for _, n in kept)
+        return replace(
+            self,
+            units_per_day=units / self.window_hours * 24,
+            sale_events=len(kept),
+            sale_units=units,
+            sale_prices=kept,
+        )
 
 
 def sell_rates(
@@ -59,10 +79,10 @@ def sell_rates(
     market_sizes = [e.units for e in evidence.sale_events if e.item_key in stacking]
     market_size = median(market_sizes) if market_sizes else None
     units: Counter[str] = Counter()
-    max_price: dict[str, int] = {}
+    prices: dict[str, list[tuple[int, int]]] = defaultdict(list)
     for event in evidence.sale_events:
         units[event.item_key] += event.units
-        max_price[event.item_key] = max(max_price.get(event.item_key, 0), event.unit_buyout)
+        prices[event.item_key].append((event.unit_buyout, event.units))
     events = evidence.event_counts()
     reposts = evidence.repost_counts()
     coincidences = evidence.coincidence_counts()
@@ -75,7 +95,7 @@ def sell_rates(
             coincidences=coincidences.get(item_key, 0),
             sale_units=units[item_key],
             typical_sale_size=_typical_sale_size(market_size, quantities.get(item_key, [])),
-            max_sale_price=max_price.get(item_key),
+            sale_prices=tuple(prices.get(item_key, ())),
         )
         for item_key in {listing.item_key for listing in seen}
     }

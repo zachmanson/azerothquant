@@ -5,7 +5,7 @@ A Scan runs every 15 minutes or so, and a cheap Listing is often bought within m
 `way_out_value(k)` is the best per-unit value of k's ways out:
 
 - **Vendor**: the Vendor Price.
-- **Sell**: posted as a Flip would post it, under the latest Scan's other Listings and never above the dearest Sale Event or a Merchant Cost, after the cut, the effort of posting a non-stacking unit and the Deposits it's expected to lose queued behind the unbound held units. It needs the minimum of Sale Events for a Flip.
+- **Sell**: posted as a Flip would post it, under the latest Scan's other Listings and never above a Merchant Cost, with a Sell Rate from only the Sale Events at or above that price (#107 replaced the cap at the dearest Sale Event), after the cut, the effort of posting a non-stacking unit and the Deposits it's expected to lose queued behind the unbound held units. It needs the minimum of Sale Events for a Flip.
 - **Craft**: for each Known Recipe of any Character in the Market that takes k, the output's value (Sell or Vendor only) times its quantity, less the other reagents' cheapest current source (Merchant Cost, the cheapest other player's Listings, or a Sub-craft, as in ADR-0014) and the effort of buying them, over k's quantity in the recipe. The best recipe counts.
 
 `Buy Under = way_out_value − the effort of buying one unit − the Flip margin`, with the margin `max(flip_min_margin_copper, flip_min_margin_share × Buy Under)` solved for the price and floored to the copper. The margin is charged once, at the top: a chain built on a Buy Under (Disenchant mats, #76) builds on `way_out_value`, never on another Buy Under.

@@ -696,6 +696,104 @@ def test_a_flip_to_sell_still_undercuts_a_listing_under_the_merchant_cost(db):
     assert flip.post_at == 19499
 
 
+# --- Demand at the post price (#107) ---
+
+
+def three_sales_at_600_then_one_at_2500(*latest_rows):
+    """Scans an hour apart: 2 of the 600s sell in each of the first three hours, then 1
+    of the 2500s in the fourth. 7 units over 4 h, so 5 sell in the 3 h horizon."""
+    return [
+        scan(T0 + n * HOUR, row(quantity=8 - 2 * n, unit=600), row(quantity=3, unit=2500))
+        for n in range(4)
+    ] + [scan(T0 + 4 * HOUR, row(quantity=2, unit=600), row(quantity=2, unit=2500), *latest_rows)]
+
+
+def test_a_flip_to_sell_counts_only_the_sale_events_at_or_above_its_post_price(db):
+    # Buying the 600s through would post at 2499, but only the one 2500 sold that high,
+    # short of the 3 Sale Events a Flip needs. Posted at 599, just the 300s have all 4.
+    result = run(
+        db,
+        three_sales_at_600_then_one_at_2500(row(quantity=2, unit=300)),
+        [character_read(money=GOLD)],
+        config=replace(CONFIG, flip_min_sale_events=3),
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price, flip.post_at) == (Action.SELL, 2, 300, 599)
+
+
+def test_a_flip_to_sells_room_and_wait_come_from_the_sale_events_at_its_post_price(db):
+    # 2 of the 1000s sell every other hour, 6 in 6 h, and 8 of the 400s besides: 14 units,
+    # so 7 would sell in the 3 h horizon. At or above 999, only the 1000s count: 3 do.
+    # So the 700 isn't bought too, and the 3 cheap ones post under it, waiting 3 h.
+    thousands = [20, 18, 18, 16, 16, 14]
+    four_hundreds = [row(quantity=q, unit=400) for q in (12, 12, 8, 8)] + [
+        row(quantity=4, unit=400, time_left=1)  # gone next Scan, maybe expired: no sale
+    ]
+    scans = [
+        scan(T0 + n * HOUR, row(quantity=q, unit=1000), *four_hundreds[n : n + 1])
+        for n, q in enumerate(thousands)
+    ]
+    scans.append(
+        scan(
+            T0 + 6 * HOUR,
+            row(quantity=14, unit=1000),
+            *[row(unit=u) for u in (300, 310, 320, 700)],
+        )
+    )
+
+    result = run(db, scans, [character_read(money=GOLD)])
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at, flip.sale_events) == (3, 699, 3)
+    assert flip.days == pytest.approx(3 / 24)
+
+
+@pytest.mark.parametrize(("min_sale_events", "flipped"), [(3, True), (4, False)])
+def test_sale_events_at_exactly_the_post_price_count_toward_the_minimum(
+    db, min_sale_events, flipped
+):
+    # With no undercut the 500 posts at 1000, just what the 3 Sale Events sold at.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=500), unit=1000, sale_events=3),
+        [character_read(money=GOLD)],
+        config=replace(CONFIG, flip_min_sale_events=min_sale_events, post_undercut_copper=0),
+    )
+
+    assert [(r.action, r.post_at) for r in result[MARKET].shopping_list] == (
+        [(Action.SELL, 1000)] if flipped else []
+    )
+
+
+def test_no_flip_to_sell_posts_where_only_two_sale_events_ever_sold(db):
+    # #107, shaped like Hulking Gauntlets on beta: 8 Sale Events from 21s to 2g 99s, 11 up
+    # at 68s 73c and a wall at 2g 49s. Bought out, they'd post at 2g 48s 99c, where only
+    # the two 2g 99s sold: short of the 3 a Flip needs, though a day holds all 11. Each
+    # sale's stack is gone the Scan after, maybe expired.
+    sales = [(2100, 1), (8000, 2), (8000, 1), (29900, 1), (29900, 1), (18000, 1), (8800, 1)]
+    sales.append((3000, 1))
+    wall = row(quantity=3, unit=24900)
+
+    def stacks(n):
+        """The stack that sells in the window ending at Scan n, and the one sold before."""
+        up = [row(quantity=sales[n][1] + 1, unit=sales[n][0])] if n < len(sales) else []
+        sold = [row(unit=sales[n - 1][0], time_left=1)] if n else []
+        return up + sold
+
+    scans = [scan(T0 + n * HOUR, wall, *stacks(n)) for n in range(len(sales) + 1)]
+    scans.append(scan(T0 + (len(sales) + 1) * HOUR, wall, row(quantity=11, unit=6873)))
+
+    result = run(
+        db,
+        scans,
+        [character_read(money=GOLD)],
+        config=replace(CONFIG, flip_min_sale_events=3, sale_horizon_seconds=DAY),
+    )
+
+    assert [r for r in result[MARKET].shopping_list if r.action is Action.SELL] == []
+
+
 def test_own_listings_are_never_bought(db):
     result = run(
         db,
@@ -1950,6 +2048,25 @@ def test_a_flip_to_crafts_output_sells_only_on_the_minimum_of_sale_events(db, sa
     assert sum(made) == crafts
 
 
+def test_a_flip_to_crafts_output_counts_only_the_sale_events_at_or_above_its_post_price(db):
+    # #107: the Bolts sold at 500, but that stack is gone, maybe expired, and the output
+    # would post at 999 under the 1000s. Nothing sold that high, so no Linen is bought.
+    scans = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=20 - 2 * n, unit=100),
+            row(BOLT, quantity=20 - 2 * n, unit=500, time_left=4 if n < 3 else 1),
+            row(BOLT, quantity=5, unit=1000),
+        )
+        for n in range(4)
+    ]
+    scans.append(scan(T0 + 4 * HOUR, row(quantity=12, unit=100), row(BOLT, quantity=5, unit=1000)))
+
+    result = run(db, scans, [character_read(money=GOLD, recipes=[recipe()])])
+
+    assert [r for r in result[MARKET].shopping_list if r.action is Action.CRAFT] == []
+
+
 def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db):
     # #86: 15 copper. A Bolt from 2 Linen at 5 (10 copper) and all 3 Ore to Vendor (15)
     # are both shown, and so is the Tin to Hold under its Prediction.
@@ -2600,6 +2717,40 @@ def test_a_buys_exit_is_sell_only_on_the_minimum_of_sale_events(db, sale_events,
     assert sum(r.quantity for r in result[MARKET].prediction_buys) == bought
 
 
+def test_a_prediction_buys_max_loss_counts_only_the_sale_events_at_or_above_the_resale(db):
+    # #107: the Linen sold at 500, but that stack is gone, maybe expired, and resold under
+    # the 1000s it would post at 999. Nothing sold that high, so without the Prediction a
+    # 700 only Vendors for 650, losing 50. The 1000s would lose 350, too much to buy.
+    scans = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=20 - 2 * n, unit=500, time_left=4 if n < 3 else 1),
+            row(quantity=5, unit=1000),
+        )
+        for n in range(4)
+    ]
+    scans.append(scan(T0 + 4 * HOUR, row(quantity=5, unit=1000), row(quantity=2, unit=700)))
+
+    result = run(
+        db,
+        scans,
+        [character_read(money=GOLD, vendor_prices={2589: 650})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].prediction_buys == [
+        Row(
+            LINEN_KEY,
+            Action.HOLD,
+            2,
+            price=700,
+            cost=2 * 700,
+            max_loss=2 * 50,
+            prediction="Linen spike",
+        )
+    ]
+
+
 def test_held_units_count_toward_a_predictions_cap_before_it_buys(db):
     # 15% of 1g is 15s. The 3 Ore held would Vendor for 1s each today, so 12s is left for
     # Linen at 1s, which can lose 5c each against the 95c a vendor pays.
@@ -3205,6 +3356,26 @@ def test_the_sell_way_buys_under_the_price_a_flip_would_post_at(
     )
 
     assert [(b.price, b.way, b.units) for b in result[MARKET].buy_under] == expected
+
+
+def test_the_sell_way_counts_only_the_sale_events_at_or_above_its_post_price(db):
+    # #107: the Linen sold at 900, but that stack is gone, maybe expired, and it would
+    # post at 999 under the 1000s. Nothing sold that high, so there's no Sell way, and
+    # without a Vendor Price no Buy Under, though a 600 was seen.
+    scans = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=20 - 2 * n, unit=900, time_left=4 if n < 3 else 1),
+            row(quantity=5, unit=1000),
+            *([row(unit=600, time_left=1)] if n == 0 else []),
+        )
+        for n in range(4)
+    ]
+    scans.append(scan(T0 + 4 * HOUR, row(quantity=5, unit=1000)))
+
+    result = run(db, scans, [character_read()])
+
+    assert result[MARKET].buy_under == []
 
 
 THREAD = "item:2320::::::::20:1490"
