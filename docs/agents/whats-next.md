@@ -1,3 +1,15 @@
+2026-09-29 (later 17): AT THE PC. #93 verified and closed; the #106 spike passes.
+- #93: the Brain drops options over its own Budget, so a row only folds when the box is set below the Budget the Brain sized at. The check: size the Brain at 0.1g, then set the box to 0.01g without a reload. No Craft fits 0.1g right now, so it was checked on the Shopping List, which uses the same `section()` path.
+- #106: the client reads a LoadOnDemand addon's file from disk when it loads. The global `LoadAddOn` is nil here; use `C_AddOns.LoadAddOn`. Now `needs-info` + `later`: grill its open questions before building. The TestLOD folder is removed.
+
+Next, in order:
+1. At the PC: the rest of #85 (Buy Under tab, AH wash, Disenchant groups).
+2. Not at the PC: grill #90 (Beta Prior column) before Live on Nov 4; #91 has the same deadline. Then grill #106's open questions.
+
+- Gotchas:
+  - RecommendationFrame.lua has no busted seam. Any change to it needs an in-game check on #85.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 16): AT THE PC. Fixed a #109 bug (98b4da2): after /reload the Budget and Days to Sell boxes showed blank over saved values, and an Enter in a blank box wiped the setting. The frame's OnShow now fills both boxes and clears focus. Checked in game. Results are on #85 and #109.
 - #108: `--why-not` ran; the near misses are all Flip margin and none are on the Shopping List. 17 of 20 show `?` for the name (the Brain lacks their names). Not filed yet.
 - #93: not exercised. At Budget 0.1g the only Craft (4s 74c) fit. Set the Budget to 0.01 to force the all-over-Budget case.
