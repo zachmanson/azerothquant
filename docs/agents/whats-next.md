@@ -1,3 +1,17 @@
+2026-09-29 (later 15): TRIAGE DONE, nothing built. needs-triage is empty.
+- #92 closed: fixed by #105. The latest `Import took` lines (on #71) are 11-23 s warm and 31 s cold, down from 33-56 s.
+- #106: its LoadOnDemand spike is added to #85's checklist. Relabelled `needs-pc` + `later`.
+- #56 is `ready-for-agent` (a `/research` task, `later`).
+- #97, #91, #90, #89, #61, #60, #58, #55 and #54 are `needs-info`: each needs a grill with the user. #55's body had a stray pasted `gh issue create` command, now removed.
+
+Next, in order:
+1. At the PC: #85's list: #93's check (Budget 0.1g, open Flips to Craft), #108's check (`brain recommend --why-not` vs the Shopping List), #109's Days to Sell = 2 check, and #106's LoadOnDemand spike.
+2. Not at the PC: grill #90 (Beta Prior column). It's `later`, but it only helps if built before Live on Nov 4, so the user may want it made `core`. #91 (Launch Predictions) has the same deadline.
+
+- Gotchas:
+  - Before building an issue from this queue, check `git log --grep '#N'` and the issue's last comment.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 14): #93 BUILT (f147226), with /tdd then /code-review, and relabelled needs-triage -> needs-pc. In `section()` (RecommendationTable.lua), a tab with no rows only gets its `empty` text when nothing was folded over the Budget, so an all-over-Budget tab shows just "N over the Budget (Reload to re-size)". A tab of only low-value rows still says it's empty, since those aren't options. The mixed case can only happen on the Shopping List, because a Craft is never low-value.
 
 Next, in order:
