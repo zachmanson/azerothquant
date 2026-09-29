@@ -1,3 +1,18 @@
+2026-09-29 (later 18): AT THE PC. #85's Buy Under checks done; #88 closed. One fix (6fec61b).
+- The AH green wash never fired: the ScrollBox init callback gets an index as elementData, and row.rowData is still nil then. The Listing now comes from `list.getEntry(index)`. Checked on all three lists (browse, item, commodity), scrolling included.
+- The Disenchant group Buy Unders are correct but empty on real data: Beta mats are too cheap for any group to pay (numbers on #85). The Addon half was checked with a test group row.
+- Cosmetic, not filed: long item names and a group row's Way out get cut off with `...` in the Buy Under tab.
+
+Next, in order:
+1. Not at the PC: grill #90 (Beta Prior column) before Live on Nov 4; #91 has the same deadline. Then grill #106's open questions.
+2. At the PC: nothing is queued on #85.
+
+- Gotchas:
+  - The Brain only knows the Enchanting skill level from a Read taken with the Enchanting window open.
+  - To test an Addon path with no live data, add a tagged entry to the local Recommendations.lua and /reload at once: `brain watch` overwrites it on the next import.
+  - RecommendationFrame.lua and BuyUnderHighlight.lua have no busted seam. Changes need an in-game check on #85.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 17): AT THE PC. #93 verified and closed; the #106 spike passes.
 - #93: the Brain drops options over its own Budget, so a row only folds when the box is set below the Budget the Brain sized at. The check: size the Brain at 0.1g, then set the box to 0.01g without a reload. No Craft fits 0.1g right now, so it was checked on the Shopping List, which uses the same `section()` path.
 - #106: the client reads a LoadOnDemand addon's file from disk when it loads. The global `LoadAddOn` is nil here; use `C_AddOns.LoadAddOn`. Now `needs-info` + `later`: grill its open questions before building. The TestLOD folder is removed.
