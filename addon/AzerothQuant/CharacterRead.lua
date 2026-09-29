@@ -81,7 +81,9 @@ end
 -- each, or nil if the client couldn't say.
 -- merchantCosts: MerchantCosts read from every merchant visited this session. Left out of
 -- the Read when there are none.
-function CharacterRead.build(who, bagSlots, bank, professions, professionList, merchantCosts)
+-- disenchantResults: the DisenchantCapture Results of this session (#76). Left out of the
+-- Read when there are none.
+function CharacterRead.build(who, bagSlots, bank, professions, professionList, merchantCosts, disenchantResults)
   local slotLists = { bagSlots, bank and bank.slots or {} }
   local prices, missing = vendorPrices(slotLists)
   return {
@@ -100,6 +102,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList, m
     professions = professions and next(professions) and professions or nil,
     professionList = professionList,
     merchantCosts = merchantCosts and next(merchantCosts) and merchantCosts or nil,
+    disenchantResults = disenchantResults and next(disenchantResults) and disenchantResults or nil,
   }
 end
 

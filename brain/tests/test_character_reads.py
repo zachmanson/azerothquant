@@ -5,11 +5,13 @@ import pytest
 
 from brain.archive import Archive
 from brain.config import Config, Era, Install
+from brain.disenchant import DisenchantResult
 from brain.history import (
     Holding,
     KnownRecipe,
     Market,
     Reagent,
+    disenchant_results,
     holdings,
     import_character_reads,
     known_recipes,
@@ -553,3 +555,54 @@ def test_merchant_costs_are_the_lowest_of_each_characters_latest_price(db):
     run(db, character_read(T0, "Kash-Patel", merchant_costs={THREAD: 1}), era=Era.LIVE)
 
     assert merchant_costs(db, ALLIANCE) == {THREAD: 10, VIAL: 10 / 3}
+
+
+# --- Disenchant Results (#76) ---
+
+
+def test_disenchant_results_are_imported_with_their_item_group_and_mats(db):
+    read = character_read(character="Bob-Patel")
+    read["disenchantResults"] = [
+        {
+            "itemID": 9999,
+            "itemLevel": 18,
+            "quality": 2,
+            "classID": 4,
+            "mats": {10940: 2, 10938: 1},
+            "at": T0 - 60,
+        },
+        # Group only: alike items left the bags together.
+        {"itemLevel": 18, "quality": 2, "classID": 4, "mats": {10940: 1}, "at": T0 - 50},
+        # From the Archive's JSON, mats are keyed by strings; this one couldn't be placed.
+        {"mats": {"10940": 3}, "at": T0 - 40},
+    ]
+
+    run(db, read)
+
+    assert disenchant_results(db, Era.BETA) == [
+        DisenchantResult(
+            at=T0 - 60,
+            character="Bob-Patel",
+            mats={10940: 2, 10938: 1},
+            item_id=9999,
+            item_level=18,
+            quality=2,
+            class_id=4,
+        ),
+        DisenchantResult(
+            at=T0 - 50, character="Bob-Patel", mats={10940: 1}, item_level=18, quality=2, class_id=4
+        ),
+        DisenchantResult(at=T0 - 40, character="Bob-Patel", mats={10940: 3}),
+    ]
+    assert disenchant_results(db, Era.LIVE) == []
+
+
+def test_a_disenchant_result_the_brain_cant_read_is_skipped_with_a_warning(db):
+    read = character_read()
+    read["disenchantResults"] = [{"at": T0, "mats": "dust"}, {"mats": {10940: 1}}]
+
+    report = run(db, read)
+
+    assert disenchant_results(db, Era.BETA) == []
+    assert len(report.warnings) == 1
+    assert "2 Disenchant Results" in report.warnings[0]

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from brain.archive import Archive
 from brain.config import Config, Era
-from brain.disenchant import ItemInfo
+from brain.disenchant import DisenchantResult, ItemInfo
 from brain.mailbox import (
     OUTCOME_KINDS,
     AuctionMail,
@@ -170,6 +170,25 @@ CREATE TABLE IF NOT EXISTS item_info (
     equip_loc TEXT NOT NULL,   -- empty when it can't be equipped
     seen_at INTEGER NOT NULL,  -- requestedAt or readAt of the Scan or Read it came from
     PRIMARY KEY (era, item_id)
+);
+
+-- What each Disenchant the player cast yielded (#76), carried on the Character Read of its
+-- session. The item's fields are NULL when the Addon couldn't tell which item it was.
+CREATE TABLE IF NOT EXISTS disenchant_result (
+    id INTEGER PRIMARY KEY,
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    at INTEGER NOT NULL,
+    item_id INTEGER,
+    item_level INTEGER,
+    quality INTEGER,
+    class_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS disenchant_result_by_read ON disenchant_result (character_read_id);
+
+CREATE TABLE IF NOT EXISTS disenchant_result_mat (
+    disenchant_result_id INTEGER NOT NULL REFERENCES disenchant_result (id),
+    item_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL
 );
 
 -- One row per profession window read carried on a Character Read (its professions map).
@@ -795,6 +814,54 @@ def _import_character_read(
         "INSERT INTO merchant_cost (character_read_id, item_id, cost) VALUES (?, ?, ?)",
         [(read_id, item_id, cost) for item_id, cost in costs.items()],
     )
+    _import_disenchant_results(conn, read_id, raw, report)
+
+
+def _import_disenchant_results(
+    conn: sqlite3.Connection, read_id: int, raw: dict, report: ImportReport
+) -> None:
+    unreadable = 0
+    for entry in _entries(raw.get("disenchantResults")):
+        parsed = _disenchant_result(entry)
+        if parsed is None:
+            unreadable += 1
+            continue
+        fields, mats = parsed
+        cursor = conn.execute(
+            "INSERT INTO disenchant_result (character_read_id, at, item_id, item_level, quality,"
+            " class_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (read_id, *fields),
+        )
+        conn.executemany(
+            "INSERT INTO disenchant_result_mat (disenchant_result_id, item_id, quantity)"
+            " VALUES (?, ?, ?)",
+            [(cursor.lastrowid, item_id, qty) for item_id, qty in mats.items()],
+        )
+    if unreadable:
+        report.warn(
+            f"Character Read at {raw['readAt']} for {raw['character']}: skipped"
+            f" {unreadable} Disenchant Results the Brain can't read."
+        )
+
+
+def _disenchant_result(entry: dict) -> tuple[tuple, dict[int, int]] | None:
+    """(at, item_id, item_level, quality, class_id) and the mats of one Result, or None if
+    it can't be read. The item's fields may each be None; the Addon leaves them out when
+    it couldn't tell which item it was."""
+    at, mats = entry.get("at"), entry.get("mats")
+    if not _whole(at) or not isinstance(mats, dict):
+        return None
+    quantities = {}
+    for item_id, qty in mats.items():
+        if isinstance(item_id, str) and item_id.isdigit():
+            item_id = int(item_id)
+        if not _whole(item_id) or not _whole(qty) or qty < 1:
+            return None
+        quantities[item_id] = qty
+    fields = [entry.get(k) for k in ("itemID", "itemLevel", "quality", "classID")]
+    if not all(f is None or _whole(f) for f in fields):
+        return None
+    return (at, *fields), quantities
 
 
 def _merchant_costs(raw: dict) -> tuple[dict[int, float], int]:
@@ -1252,6 +1319,28 @@ def item_info(conn: sqlite3.Connection, era: Era) -> dict[int, ItemInfo]:
         (era.value,),
     )
     return {item_id: ItemInfo(*fields) for item_id, *fields in rows}
+
+
+def disenchant_results(conn: sqlite3.Connection, era: Era) -> list[DisenchantResult]:
+    """Every Disenchant Result recorded in the Era, oldest first."""
+    rows = conn.execute(
+        "SELECT d.id, d.at, r.character, d.item_id, d.item_level, d.quality, d.class_id"
+        " FROM disenchant_result d JOIN character_read r ON d.character_read_id = r.id"
+        " WHERE r.era = ? ORDER BY d.at, d.id",
+        (era.value,),
+    ).fetchall()
+    mats: dict[int, dict[int, int]] = {}
+    for result_id, item_id, qty in conn.execute(
+        "SELECT m.disenchant_result_id, m.item_id, m.quantity FROM disenchant_result_mat m"
+        " JOIN disenchant_result d ON m.disenchant_result_id = d.id"
+        " JOIN character_read r ON d.character_read_id = r.id WHERE r.era = ?",
+        (era.value,),
+    ):
+        mats.setdefault(result_id, {})[item_id] = qty
+    return [
+        DisenchantResult(at, character, mats.get(result_id, {}), *fields)
+        for result_id, at, character, *fields in rows
+    ]
 
 
 def _market_characters(conn: sqlite3.Connection, market: Market) -> set[str]:

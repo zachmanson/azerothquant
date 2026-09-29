@@ -13,6 +13,7 @@ import pytest
 from brain.archive import Archive
 from brain.cli import (
     RebuildError,
+    run_disenchants,
     run_import,
     run_rebuild,
     run_recommend,
@@ -782,3 +783,43 @@ def test_recommend_prints_a_flip_to_crafts_reagent_buys(tmp_path):
 
     [craft] = [line for line in lines if line[:2] == ["2996", "Craft"] and "(buy" in line[-1]]
     assert craft[-1].startswith("on Kash-Patel: uses ") and "of 2589 (buy " in craft[-1]
+
+
+def test_disenchants_prints_each_groups_mats_next_to_the_table(tmp_path):
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    result = {"itemLevel": 18, "quality": 2, "classID": 4, "at": 1790000000}
+    read = {
+        "readAt": 1790000100,
+        "realm": "Classic Beta PvP",
+        "character": "Bob-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "disenchantResults": [result | {"mats": {10940: 2}}, result | {"mats": {10940: 3}}],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    text = run_disenchants(config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Beta: 2 Disenchant Results, a group judged from 20" in text
+    assert "Green armor ilvl 16-20" in text
+    # Strange Dust both times: 100% (Wilson 34.2% to 100.0%) against the table's 75%,
+    # and a mean of 2.5 (t-interval 2.5 ± 12.706 × 0.707 / √2) against its 2.5.
+    assert [
+        "10940",
+        "2",
+        "100.0% (34.2% to 100.0%)",
+        "75.0%",
+        "2.50 (-3.85 to 8.85)",
+        "2.50",
+        "too few Results",
+    ] in lines
+
+
+def test_disenchants_says_when_there_are_none(tmp_path):
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    open_history(config.history_path).close()
+
+    assert run_disenchants(config) == "No Disenchant Results yet.\n"

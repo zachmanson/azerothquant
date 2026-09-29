@@ -27,6 +27,20 @@ class ItemInfo:
 
 
 @dataclass(frozen=True)
+class DisenchantResult:
+    """What one of the player's Disenchants yielded, as the Addon captured it. The item
+    and its group are None when the Addon couldn't tell which item it was."""
+
+    at: int
+    character: str
+    mats: dict[int, int]  # quantity by itemID
+    item_id: int | None = None
+    item_level: int | None = None
+    quality: int | None = None
+    class_id: int | None = None
+
+
+@dataclass(frozen=True)
 class Mat:
     item_id: int
     chance: float
@@ -71,11 +85,19 @@ class DisenchantTable:
             return None
         if not info.equip_loc or info.equip_loc in self.excluded_equip_locs:
             return None
+        return self.group_of(info.quality, info.class_id, info.item_level)
+
+    def group_of(
+        self, quality: int | None, class_id: int | None, item_level: int | None
+    ) -> Group | None:
+        """The group of that quality, class and item level, exclusions aside: a Disenchant
+        Result's item was Disenchanted, so it wasn't excluded."""
         for g in self.groups:
             if (
-                g.quality == info.quality
-                and _KINDS[g.kind] == info.class_id
-                and g.min_level <= info.item_level <= g.max_level
+                g.quality == quality
+                and _KINDS[g.kind] == class_id
+                and item_level is not None
+                and g.min_level <= item_level <= g.max_level
             ):
                 return g
         return None

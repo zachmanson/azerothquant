@@ -95,6 +95,11 @@
 # ADR-0014), down to craft_chain_depth crafts deep, counting the top one. Defaults to 3.
 # craft_chain_depth = 3
 
+# Optional: `brain disenchants` checks the Disenchant tables against your own Disenchant
+# Results, and only judges a group once it has this many (ADR-0018). Defaults to 20.
+# Must come before the first [[installs]].
+# disenchant_check_min_results = 20
+
 # Optional: how many options the Shopping List shows, most profit first. Each is sized on
 # its own, within the Budget set in game (or all the gold), so they're alternatives to
 # pick from (#86). Defaults to 50. Must come before the first [[installs]].

@@ -125,7 +125,7 @@ One Character's gold, faction and bag contents as they stood at logout or `/relo
 _Avoid_: snapshot, inventory
 
 **Disenchant Result**:
-The materials the player actually got from disenchanting one specific item.
+The materials the player actually got from disenchanting one specific item. The Addon records one for each Disenchant the player casts, with the item that left the bags between the cast starting and its loot. When it can't tell which item that was, it records only the item's Disenchant source group (if the items that left were alike) or just the mats. They travel on the Character Read of the session, and `brain disenchants` checks the static tables against them; they never change the tables themselves (ADR-0018).
 
 ## Decisions
 

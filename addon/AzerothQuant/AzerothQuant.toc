@@ -15,6 +15,7 @@ Scan.lua
 MailboxRead.lua
 MailboxVisit.lua
 CharacterRead.lua
+DisenchantCapture.lua
 KnownRecipes.lua
 MerchantCosts.lua
 Prune.lua

@@ -275,6 +275,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.non_stacking_effort_copper == 500
     assert config.ah_deposit_share == 0.6
     assert config.post_duration_hours == 24
+    assert config.disenchant_check_min_results == 20
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -298,6 +299,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "non_stacking_effort_copper = 0\n"
         "ah_deposit_share = 0.15\n"
         "post_duration_hours = 12\n"
+        "disenchant_check_min_results = 50\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -320,6 +322,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.non_stacking_effort_copper == 0
     assert config.ah_deposit_share == 0.15
     assert config.post_duration_hours == 12
+    assert config.disenchant_check_min_results == 50
 
 
 @pytest.mark.parametrize(
@@ -352,6 +355,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("craft_chain_depth", "0"),  # counts the top craft
         ("craft_chain_depth", "2.5"),
         ("craft_chain_depth", "true"),
+        ("disenchant_check_min_results", "1"),  # an interval needs 2
+        ("disenchant_check_min_results", "2.5"),
+        ("disenchant_check_min_results", "true"),
         ("shopping_list_rows", "0"),
         ("shopping_list_rows", "2.5"),
         ("craft_list_rows", "0"),

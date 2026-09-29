@@ -87,6 +87,9 @@ DEFAULT_PREDICTIONS_CAP_SHARE = 0.40
 # copper.
 DEFAULT_CRAFT_MIN_GAIN = 0
 DEFAULT_CRAFT_CHAIN_DEPTH = 3
+# `brain disenchants` (#76, ADR-0018) judges a Disenchant source group's table only from
+# this many Disenchant Results.
+DEFAULT_DISENCHANT_CHECK_MIN_RESULTS = 20
 DEFAULT_SHOPPING_LIST_ROWS = 50
 DEFAULT_CRAFT_LIST_ROWS = 25
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
@@ -168,6 +171,8 @@ class Config:
     craft_min_gain: float = DEFAULT_CRAFT_MIN_GAIN
     # The most crafts deep a chain of Sub-crafts goes, counting the top craft (#33).
     craft_chain_depth: int = DEFAULT_CRAFT_CHAIN_DEPTH
+    # `brain disenchants` says "too few Results" for a group with fewer than this many.
+    disenchant_check_min_results: int = DEFAULT_DISENCHANT_CHECK_MIN_RESULTS
     # How many options the Shopping List shows, most profit first (#86).
     shopping_list_rows: int = DEFAULT_SHOPPING_LIST_ROWS
     # How many Flips to Craft it shows besides, most profit first, in their own tab (#87).
@@ -340,6 +345,12 @@ def load_config(path: Path) -> Config:
             f"{path}: craft_chain_depth must be a whole number of crafts of at least 1, "
             f"got {chain_depth!r}"
         )
+    min_results = raw.get("disenchant_check_min_results", DEFAULT_DISENCHANT_CHECK_MIN_RESULTS)
+    if isinstance(min_results, bool) or not isinstance(min_results, int) or min_results < 2:
+        raise ConfigError(
+            f"{path}: disenchant_check_min_results must be a whole number of Results of at"
+            f" least 2, got {min_results!r}"
+        )
     shopping_rows = raw.get("shopping_list_rows", DEFAULT_SHOPPING_LIST_ROWS)
     craft_rows = raw.get("craft_list_rows", DEFAULT_CRAFT_LIST_ROWS)
     for key, rows in (("shopping_list_rows", shopping_rows), ("craft_list_rows", craft_rows)):
@@ -393,6 +404,7 @@ def load_config(path: Path) -> Config:
         predictions_cap_share=total_cap_share,
         craft_min_gain=craft_min_gain,
         craft_chain_depth=chain_depth,
+        disenchant_check_min_results=min_results,
         shopping_list_rows=shopping_rows,
         craft_list_rows=craft_rows,
         roi_hint=roi_hint,

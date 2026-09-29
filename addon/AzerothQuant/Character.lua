@@ -1,7 +1,8 @@
 -- WoW glue for Character Reads: on every logout or /reload (PLAYER_LOGOUT fires for
 -- both), records the Character's gold, bags and, if the bank was opened this session,
 -- the bank to AzerothQuantDB.characterReads, along with the Known Recipes and profession
--- list Professions.lua has kept and the Merchant Costs Merchant.lua has. All shaping
+-- list Professions.lua has kept, the Merchant Costs Merchant.lua has and this session's
+-- Disenchant Results (DisenchantCapture.lua, fed here since it needs the bags). All shaping
 -- happens in CharacterRead.lua; this file only talks to the WoW API. On load it also deletes the Reads the Brain has
 -- imported (Prune.lua).
 --
@@ -9,8 +10,8 @@
 -- real logout (not /reload) the client has already emptied them by PLAYER_LOGOUT, so
 -- reading them there records 0 gold and empty bags.
 --
--- Read-only (ADR-0003): only calls that read gold, containers, item info and who the player is.
--- Nothing that moves, uses or deletes items.
+-- Read-only (ADR-0003): only calls that read gold, containers, item info, the loot window
+-- and who the player is. Nothing that moves, uses, loots or deletes items.
 local _, ns = ...
 local CharacterRead = ns.CharacterRead
 local Scan = ns.Scan
@@ -19,6 +20,9 @@ local Prune = ns.Prune
 local Chat = ns.Chat
 local Professions = ns.Professions
 local Merchant = ns.Merchant
+local DisenchantCapture = ns.DisenchantCapture
+
+local DISENCHANT_SPELL = 13262
 
 -- The bank can only be read while it's open. Bag updates come in bursts (one per bag
 -- touched), so read once they have been quiet this long.
@@ -56,6 +60,7 @@ local bank -- { readAt, slots }: the latest read while the bank was open this se
 local carried -- { money, slots }: the latest read of gold and bags while in the world
 local timer
 local carriedTimer
+local disenchants = DisenchantCapture.new()
 
 local function readContainers(bags, into)
   for _, bag in ipairs(bags) do
@@ -104,6 +109,20 @@ local function readCarried()
     return
   end
   carried = { money = GetMoney(), slots = readContainers(bagIds(), {}) }
+  -- The Disenchanted item may leave the bags only after its loot window opens.
+  disenchants:bagsRead(carried.slots, time())
+end
+
+-- The loot window's item slots, { link, quantity } each. Money has no link.
+local function lootSlots()
+  local loot = {}
+  for i = 1, GetNumLootItems() do
+    local link = GetLootSlotLink(i)
+    if link then
+      loot[#loot + 1] = { link = link, quantity = select(3, GetLootSlotInfo(i)) or 1 }
+    end
+  end
+  return loot
 end
 
 local function readCarriedSoon()
@@ -129,7 +148,10 @@ frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_MONEY")
 frame:RegisterEvent("PLAYER_LOGOUT")
-frame:SetScript("OnEvent", function(_, event, arg1)
+frame:RegisterEvent("LOOT_READY")
+frame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+frame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
   if event == "ADDON_LOADED" then
     if arg1 == "AzerothQuant" then
       AzerothQuantDB = AzerothQuantDB or {}
@@ -155,6 +177,13 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       cancel()
       timer = C_Timer.NewTimer(QUIET_SECONDS, readBank)
     end
+  elseif event == "UNIT_SPELLCAST_START" and arg3 == DISENCHANT_SPELL then
+    -- The item is still in the bags while the cast runs (unit, castGUID, spellID).
+    disenchants:castStarted(readContainers(bagIds(), {}))
+  elseif event == "UNIT_SPELLCAST_SUCCEEDED" and arg3 == DISENCHANT_SPELL then
+    disenchants:castSucceeded()
+  elseif event == "LOOT_READY" then
+    disenchants:lootReady(lootSlots(), readContainers(bagIds(), {}), time())
   elseif event == "BANKFRAME_CLOSED" then
     -- Catch a change still waiting out the quiet time before the bank closes for good.
     if atBank and timer then
@@ -168,6 +197,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if not carried then
       return
     end
+    disenchants:flush()
     local realm, faction = GetRealmName(), UnitFactionGroup("player")
     local read = CharacterRead.build({
       readAt = time(),
@@ -176,7 +206,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       faction = faction,
       money = carried.money,
       budget = faction and db.budgets and db.budgets[RecommendationTable.budgetKey(realm, faction)],
-    }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs())
+    }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs(), disenchants.results)
     table.insert(db.characterReads, read)
   end
 end)

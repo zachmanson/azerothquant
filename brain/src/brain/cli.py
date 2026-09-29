@@ -5,6 +5,7 @@
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
     brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
+    brain disenchants  check the Disenchant tables against the player's Disenchant Results
 
 All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003).
@@ -26,10 +27,13 @@ from pathlib import Path
 
 from brain.archive import Archive
 from brain.config import Config, ConfigError, Era, load_config
+from brain.disenchant import Group, load_table
+from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
 from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
     ImportReport,
+    disenchant_results,
     import_character_reads,
     import_file,
     import_mailbox_reads,
@@ -328,6 +332,81 @@ def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
     )
 
 
+def _disenchants(config: Config) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        text = run_disenchants(config)
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
+        return 1
+    print(text, end="")
+    return 0
+
+
+def run_disenchants(config: Config) -> str:
+    """The Disenchant tables checked against the player's Disenchant Results (#76,
+    ADR-0018), per Era, as text. Only a person changes the tables."""
+    table = load_table()
+    eras = dict.fromkeys(install.era for install in config.installs)
+    parts = []
+    with closing(open_history(config.history_path)) as conn:
+        for era in eras:
+            results = disenchant_results(conn, era)
+            if results:
+                min_results = config.disenchant_check_min_results
+                check = check_disenchants(table, results, min_results)
+                parts.append(_render_disenchants(era, len(results), check, min_results))
+    if not parts:
+        return "No Disenchant Results yet.\n"
+    return "\n".join(parts)
+
+
+_QUALITIES = {2: "Green", 3: "Blue", 4: "Purple"}
+
+
+def _render_disenchants(era: Era, count: int, check: DisenchantCheck, min_results: int) -> str:
+    text = (
+        f"{era.value.capitalize()}: {count} Disenchant Results, a group judged from {min_results}\n"
+    )
+    if check.unplaced:
+        text += (
+            f"{check.unplaced} of them have no group: the item wasn't known, or no band has it\n"
+        )
+    groups: dict[Group, list[MatCheck]] = {}
+    for row in check.rows:
+        groups.setdefault(row.group, []).append(row)
+    for group, checks in groups.items():
+        kind = "armor" if group.kind == "armor" else "weapons"
+        text += f"\n{_QUALITIES[group.quality]} {kind} ilvl {group.min_level}-{group.max_level}\n"
+        text += _table(
+            ["Mat", "n", "Chance (95%)", "Table", "Qty when it drops (95%)", "Table", "Verdict"],
+            [
+                [
+                    str(c.item_id),
+                    str(c.n),
+                    f"{c.chance:.1%} ({c.chance_interval[0]:.1%} to {c.chance_interval[1]:.1%})",
+                    f"{c.table_chance:.1%}",
+                    _mean_qty(c),
+                    "-" if c.table_qty is None else f"{c.table_qty:.2f}",
+                    c.verdict.value,
+                ]
+                for c in checks
+            ],
+        )
+    return text
+
+
+def _mean_qty(c: MatCheck) -> str:
+    if c.qty is None:
+        return "-"
+    if c.qty_interval is None:
+        return f"{c.qty:.2f}"
+    low, high = c.qty_interval
+    return f"{c.qty:.2f} ({low:.2f} to {high:.2f})"
+
+
 def run_recommend(config: Config) -> str:
     """The Recommendations for every Market the player has Characters in, as text."""
     predictions = load_predictions(config.predictions_path)
@@ -552,6 +631,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
     replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
+    commands.add_parser(
+        "disenchants", help="check the Disenchant tables against your Disenchant Results"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -569,6 +651,8 @@ def main(argv: list[str] | None = None) -> int:
         return _recommend(config)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
+    if args.command == "disenchants":
+        return _disenchants(config)
     return _watch(config)
 
 

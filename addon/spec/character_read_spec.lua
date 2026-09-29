@@ -143,4 +143,11 @@ describe("CharacterRead.build", function()
 
     assert.is_nil(read.merchantCosts)
   end)
+
+  it("includes the Disenchant Results of this session, and leaves them out when there are none", function()
+    local results = { { itemID = 9999, itemLevel = 18, quality = 2, classID = 4, mats = { [10940] = 2 }, at = 1 } }
+
+    assert.are.same(results, CharacterRead.build(WHO, {}, nil, {}, {}, {}, results).disenchantResults)
+    assert.is_nil(CharacterRead.build(WHO, {}, nil, {}, {}, {}, {}).disenchantResults)
+  end)
 end)

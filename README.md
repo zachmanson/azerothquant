@@ -47,6 +47,7 @@ cd brain
 ..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
 ..\.venv\Scripts\brain recommend  # print Vendor, Sell or Hold for Holdings, and the Shopping List
 ..\.venv\Scripts\brain replay --since 2026-09-20  # grade the Brain against Auctionator and emulated TSM (ADR-0015)
+..\.venv\Scripts\brain disenchants  # check the Disenchant tables against your Disenchant Results (ADR-0018)
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.
@@ -75,6 +76,8 @@ Run the specs:
 ```powershell
 .\.lua\bin\busted.bat --directory=addon
 ```
+
+With no Lua at all, `scripts/busted.py` runs the same specs on [lupa](https://pypi.org/project/lupa/)'s Lua 5.1 (`pip install lupa`, then `python ..\scripts\busted.py` from `addon\`). It covers only what the specs use; CI runs the real busted.
 
 To try the Addon in game, copy (or symlink) `addon\AzerothQuant` into `<WoW>\_classic_beta_\Interface\AddOns\`.
 
