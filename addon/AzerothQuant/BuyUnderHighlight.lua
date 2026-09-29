@@ -81,6 +81,17 @@ end
 
 local browseScrollBox
 
+-- Refreshes the rows a list has on show. A list gets its view (and rows) only once the AH
+-- sets it up, after Blizzard_AuctionHouseUI loads; before that it has no rows to refresh.
+local function refreshShown(scrollBox, listingOf)
+  if not scrollBox:GetView() then
+    return
+  end
+  scrollBox:ForEachFrame(function(row)
+    refresh(row, listingOf)
+  end)
+end
+
 -- Rows are recycled as the list scrolls, so each one is refreshed on every init. The
 -- callback registry keeps one callback per owner, so the owner is a table of our own, never
 -- the list (which may have its own). Rows already on show (the AH open over a /reload) are
@@ -93,9 +104,7 @@ local function hook(list, listingOf)
   ScrollUtil.AddInitializedFrameCallback(scrollBox, function(_, row)
     refresh(row, listingOf)
   end, {}, false)
-  scrollBox:ForEachFrame(function(row)
-    refresh(row, listingOf)
-  end)
+  refreshShown(scrollBox, listingOf)
   return scrollBox
 end
 
@@ -121,9 +130,7 @@ events:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" and name == "Blizzard_AuctionHouseUI" then
     hookAuctionHouse()
   elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" and browseScrollBox then
-    browseScrollBox:ForEachFrame(function(row)
-      refresh(row, browseListing)
-    end)
+    refreshShown(browseScrollBox, browseListing)
   end
 end)
 if isAddOnLoaded and isAddOnLoaded("Blizzard_AuctionHouseUI") then
