@@ -149,7 +149,7 @@ Crafting a reagent a Craft or Flip to Craft is short of, with another Known Reci
 _Avoid_: intermediate craft, chain step
 
 **Disenchant**:
-The Action of destroying a held unit of armor or a weapon for its mats, by a Character whose Enchanting skill (from its latest Character Read that has one) meets what the unit's item level needs. What a unit yields comes from the static tables for its Disenchant source group, as expected quantities, so they come in fractions. A unit is worth Disenchanting when its expected mats gain more, added to the mat Holdings, than the unit would bring by Sell or Vendor: the same marginal rule as Craft, bound units first, and never for an Item Key Held under a Prediction (ADR-0018).
+The Action of destroying a held unit of armor or a weapon for its mats, by a Character whose Enchanting skill (from its latest Character Read that has one) meets what the unit's item level needs. What a unit yields comes from the static tables for its Disenchant source group, as expected quantities, so they come in fractions. A unit is worth Disenchanting when its expected mats gain more, added to the mat Holdings, than the unit would bring by Sell or Vendor: the same marginal rule as Craft, bound units first, and never for an Item Key Held under a Prediction (ADR-0018). A bound unit can't be mailed, so only the Character who holds it can Disenchant it; unbound units go to whoever can.
 _Avoid_: DE, salvage
 
 **Disenchant source group**:
@@ -185,7 +185,7 @@ What a held Item Key's units cost, per unit, from its open Purchase Lots not tie
 _Avoid_: cost basis, buy price
 
 **Best Exit Value**:
-The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts, and takes nothing on the Shopping List as bought (ADR-0017).
+The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts, and takes nothing on the Shopping List as bought (ADR-0017). Units valued together share the Disenchant mats' worth: held mats, and the mats other Item Keys yield, take the Sale Horizon first (ADR-0018).
 _Avoid_: value, worth
 
 **Buy Under**:

@@ -50,6 +50,7 @@ from brain.recommend import (
     deposit_of,
     exit_values,
     item_id_of,
+    market_bound,
     market_holdings,
     recommend_market,
     without,
@@ -206,7 +207,8 @@ def replay(
         for t in replayed:
             later = [e for e in events.sale_events if t < e.seen_at <= t + horizon]
             held = market_holdings(conn, market, characters, as_of=t)
-            untouched = sum(exit_values(conn, config, market, held, t + horizon).values())
+            bound = market_bound(conn, market, characters, as_of=t)
+            untouched = sum(exit_values(conn, config, market, held, t + horizon, bound).values())
             others = supply_at(conn, market, t, others_only=True)
             gold = pooled_gold(conn, market.era, market.realm, market.faction, t)
             moves = {

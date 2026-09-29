@@ -2762,6 +2762,10 @@ def worth_nothing(*args):
     return 0.0
 
 
+def valued_at_nothing(conn, config, market, held, at, bound=None):
+    return dict.fromkeys(held, 0.0)
+
+
 def test_a_held_at_writing_cost_is_frozen_once_its_day_has_passed(db, tmp_path, monkeypatch):
     # The same held units as the first held-at-writing test (604). Later, the pricing
     # changes, and the cost recorded then must stand.
@@ -2808,7 +2812,7 @@ def test_a_grade_is_frozen_once_worked_out(db, tmp_path, monkeypatch):
     [grade] = grades(db, config, MARKET, [p], now)
     assert grade.open_value > 0
 
-    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+    monkeypatch.setattr("brain.recommend.exit_values", valued_at_nothing)
 
     assert grades(db, config, MARKET, [p], now + DAY) == [grade]
 
@@ -2839,7 +2843,7 @@ def test_a_grade_is_not_frozen_before_a_scan_at_its_grading_moment(db, tmp_path,
     now = start_of(written + timedelta(days=2)) + 3 * HOUR
     grades(db, config, MARKET, [p], now)
 
-    monkeypatch.setattr("brain.recommend._exit_value", worth_nothing)
+    monkeypatch.setattr("brain.recommend.exit_values", valued_at_nothing)
 
     [grade] = grades(db, config, MARKET, [p], now)
     assert grade.open_value == 0

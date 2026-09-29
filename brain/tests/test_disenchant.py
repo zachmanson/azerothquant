@@ -15,8 +15,9 @@ from brain.history import (
     item_info,
     open_history,
 )
+from brain.lots import start_of
 from brain.predictions import Prediction
-from brain.recommend import Action, BuyUnder, MatYield, exit_values, recommend
+from brain.recommend import Action, BuyUnder, MatYield, exit_values, grades, recommend
 
 T0 = 1_790_000_000
 REALM = "Classic Beta PvP"
@@ -285,6 +286,128 @@ def test_best_exit_value_counts_the_disenchant_way(db):
     values = exit_values(db, RECOMMEND_CONFIG, MARKET, {GREEN: Holding(bags=2)}, T0 + HOUR)
 
     assert values == {GREEN: pytest.approx(2 * (1.875 * 100 + 0.3 * 200 + 0.05 * 400))}
+
+
+OTHER = "9998"  # another green armor piece of the Green Chest's band
+DUST_KEY = "10940"
+# Dust Vendors for 10, so past the 6 that sell in the horizon it's worth little.
+MARGINAL_PRICES = {9999: 100, 9998: 100, 10940: 10, 10939: 200, 10978: 400}
+
+
+def two_greens(db):
+    """Bob, an enchanter, holds 2 unbound Green Chests and 2 of the other green, with
+    Strange Dust selling 6 in the horizon."""
+    r = read("Bob", T0, {ENCHANTING: 90})
+    r["bags"] = [
+        {"bag": 0, "slot": 1, "link": GREEN_LINK, "count": 2, "isBound": False},
+        {"bag": 0, "slot": 2, "link": other_green(9998), "count": 2, "isBound": False},
+    ]
+    r["vendorPrices"] = MARGINAL_PRICES
+    r["itemInfo"] = {9998: info(18, equip_loc="INVTYPE_LEGS")}
+    import_scans(db, market_scans(dust_selling=True), Era.BETA, RECOMMEND_CONFIG)
+    import_character_reads(db, [r], Era.BETA, RECOMMEND_CONFIG)
+    return {GREEN: Holding(bags=2), OTHER: Holding(bags=2)}
+
+
+def test_greens_that_yield_the_same_mat_share_its_sale_slots_in_best_exit_value(db):
+    held = two_greens(db)
+
+    joint = exit_values(db, RECOMMEND_CONFIG, MARKET, held, T0 + HOUR)
+    alone = [
+        exit_values(db, RECOMMEND_CONFIG, MARKET, {key: h}, T0 + HOUR)[key]
+        for key, h in held.items()
+    ]
+
+    # 4 Disenchants expect 7.5 dust, but only 6 sell: each green alone expects 3.75.
+    assert sum(joint.values()) < sum(alone)
+    [result] = recommend(db, RECOMMEND_CONFIG)
+    assert sum(joint.values()) == pytest.approx(sum(r.profit for r in result.holdings))
+
+
+def test_a_grades_open_units_share_their_mats_sale_slots_too(db):
+    held = two_greens(db)
+    written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
+    p = Prediction(
+        "greens",
+        "a reason",
+        (GREEN, OTHER),
+        "a patch",
+        written,
+        written + timedelta(days=30),
+        happened=written + timedelta(days=1),
+    )
+    graded_at = start_of(written + timedelta(days=1)) + RECOMMEND_CONFIG.sale_horizon_seconds
+
+    [grade] = grades(db, RECOMMEND_CONFIG, MARKET, [p], graded_at)
+
+    joint = exit_values(db, RECOMMEND_CONFIG, MARKET, held, graded_at)
+    assert grade.open_value == pytest.approx(sum(joint.values()))
+
+
+def test_held_mats_lower_the_best_exit_value_of_a_green_that_yields_them(db):
+    import_scans(db, market_scans(dust_selling=True), Era.BETA, RECOMMEND_CONFIG)
+    import_character_reads(
+        db, [holder(count=0, vendor_prices=MARGINAL_PRICES)], Era.BETA, RECOMMEND_CONFIG
+    )
+
+    def value(held):
+        return exit_values(db, RECOMMEND_CONFIG, MARKET, held, T0 + HOUR)[GREEN]
+
+    # 6 held dust take every sale slot, so the green's dust would only Vendor.
+    with_dust = value({GREEN: Holding(bags=1), DUST_KEY: Holding(bags=6)})
+    assert with_dust < value({GREEN: Holding(bags=1)})
+
+
+@pytest.mark.parametrize(
+    "bound, value",
+    [
+        ({GREEN: {"Bob": 1}}, 1.875 * 100 + 0.3 * 200 + 0.05 * 400),
+        ({GREEN: {"Ann": 1}}, 50),  # Ann can't Disenchant it, and can't mail it to Bob
+        ({}, 50),  # no holder given
+    ],
+)
+def test_a_bound_units_best_exit_value_disenchants_it_only_for_a_holder_who_can(db, bound, value):
+    import_scans(db, market_scans(), Era.BETA, RECOMMEND_CONFIG)
+    import_character_reads(db, [holder(count=0)], Era.BETA, RECOMMEND_CONFIG)
+
+    held = {GREEN: Holding(bags_bound=1)}
+    values = exit_values(db, RECOMMEND_CONFIG, MARKET, held, T0 + HOUR, bound)
+
+    assert values == {GREEN: pytest.approx(value)}
+
+
+def ann(count=1, enchanting=None, bound=True):
+    """Ann's Read: `count` Green Chests, and Enchanting at `enchanting` (None: none)."""
+    professions = {} if enchanting is None else {ENCHANTING: enchanting}
+    r = read("Ann", T0, professions)
+    r["bags"] = [{"bag": 0, "slot": 1, "link": GREEN_LINK, "count": count, "isBound": bound}]
+    return r
+
+
+def test_a_bound_green_held_by_a_character_who_cant_disenchant_it_takes_its_next_best_action(
+    db,
+):
+    # Bob can Disenchant it, but a bound unit can't be mailed to him.
+    assert holdings_of(db, market_scans(), [ann(), holder(count=0)]) == [
+        (GREEN, Action.VENDOR, 1, 50, "")
+    ]
+
+
+def test_a_bound_green_is_disenchanted_by_the_character_who_holds_it(db):
+    # Ann can Disenchant too, and comes first by name, but can't be mailed Bob's unit.
+    rows = holdings_of(db, market_scans(), [ann(count=0, enchanting=90), holder()])
+
+    assert [(key, action, n, who) for key, action, n, _, who in rows] == [
+        (GREEN, Action.DISENCHANT, 1, "Bob")
+    ]
+
+
+def test_unbound_greens_held_by_a_character_who_cant_disenchant_are_mailed_to_one_who_can(db):
+    rows = holdings_of(db, market_scans(), [ann(count=2, bound=False), holder(count=0)])
+
+    assert [(key, action, n, who) for key, action, n, _, who in rows] == [
+        (GREEN, Action.DISENCHANT, 2, "Bob")
+    ]
 
 
 # --- Buy Under with the Disenchant way (#88) ---

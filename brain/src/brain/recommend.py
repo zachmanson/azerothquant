@@ -446,7 +446,7 @@ def recommend_market(
     )
     shopping = _options(buys, crafts, spend, config.shopping_list_rows, config.craft_list_rows)
     crafted = crafting.counts
-    disenchanted, left = _disenchants(held, valuer, set(under))
+    disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
     rows = (
         [
             _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
@@ -459,7 +459,7 @@ def recommend_market(
     graded = grades(conn, config, market, predictions, now)
     pooled = pooled_return(graded)
     caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
-    bound = {k: h.bags_bound + h.bank_bound for k, h in held.items()}
+    bound = {k: _bound(h) for k, h in held.items()}
     rows = _hold(rows, active, bound, vendor, caps, _lot_costs(conn, config, market, active))
     rows = _with_roi(rows, _market_lots(conn, config, market, predictions), cut, config)
     # Most expected profit first; rows without a number to rank by go last.
@@ -735,11 +735,9 @@ def grades(
             continue
         graded_at = ended_at(p) + config.sale_horizon_seconds
         settled = settle(p, market_lots, graded_at, auction_cut(market, config))
-        open_value = sum(
-            _exit_value(conn, config, market, item_key, units, graded_at)
-            for item_key, units in settled.open_units.items()
-            if units
-        )
+        # Valued together, so open units that yield the same mats share them (#102).
+        open_units = {k: Holding(bags=units) for k, units in settled.open_units.items() if units}
+        open_value = sum(exit_values(conn, config, market, open_units, graded_at).values())
         grade = Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost)
         # Once a Scan at or after its grading moment is in, what it rests on is too.
         if config.grades_path is not None and times and times[-1] >= graded_at:
@@ -799,13 +797,29 @@ def exit_values(
     market: Market,
     held: Mapping[str, Holding],
     at: int,
+    bound: Mapping[str, Mapping[str, int]] = MappingProxyType({}),
 ) -> dict[str, float]:
     """What each Item Key's `held` units would have brought by their best Actions, as
-    `_exit_value` values them, all at once."""
+    `_exit_value` values them: Best Exit Value (#76). The Disenchant way is valued over
+    all of `held` at once, as the Holdings Disenchant Actions are, so held mats and the
+    mats other Item Keys yield take the Sale Horizon first (#102). Each Item Key gets its
+    own Disenchant proceeds and the worth of its units left. `bound` is who holds the
+    bound units (`_disenchants`); without it, none is Disenchanted."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
     valuer, _ = _valuer(conn, config, market, scan, unbound=_unbound_units(dict(held)))
-    return {item_key: valuer.best_exit(item_key, h) for item_key, h in held.items()}
+    rows, left = _disenchants(held, valuer, bound=bound)
+    proceeds: Counter[str] = Counter()
+    for row in rows:
+        proceeds[row.item_key] += row.profit
+    return {key: proceeds[key] + valuer.worth(key, left[key]) for key in held}
+
+
+def market_bound(
+    conn: sqlite3.Connection, market: Market, characters: list[str], as_of: int | None = None
+) -> dict[str, dict[str, int]]:
+    """Who of the Market's Characters holds each Item Key's bound units, and how many."""
+    return _bound_by(_by_character(conn, market, characters, as_of))
 
 
 def deposit_of(conn: sqlite3.Connection, config: Config, market: Market) -> Callable[[str], float]:
@@ -875,13 +889,17 @@ class _Disenchanting:
     def way(self, item_key: str) -> tuple[str, dict[str, float]] | None:
         """The Character to Disenchant an Item Key, and the expected mats of one
         Disenchant by Item Key, or None if nobody can."""
-        info = self.info.get(item_id_of(item_key))
-        group = self.group(item_key)
-        need = self.table.required_skill(info.item_level) if group else None
-        able = self._able(need)
+        able = self.disenchanters(item_key)
         if not able:
             return None
+        group = self.group(item_key)
         return able[0], {str(mat): q for mat, q in group.expected.items()}
+
+    def disenchanters(self, item_key: str) -> list[str]:
+        """The Characters who can Disenchant an Item Key, by name."""
+        info = self.info.get(item_id_of(item_key))
+        group = self.group(item_key)
+        return self._able(self.table.required_skill(info.item_level) if group else None)
 
     def disenchanter(self, group: Group) -> str | None:
         """The Character to Disenchant any item in the group: one whose skill meets what
@@ -1048,11 +1066,6 @@ class _Valuer:
             )
         return self._worth[item_key, holding]
 
-    def best_exit(self, item_key: str, holding: Holding) -> float:
-        """`worth`, with the Disenchant way too: Best Exit Value (#76)."""
-        rows, left = _disenchants({item_key: holding}, self)
-        return sum(r.profit for r in rows) + self.worth(item_key, left[item_key])
-
     def worth_with(self, item_key: str, holding: Holding, extra: float) -> float:
         """`worth` of `holding` plus `extra` unbound units, a fraction of a unit counting
         that fraction of the next whole unit's worth (expected Disenchant mats, #76)."""
@@ -1064,18 +1077,41 @@ class _Valuer:
         return below + (extra - whole) * (above - below)
 
 
+@dataclass(frozen=True)
+class _NextUnit:
+    """The next unit of an Item Key to Disenchant: who does it, what's left of the Item
+    Key's Holding after it, and whether it's a bound one."""
+
+    character: str
+    left: Holding
+    bound: bool
+
+
+def _holders(
+    bound: Mapping[str, int], disenchanting: _Disenchanting, item_key: str
+) -> Counter[str]:
+    """The bound units of an Item Key held by Characters who can Disenchant it, by holder."""
+    able = set(disenchanting.disenchanters(item_key))
+    return Counter({c: n for c, n in bound.items() if c in able})
+
+
 def _disenchants(
-    held: Mapping[str, Holding], valuer: _Valuer, under: set[str] = frozenset()
+    held: Mapping[str, Holding],
+    valuer: _Valuer,
+    under: set[str] = frozenset(),
+    bound: Mapping[str, Mapping[str, int]] = MappingProxyType({}),
 ) -> tuple[list[Row], dict[str, Holding]]:
     """The Disenchant Actions (#76) and what's left of `held` after them. Item Keys
-    `under` a Prediction are Held instead.
+    `under` a Prediction are Held instead. `bound` is who holds the bound units, by Item
+    Key, then Character.
 
     The same marginal rule as Craft (ADR-0008): each step Disenchants the one unit that
     gains the most, its expected mats' worth less what the unit would bring by Sell or
     Vendor, until no unit gains. A mat's worth is that of its Holdings with the expected
     mats added, on top of the ones earlier steps are expected to yield, a fraction of a unit
     counting that fraction of the next whole unit. Bound units go first, since they'd only
-    be Vendored.
+    be Vendored, but only those whose holder can Disenchant them: they can't be mailed
+    (#102). Unbound units can, so any Character who can Disenchant them does.
     """
     left = dict(held)
     ways = {
@@ -1085,41 +1121,55 @@ def _disenchants(
         and valuer.disenchanting
         and (way := valuer.disenchanting.way(key)) is not None
     }
+    holders = {key: _holders(bound.get(key, {}), valuer.disenchanting, key) for key in ways}
+
+    def next_unit(key: str) -> _NextUnit | None:
+        """Who Disenchants the Item Key's next unit, or None if no unit left can be."""
+        h = left[key]
+        holder = min((c for c, n in holders[key].items() if n), default=None)
+        if holder is not None and _bound(h):
+            return _NextUnit(holder, _take(h, 1), bound=True)
+        if _unbound(h):
+            return _NextUnit(ways[key][0], _take_unbound(h), bound=False)
+        return None
+
     added: Counter[str] = Counter()  # expected mats from the steps so far, in fractions
-    done: Counter[str] = Counter()
-    proceeds: Counter[str] = Counter()
+    done: Counter[tuple[str, str]] = Counter()
+    proceeds: Counter[tuple[str, str]] = Counter()
     while True:
         best = None
         for key, (_, mats) in ways.items():
-            if not _units(left[key]):
+            if (unit := next_unit(key)) is None:
                 continue
             value = sum(
                 valuer.worth_with(mat, held.get(mat, Holding()), added[mat] + q)
                 - valuer.worth_with(mat, held.get(mat, Holding()), added[mat])
                 for mat, q in mats.items()
             )
-            gain = value - (valuer.worth(key, left[key]) - valuer.worth(key, _take(left[key], 1)))
+            gain = value - (valuer.worth(key, left[key]) - valuer.worth(key, unit.left))
             if gain > 0 and (best is None or gain > best[0]):
-                best = (gain, key, value)
+                best = (gain, key, value, unit)
         if best is None:
             break
-        _, key, value = best
-        left[key] = _take(left[key], 1)
+        _, key, value, unit = best
+        left[key] = unit.left
+        if unit.bound:
+            holders[key][unit.character] -= 1
         added.update(ways[key][1])
-        done[key] += 1
-        proceeds[key] += value
+        done[key, unit.character] += 1
+        proceeds[key, unit.character] += value
     rows = [
         Row(
             key,
             Action.DISENCHANT,
             n,
-            profit=proceeds[key],
-            note=f"on {ways[key][0]}: expect "
+            profit=proceeds[key, who],
+            note=f"on {who}: expect "
             + ", ".join(f"{q * n:.2f} of {mat}" for mat, q in ways[key][1].items()),
-            character=ways[key][0],
+            character=who,
             mats=tuple(MatYield(mat, q * n) for mat, q in ways[key][1].items()),
         )
-        for key, n in done.items()
+        for (key, who), n in done.items()
     ]
     return rows, left
 
@@ -1160,6 +1210,16 @@ def _pooled(by_character: dict[str, dict[str, Holding]]) -> dict[str, Holding]:
                 t.bank_bound + h.bank_bound,
             )
     return dict(sorted(total.items()))
+
+
+def _bound_by(by_character: dict[str, dict[str, Holding]]) -> dict[str, dict[str, int]]:
+    """Who holds each Item Key's bound units, and how many: they can't be mailed."""
+    bound: dict[str, dict[str, int]] = {}
+    for character, held in by_character.items():
+        for item_key, h in held.items():
+            if _bound(h):
+                bound.setdefault(item_key, {})[character] = _bound(h)
+    return bound
 
 
 def _whose(by_character: dict[str, dict[str, Holding]]) -> dict[str, list[CharacterHolding]]:
@@ -1852,6 +1912,10 @@ def _unbound(h: Holding) -> int:
     return h.bags + h.bank
 
 
+def _bound(h: Holding) -> int:
+    return h.bags_bound + h.bank_bound
+
+
 def _unbound_units(held: dict[str, Holding]) -> dict[str, int]:
     return {key: _unbound(h) for key, h in held.items()}
 
@@ -1882,6 +1946,11 @@ def _take(h: Holding, n: int) -> Holding:
         left[place] = getattr(h, place) - taken
         n -= taken
     return Holding(**left)
+
+
+def _take_unbound(h: Holding) -> Holding:
+    """`h` less one unbound unit, from the bags first."""
+    return replace(h, bags=h.bags - 1) if h.bags else replace(h, bank=h.bank - 1)
 
 
 def _with_note(row: Row, note: str) -> Row:
