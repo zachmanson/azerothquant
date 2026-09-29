@@ -1,6 +1,6 @@
 -- Turns an item link into the lines the Addon adds to that item's tooltip: one per
--- Recommendation the Market has for its Item Key, e.g. "AQ: Sell 2 @ 1g 28s", then one
--- per Character holding it.
+-- Recommendation the Market has for its Item Key, e.g. "AQ: Sell 2 @ 1g 28s", then its Buy
+-- Under (#88), then one per Character holding it.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted.
 local _, ns = ...
@@ -59,6 +59,8 @@ local function itemKey(link)
   return table.concat(key, ":")
 end
 
+TooltipLines.itemKey = itemKey
+
 -- A Craft has no price of its own: it names its Character, and its reagents follow as
 -- lines of their own. One that can't be made says why. A Disenchant is the same, with its
 -- expected mats (#76). A Hold's worth hangs on its Prediction (ADR-0006).
@@ -88,6 +90,13 @@ local function buyLine(r)
   return line
 end
 
+-- A Buy Under (#88), e.g. "AQ: Buy Under 21s: Craft Bolt of Linen Cloth (Kash-Patel), seen
+-- 14 Scans / 7d".
+local function buyUnderLine(r, nameOf)
+  return "AQ: Buy Under " .. Money.format(r.price) .. ": " .. RecommendationTable.wayOut(r, nameOf)
+    .. ", seen " .. RecommendationTable.seen(r)
+end
+
 -- The lines for each of keys (a set of Item Keys) in the Market's entry, in the order the
 -- Recommendation Table has them, then who holds each.
 local function linesFor(entry, keys, nameOf)
@@ -110,6 +119,7 @@ local function linesFor(entry, keys, nameOf)
   add(entry.holdings, holdingLine)
   add(entry.shoppingList, buyLine)
   add(entry.predictionBuys, buyLine)
+  add(entry.buyUnder or {}, buyUnderLine)
   local sorted = {}
   for key in pairs(keys) do
     sorted[#sorted + 1] = key
@@ -154,7 +164,7 @@ function TooltipLines.forItemName(recommendations, realm, faction, itemID, name,
       keys[key] = true
     end
   end
-  for _, rows in ipairs({ entry.holdings, entry.shoppingList, entry.predictionBuys }) do
+  for _, rows in ipairs({ entry.holdings, entry.shoppingList, entry.predictionBuys, entry.buyUnder }) do
     for _, r in ipairs(rows or {}) do
       consider(r.itemKey)
     end

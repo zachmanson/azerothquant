@@ -197,7 +197,7 @@ The best Action for one Candidate Item, with quantity, price ceiling, the full A
 _Avoid_: signal, tip
 
 **Recommendation Table**:
-The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft in their own tab, and Prediction buys) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). It shows the Market of the Character's own faction, the only one the Brain recommends for.
+The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft in their own tab, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). It shows the Market of the Character's own faction, the only one the Brain recommends for.
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:

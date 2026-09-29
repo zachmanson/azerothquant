@@ -490,12 +490,16 @@ describe("RecommendationTable.build", function()
       },
     }))
 
-    assert.are.same({ "Holdings (1)", "Shopping List (0)", "Flips to Craft (0)", "Prediction buys (0)" }, {
-      view.sections[1].tab,
-      view.sections[2].tab,
-      view.sections[3].tab,
-      view.sections[4].tab,
-    })
+    assert.are.same(
+      { "Holdings (1)", "Shopping List (0)", "Flips to Craft (0)", "Prediction buys (0)", "Buy Under (0)" },
+      {
+        view.sections[1].tab,
+        view.sections[2].tab,
+        view.sections[3].tab,
+        view.sections[4].tab,
+        view.sections[5].tab,
+      }
+    )
   end)
 
   it("says a section is empty when it has no rows to show, folded ones aside", function()
@@ -512,6 +516,7 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Nothing on the Shopping List right now", build(entry()).sections[2].empty)
     assert.are.equal("No Flips to Craft right now", view.sections[3].empty)
     assert.are.equal("No Prediction buys right now", view.sections[4].empty)
+    assert.are.equal("No Buy Unders right now", view.sections[5].empty)
   end)
 
   it("shows the Shopping List under the Holdings, with Buy as a Flip to Sell's Action", function()
@@ -627,6 +632,50 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Prediction buys", buys.title)
     assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss" }, buys.columns)
     assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s" }, buys.rows[1].cells)
+  end)
+
+  it("shows the Buy Unders after the Prediction buys, with the way out, units and Scans that saw one (#88)", function()
+    local view = build(entry({
+      buyUnder = {
+        { itemKey = "2589", price = 2100, way = "Sell", units = 40, seen = 14, windowDays = 7, listedNow = true },
+      },
+    }))
+
+    local buyUnder = view.sections[5]
+    assert.are.equal("Buy Under", buyUnder.title)
+    assert.are.same({ "Item", "Buy Under", "Way out", "Units", "Seen", "Note" }, buyUnder.columns)
+    assert.are.same({ "item:2589", "21s", "Sell", "40", "14 Scans / 7d", "listed now" }, buyUnder.rows[1].cells)
+  end)
+
+  it("keeps the Brain's order of Buy Unders, and never folds one over the Budget (#88)", function()
+    local view = build(entry({
+      buyUnder = {
+        { itemKey = "1", price = 100, way = "Vendor", seen = 1, windowDays = 7 },
+        { itemKey = "2", price = 900000, way = "Sell", units = 3, seen = 2, windowDays = 7 },
+      },
+    }), AS_OF, nil, nil, 5000)
+
+    local buyUnder = view.sections[5]
+    assert.are.same({ "item:1", "item:2" }, { buyUnder.rows[1].cells[1], buyUnder.rows[2].cells[1] })
+    assert.is_nil(buyUnder.more)
+  end)
+
+  it("names a Craft way's output and crafter, and a Buy Under with no unit limit (#88)", function()
+    local view = build(entry({
+      buyUnder = {
+        {
+          itemKey = "2589", price = 90, way = "Craft", seen = 1, windowDays = 7,
+          recipe = 2963, output = "2996", crafter = "Kash-Patel",
+        },
+      },
+    }), AS_OF, function(itemString)
+      return itemString == "item:2996" and "Bolt of Linen Cloth" or names(itemString)
+    end)
+
+    assert.are.same(
+      { "Linen Cloth", "90c", "Craft Bolt of Linen Cloth (Kash-Patel)", "no limit", "1 Scan / 7d", "" },
+      view.sections[5].rows[1].cells
+    )
   end)
 
   it("shows a Hold's profit as unknown and the Prediction it's under, as brain recommend does", function()
@@ -816,6 +865,12 @@ describe("RecommendationTable.nextSort", function()
   it("sorts a text column A to Z on its first click", function()
     assert.are.same({ column = 1, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 1))
     assert.are.same({ column = 7, descending = false }, RecommendationTable.nextSort(holdings, holdings.sort, 7))
+  end)
+
+  it("sorts a Buy Under's way out A to Z on its first click, and its units largest first (#88)", function()
+    local buyUnder = build(entry()).sections[5] -- Item, Buy Under, Way out, Units, Seen, Note
+    assert.are.same({ column = 3, descending = false }, RecommendationTable.nextSort(buyUnder, buyUnder.sort, 3))
+    assert.are.same({ column = 4, descending = true }, RecommendationTable.nextSort(buyUnder, buyUnder.sort, 4))
   end)
 end)
 

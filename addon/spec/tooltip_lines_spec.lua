@@ -268,6 +268,30 @@ describe("TooltipLines.forLink", function()
     }, linesFor(r, "item:2589"))
   end)
 
+  it("gives an item's Buy Under with its way out and the Scans that saw it, after its Recommendations (#88)", function()
+    local r = recs({
+      holdings = { { itemKey = "2589", action = "Sell", quantity = 2, price = 2500, profit = 4750 } },
+      buyUnder = {
+        {
+          itemKey = "2589", price = 2100, way = "Craft", units = 40, seen = 14, windowDays = 7,
+          recipe = 2963, output = "2996", crafter = "Kash-Patel",
+        },
+        { itemKey = "2592", price = 300, way = "Vendor", seen = 1, windowDays = 7 },
+      },
+      held = { ["2589"] = { { character = "Kash-Patel", bags = 2, bank = 0, bound = 0 } } },
+    })
+    local function named(itemString)
+      return itemString == "item:2996" and "Bolt of Linen Cloth" or names(itemString)
+    end
+
+    assert.are.same({
+      "AQ: Sell 2 @ 25s",
+      "AQ: Buy Under 21s: Craft Bolt of Linen Cloth (Kash-Patel), seen 14 Scans / 7d",
+      "On Kash-Patel: 2 bags",
+    }, TooltipLines.forLink(r, REALM, FACTION, link("item:2589"), named))
+    assert.are.same({ "AQ: Buy Under 3s: Vendor, seen 1 Scan / 7d" }, linesFor(r, "item:2592"))
+  end)
+
   it("adds nothing without Recommendations for the Market or an item link", function()
     local r = recs({ holdings = { { itemKey = "1", action = "Sell", quantity = 1, price = 1, profit = 1 } } })
 
@@ -323,6 +347,14 @@ describe("TooltipLines.forItemName", function()
       { "AQ: Sell 1 @ 19s 99c", "AQ: Buy 2 @ max 15s" },
       linesForName(r, 15932, "Willow Belt of the Sorcerer")
     )
+  end)
+
+  it("gives the Buy Under of the Item Key with that itemID and name (#88)", function()
+    local r = recs({
+      buyUnder = { { itemKey = "15932:1873", price = 250, way = "Vendor", seen = 2, windowDays = 7 } },
+    })
+
+    assert.are.same({ "AQ: Buy Under 2s 50c: Vendor, seen 2 Scans / 7d" }, linesForName(r, 15932, "Willow Belt of the Owl"))
   end)
 
   it("adds nothing for a name no Item Key has, or one the client hasn't loaded", function()

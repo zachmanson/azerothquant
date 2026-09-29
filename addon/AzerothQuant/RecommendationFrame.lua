@@ -38,6 +38,7 @@ local COLUMN_WIDTHS = {
   ["Shopping List"] = { 160, 45, 40, 80, 80, 90, 80, 80, 50, 80 },
   ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
+  ["Buy Under"] = { 230, 90, 250, 70, 110 },
 }
 local MAX_COLUMNS = 11
 local STRIPE_ALPHA = 0.04
@@ -380,7 +381,7 @@ end
 
 -- Bottom tabs, one per section, in the order RecommendationTable.build gives them. A click
 -- is remembered, so /aq recs reopens that tab.
-local TAB_TITLES = { "Holdings", "Shopping List", "Flips to Craft", "Prediction buys" }
+local TAB_TITLES = { "Holdings", "Shopping List", "Flips to Craft", "Prediction buys", "Buy Under" }
 
 local function createTabs()
   for i, title in ipairs(TAB_TITLES) do

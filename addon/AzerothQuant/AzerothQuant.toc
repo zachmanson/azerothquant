@@ -22,6 +22,7 @@ Prune.lua
 Nudge.lua
 RecommendationTable.lua
 TooltipLines.lua
+BuyUnderMatch.lua
 
 # WoW glue (thin; not unit tested)
 Scanner.lua
@@ -30,4 +31,5 @@ Professions.lua
 Merchant.lua
 Character.lua
 Tooltip.lua
+BuyUnderHighlight.lua
 RecommendationFrame.lua

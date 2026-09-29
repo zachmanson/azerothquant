@@ -213,11 +213,12 @@ local function roiCell(r)
 end
 
 -- How many units of each Item Key the Holdings hold, which a Paid covers some or all of:
--- every row but a Craft's, whose units are made rather than held.
+-- every row but a Craft's, whose units are made rather than held, and a Buy Under's, which
+-- has none (#88).
 function RecommendationTable.heldUnits(holdings)
   local held = {}
   for _, r in ipairs(holdings or {}) do
-    if r.action ~= "Craft" then
+    if r.quantity and r.action ~= "Craft" then
       held[r.itemKey] = (held[r.itemKey] or 0) + r.quantity
     end
   end
@@ -292,9 +293,10 @@ local function tooltip(r, nameOf, held, holdersOf)
 end
 
 -- A row the Brain couldn't choose an Action for, or a Vendor that brings nothing. The
--- Table folds these into a count, and item tooltips leave them out.
+-- Table folds these into a count, and item tooltips leave them out. A Buy Under has a way
+-- out rather than an Action (#88).
 function RecommendationTable.lowValue(r)
-  return r.action == nil or (r.action == "Vendor" and r.profit == 0)
+  return (r.action == nil and r.way == nil) or (r.action == "Vendor" and r.profit == 0)
 end
 
 -- A Craft's note names reagents by ID, which is no use in game: the summary keeps the
@@ -382,12 +384,40 @@ local function predictionBuyKeys(r, name, cells)
   return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss }
 end
 
+-- How a Buy Under gets out (#88): Vendor, Sell, or e.g. "Craft Bolt of Linen Cloth
+-- (Kash-Patel)" for a Craft it's a reagent of.
+function RecommendationTable.wayOut(r, nameOf)
+  if r.way == "Craft" then
+    return "Craft " .. nameFor(r.output, nameOf) .. " (" .. r.crafter .. ")"
+  end
+  return r.way
+end
+
+-- How many Scans saw a Listing at or under a Buy Under, in how many days, e.g.
+-- "14 Scans / 7d" (#88).
+function RecommendationTable.seen(r)
+  return plural(r.seen, "Scan") .. " / " .. r.windowDays .. "d"
+end
+
+-- A Buy Under's cells (#88): its price, how it gets out, how many units it's good for, and
+-- how many Scans saw a Listing at or under it.
+local function buyUnderCells(r, name, nameOf)
+  local units = r.units and tostring(r.units) or "no limit"
+  local seen = RecommendationTable.seen(r)
+  return { name, money(r.price), RecommendationTable.wayOut(r, nameOf), units, seen, r.listedNow and "listed now" or "" }
+end
+
+local function buyUnderKeys(r, name, cells)
+  return { name:lower(), r.price, cells[3]:lower(), r.units or math.huge, r.seen, cells[6] }
+end
+
 -- What an empty tab says, in place of its rows.
 local NOTHING = {
   ["Holdings"] = "Nothing in Holdings right now",
   ["Shopping List"] = "Nothing on the Shopping List right now",
   ["Flips to Craft"] = "No Flips to Craft right now",
   ["Prediction buys"] = "No Prediction buys right now",
+  ["Buy Under"] = "No Buy Unders right now",
 }
 
 -- Orders a section's rows by state.column, largest first when state.descending. Rows
@@ -414,7 +444,7 @@ function RecommendationTable.sort(section, state)
 end
 
 -- Columns sorted by their text. A first click sorts these A to Z and the rest largest first.
-local TEXT_COLUMNS = { Item = true, Action = true, Note = true, Prediction = true }
+local TEXT_COLUMNS = { Item = true, Action = true, Note = true, Prediction = true, ["Way out"] = true }
 
 -- The sort after a click on a column header: the clicked column's first direction, or the
 -- other direction if it's the column already sorted by.
@@ -593,6 +623,19 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         predictionBuyCells,
         predictionBuyKeys,
         { column = 5, descending = false },
+        nameOf,
+        holdersOf
+      ),
+      -- In the Brain's order, best profit per unit first: no column sorts it by default, so
+      -- the rows fall through to the tie-break on their order (a Buy Under's worth is 0).
+      -- Never over the Budget: the player only buys one when it shows up on the AH (#88).
+      section(
+        "Buy Under",
+        { "Item", "Buy Under", "Way out", "Units", "Seen", "Note" },
+        entry.buyUnder or {},
+        buyUnderCells,
+        buyUnderKeys,
+        {},
         nameOf,
         holdersOf
       ),
