@@ -21,9 +21,10 @@ only it can look up item names.
 import os
 import sqlite3
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from brain.beta_prior import BetaPrior
 from brain.config import Install
 from brain.disenchant import DisenchantTable, load_table
 from brain.history import (
@@ -100,6 +101,7 @@ def render(
     last_mailbox_read: dict[tuple[str, str], int] | None = None,
     last_character_read: dict[tuple[str, str], int] | None = None,
     markets: Sequence[MarketRecommendations] = (),
+    beta_priors: Mapping[Market, BetaPrior] | None = None,
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
@@ -110,13 +112,15 @@ def render(
             "lastImported": by_realm,
             "lastMailboxRead": _by_realm(last_mailbox_read or {}),
             "lastCharacterRead": _by_realm(last_character_read or {}),
-            "recommendations": _recommendations(markets),
+            "recommendations": _recommendations(markets, beta_priors or {}),
             "disenchantExcluded": _disenchant_excluded(load_table()),
         },
     )
 
 
-def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict[str, dict]]:
+def _recommendations(
+    markets: Sequence[MarketRecommendations], beta_priors: Mapping[Market, BetaPrior]
+) -> dict[str, dict[str, dict]]:
     by_realm: dict[str, dict[str, dict]] = {}
     for m in markets:
         by_realm.setdefault(m.market.realm, {})[m.market.faction] = {
@@ -138,7 +142,21 @@ def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict
         }
         if m.budget is not None:  # a Lua table can't hold nil
             by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
+        if m.market in beta_priors:
+            by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
     return by_realm
+
+
+def _beta(prior: BetaPrior) -> dict[str, object]:
+    prices: dict[str, dict[str, object]] = {}
+    for item_key, p in prior.prices.items():
+        out: dict[str, object] = {"price": p.price, "saleEvents": p.sale_events}
+        if p.sold:
+            out["sold"] = True
+        if p.units_per_day is not None:
+            out["perDay"] = p.units_per_day
+        prices[item_key] = out
+    return {"realm": prior.market.realm, "faction": prior.market.faction, "prices": prices}
 
 
 # Row field -> the key the Addon reads. None and "" are left out: a Lua table can't hold
@@ -285,9 +303,10 @@ def write_recommendations(
     conn: sqlite3.Connection,
     install: Install,
     markets: Sequence[MarketRecommendations] = (),
+    beta_priors: Mapping[Market, BetaPrior] | None = None,
 ) -> Path | None:
     """Write the install's Recommendations.lua from the history and the Recommendations of
-    its Era's Markets; None if the Addon isn't installed there."""
+    its Era's Markets, with their Beta Priors; None if the Addon isn't installed there."""
     folder = addon_folder(install)
     if not folder.is_dir():
         return None
@@ -297,6 +316,7 @@ def write_recommendations(
         latest_mailbox_read_times(conn, install.era),
         latest_character_read_times(conn, install.era),
         [m for m in markets if m.market.era is install.era],
+        beta_priors,
     )
     # Write a temp file and swap it in, so the client never reads a half-written file. The
     # temp name is unique so a `brain import` running beside `brain watch` can't clash.

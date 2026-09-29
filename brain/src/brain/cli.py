@@ -26,6 +26,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from brain.archive import Archive
+from brain.beta_prior import BetaPrior, beta_prior
 from brain.config import Config, ConfigError, Era, load_config
 from brain.disenchant import Group, load_table
 from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
@@ -34,6 +35,7 @@ from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
     ImportReport,
+    Market,
     disenchant_results,
     import_character_reads,
     import_file,
@@ -194,6 +196,9 @@ def _write_recommendations(
     # Recommendations failing (a typo in the Predictions, or a Decision Engine bug) must
     # not stop the file being written: the import times in it are what let the Addon prune
     # SavedVariables.
+    # One cache for the pass, so the Beta Prior reuses the Fair Values recommend computed.
+    if fair_value_cache is None:
+        fair_value_cache = FairValueCache()
     try:
         predictions = load_predictions(config.predictions_path)
         markets = recommend(conn, config, predictions, fair_value_cache=fair_value_cache)
@@ -203,14 +208,37 @@ def _write_recommendations(
     except Exception:
         log.exception("No Recommendations written: the Decision Engine failed")
         markets = []
+    beta_priors = _beta_priors(conn, config, markets, fair_value_cache)
     for install in config.installs:
         try:
-            path = write_recommendations(conn, install, markets)
+            path = write_recommendations(conn, install, markets, beta_priors)
         except (OSError, sqlite3.Error) as e:
             log.error("Couldn't write Recommendations for %s: %s", install.path, e)
             continue
         if path is None:
             log.warning("The Addon isn't installed in %s; no Recommendations written", install.path)
+
+
+def _beta_priors(
+    conn: sqlite3.Connection,
+    config: Config,
+    markets: Sequence[MarketRecommendations],
+    fair_value_cache: FairValueCache,
+) -> dict[Market, BetaPrior]:
+    """The Beta Prior of each Market's rows (#90). It's display only, so failing only loses
+    the column, never the Recommendations."""
+    result = {}
+    for m in markets:
+        rows = [*m.holdings, *m.shopping_list, *m.prediction_buys, *m.buy_under]
+        item_keys = {r.item_key for r in rows if r.item_key}
+        try:
+            prior = beta_prior(conn, m.market, config, m.as_of, item_keys, fair_value_cache)
+        except Exception:
+            log.exception("No Beta Prior for %s %s", m.market.realm, m.market.faction)
+            continue
+        if prior is not None:
+            result[m.market] = prior
+    return result
 
 
 def _log_results(results: list[FileResult]) -> None:

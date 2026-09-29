@@ -44,7 +44,18 @@ local COLUMN_WIDTHS = {
   ["Prediction buys"] = { 230, 150, 50, 120 },
   ["Buy Under"] = { 230, 90, 250, 70, 110 },
 }
-local MAX_COLUMNS = 11
+-- The same while the Brain writes a Beta Prior (#90): a Beta column before the Note (last
+-- on Prediction buys, where it takes the leftover). "2g 74s 50c*" needs 85. The Shopping
+-- List makes room from Item and the Note (a Flip's is mostly empty), and keeps Post at and
+-- Cost at 85 too, since "5g 43s 99c" clipped at 75 in game; the Buy Under from its way out.
+local BETA_COLUMN_WIDTHS = {
+  ["Holdings"] = { 230, 70, 50, 110, 110, 80, 85 },
+  ["Shopping List"] = { 120, 40, 35, 75, 85, 80, 75, 75, 45, 85, 85 },
+  ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95, 85 },
+  ["Prediction buys"] = { 230, 150, 50, 120, 120 },
+  ["Buy Under"] = { 230, 90, 195, 70, 110, 85 },
+}
+local MAX_COLUMNS = 12
 local STRIPE_ALPHA = 0.04
 
 local db
@@ -85,10 +96,16 @@ local function nameOf(itemString)
 end
 
 -- A section's column widths, the last one taking what's left of the row.
-local function widthsFor(title)
+local function widthsFor(section)
+  local byTitle = COLUMN_WIDTHS
+  for _, name in ipairs(section.columns) do
+    if name == "Beta" then
+      byTitle = BETA_COLUMN_WIDTHS
+    end
+  end
   local widths = {}
   local used = ICON_SIZE + ICON_GAP
-  for c, w in ipairs(COLUMN_WIDTHS[title]) do
+  for c, w in ipairs(byTitle[section.title]) do
     widths[c] = w
     used = used + w
   end
@@ -535,7 +552,7 @@ function redraw()
     for _, section in ipairs(view.sections) do
       if section.title == selected then
         shown = section
-        local widths = widthsFor(section.title)
+        local widths = widthsFor(section)
         local sort = activeSort(section)
         RecommendationTable.sort(section, sort)
         drawHeaders(section.columns, widths, sort)

@@ -115,6 +115,11 @@
 # buy_under_min_sightings = 1
 # buy_under_window_days = 7
 
+# Optional: the Beta Prior (#90), a grey Beta price beside each Recommendation Table row,
+# shows for beta_column_days from a Market's first Scan. Display only: nothing decides by
+# it. 0 never shows it. Defaults to 14. Must come before the first [[installs]].
+# beta_column_days = 14
+
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
 # it nets after the cut over what its units cost on the Auction House, is at least this
 # share. Only a hint; the Action stands either way. Defaults to 0.20. Must come before the

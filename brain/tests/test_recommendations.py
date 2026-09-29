@@ -2,6 +2,7 @@ import subprocess
 from dataclasses import replace
 from pathlib import Path
 
+from brain.beta_prior import BetaPrice, BetaPrior
 from brain.config import Era
 from brain.disenchant import Group
 from brain.history import Market
@@ -586,3 +587,48 @@ def test_a_real_lua_reads_what_cant_be_disenchanted(tmp_path, lua):
         "11287,11288,11289,11290",
         "INVTYPE_BODY,INVTYPE_NON_EQUIP_IGNORE,INVTYPE_TABARD",
     ]
+
+
+def test_a_real_lua_reads_the_beta_prior(tmp_path, lua):
+    # #90: keyed by Item Key, like held, so every tab's rows can look it up.
+    beta = BetaPrior(
+        Market("Classic Beta PvP", "Alliance", Era.BETA),
+        {
+            "2589": BetaPrice(250, sold=True, sale_events=7, units_per_day=1.2),
+            "4306": BetaPrice(900, sold=False, sale_events=1, units_per_day=None),
+        },
+    )
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render(
+            {}, markets=[MarketRecommendations(MARKET, 1790000000, 0)], beta_priors={MARKET: beta}
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local b = r.recommendations["Quel\'Thalas"].Horde.beta '
+        "print(b.realm, b.faction) "
+        'for _, k in ipairs({ "2589", "4306" }) do '
+        "  local p = b.prices[k] print(k, p.price, p.sold, p.saleEvents, p.perDay) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "Classic Beta PvP	Alliance",
+        "2589	250	true	7	1.2",
+        "4306	900	nil	1	nil",
+    ]
+
+
+def test_a_market_without_a_beta_prior_has_no_beta(tmp_path, lua):
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0)]), encoding="utf-8"
+    )
+
+    out = _run_in_lua(lua, file, 'print(r.recommendations["Quel\'Thalas"].Horde.beta)')
+
+    assert out == "nil"

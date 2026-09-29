@@ -94,6 +94,8 @@ DEFAULT_SHOPPING_LIST_ROWS = 50
 DEFAULT_CRAFT_LIST_ROWS = 25
 DEFAULT_BUY_UNDER_MIN_SIGHTINGS = 1
 DEFAULT_BUY_UNDER_WINDOW_DAYS = 7
+# Days the Beta Prior column shows for, from a Market's first Scan (#90).
+DEFAULT_BETA_COLUMN_DAYS = 14
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
@@ -183,6 +185,8 @@ class Config:
     # buy_under_window_days saw another player's Listing at or under it (#88).
     buy_under_min_sightings: int = DEFAULT_BUY_UNDER_MIN_SIGHTINGS
     buy_under_window_days: int = DEFAULT_BUY_UNDER_WINDOW_DAYS
+    # The Beta Prior shows for this many days from the Market's first Scan (#90); 0 never.
+    beta_column_days: int = DEFAULT_BETA_COLUMN_DAYS
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
@@ -385,6 +389,12 @@ def load_config(path: Path) -> Config:
             raise ConfigError(
                 f"{path}: {key} must be a whole number of {unit} of at least 1, got {n!r}"
             )
+    beta_days = raw.get("beta_column_days", DEFAULT_BETA_COLUMN_DAYS)
+    if isinstance(beta_days, bool) or not isinstance(beta_days, int) or beta_days < 0:
+        raise ConfigError(
+            f"{path}: beta_column_days must be a whole number of days of at least 0,"
+            f" got {beta_days!r}"
+        )
     roi_hint = _parse_number(
         path, raw.get("roi_hint", DEFAULT_ROI_HINT), "roi_hint", lambda x: x >= 0, "of at least 0"
     )
@@ -436,6 +446,7 @@ def load_config(path: Path) -> Config:
         craft_list_rows=craft_rows,
         buy_under_min_sightings=sightings,
         buy_under_window_days=window_days,
+        beta_column_days=beta_days,
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,

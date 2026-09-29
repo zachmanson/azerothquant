@@ -775,6 +775,94 @@ describe("RecommendationTable.build", function()
   end)
 end)
 
+describe("the Beta Prior column (#90)", function()
+  local GREY = "|cff808080"
+
+  -- The Beta Prior as the Brain writes it (brain/tests/test_recommendations.py).
+  local function beta()
+    return {
+      realm = "Classic Beta PvP",
+      faction = "Alliance",
+      prices = {
+        ["2589"] = { price = 250, sold = true, saleEvents = 7, perDay = 1.2 },
+        ["4306"] = { price = 900, saleEvents = 1 },
+      },
+    }
+  end
+
+  local function sell(itemKey)
+    return { itemKey = itemKey, action = "Sell", quantity = 2, price = 100, profit = 190 }
+  end
+
+  it("shows a grey Beta price before the Note, and names its Market and Sale Events in the tooltip", function()
+    local view = build(entry({ holdings = { sell("2589") }, beta = beta() }))
+
+    local holdings = view.sections[1]
+    assert.are.same({ "Item", "Action", "Qty", "Price", "Profit", "ROI", "Beta", "Note" }, holdings.columns)
+    local row = holdings.rows[1]
+    assert.are.equal(GREY .. "2s 50c|r", row.cells[7])
+    assert.are.equal("Beta (Alliance, Classic Beta PvP): 2s 50c median sold, 7 Sale Events, 1.2/day", row.tooltip[#row.tooltip])
+  end)
+
+  it("marks a price that was only listed, not sold", function()
+    local view = build(entry({ holdings = { sell("4306") }, beta = beta() }))
+
+    local row = view.sections[1].rows[1]
+    assert.are.equal(GREY .. "9s*|r", row.cells[7])
+    assert.are.equal("Beta (Alliance, Classic Beta PvP): 9s median listed, not sold, 1 Sale Event", row.tooltip[#row.tooltip])
+  end)
+
+  it("leaves the cell blank and adds no tooltip line where Beta has no number", function()
+    local view = build(entry({ holdings = { sell("2770") }, beta = beta() }))
+
+    local row = view.sections[1].rows[1]
+    assert.are.equal("", row.cells[7])
+    assert.are.same({}, row.tooltip)
+  end)
+
+  it("shows on every tab, keyed on the row's Item Key (a Flip to Craft's output)", function()
+    local flip = { itemKey = "2589", action = "Sell", quantity = 1, price = 10, postAt = 20, profit = 9, cost = 10, listings = 1, posts = 1, days = 1 }
+    local craft = flipToCraft()
+    craft.itemKey = "4306"
+    local view = build(entry({
+      shoppingList = { flip, craft },
+      predictionBuys = { { itemKey = "2589", action = "Hold", quantity = 1, price = 10, cost = 10, prediction = "P", maxLoss = 1 } },
+      buyUnder = { { itemKey = "4306", price = 5, way = "Sell", units = 1, seen = 1, windowDays = 7 } },
+      beta = beta(),
+    }))
+
+    local shopping, crafts, predictions, buyUnder = unpack(view.sections, 2, 5)
+    assert.are.equal("Beta", shopping.columns[11])
+    assert.are.equal(GREY .. "2s 50c|r", shopping.rows[1].cells[11])
+    assert.are.equal("Beta", crafts.columns[8])
+    assert.are.equal(GREY .. "9s*|r", crafts.rows[1].cells[8])
+    -- No Note there, so it goes last.
+    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Beta" }, predictions.columns)
+    assert.are.equal(GREY .. "2s 50c|r", predictions.rows[1].cells[6])
+    assert.are.equal("Beta", buyUnder.columns[6])
+    assert.are.equal(GREY .. "9s*|r", buyUnder.rows[1].cells[6])
+  end)
+
+  it("sorts the Beta column by the price, with rows Beta has no number for last", function()
+    local view = build(entry({ holdings = { sell("2770"), sell("4306"), sell("2589") }, beta = beta() }))
+    local holdings = view.sections[1]
+
+    RecommendationTable.sort(holdings, { column = 7, descending = true })
+
+    local order = {}
+    for _, row in ipairs(holdings.rows) do
+      order[#order + 1] = row.record.itemKey
+    end
+    assert.are.same({ "4306", "2589", "2770" }, order)
+  end)
+
+  it("has no Beta column once the Brain stops writing one", function()
+    local view = build(entry({ holdings = { sell("2589") } }))
+
+    assert.are.same({ "Item", "Action", "Qty", "Price", "Profit", "ROI", "Note" }, view.sections[1].columns)
+  end)
+end)
+
 -- A selected row (#77) is found again after a redraw by its Item Key and action.
 describe("selecting a Recommendation Table row", function()
   it("finds the row with the same Item Key and action after a redraw", function()

@@ -420,6 +420,54 @@ local function buyUnderKeys(r, name, cells)
   return { name:lower(), r.price, cells[3]:lower(), r.units or math.huge, r.seen, cells[6] }
 end
 
+-- The Beta Prior (#90): a Beta price beside each row early in Live, grey since it's only a
+-- reference and never decides anything. A price only listed, not sold, is starred. beta is
+-- the entry's; nil where Beta has no number for the Item Key.
+local BETA_COLOR = "|cff808080"
+
+local function betaPrice(beta, itemKey)
+  return beta and itemKey and beta.prices[itemKey]
+end
+
+function RecommendationTable.betaCell(beta, itemKey)
+  local p = betaPrice(beta, itemKey)
+  if not p then
+    return ""
+  end
+  return BETA_COLOR .. Money.format(p.price) .. (p.sold and "" or "*") .. "|r"
+end
+
+-- e.g. "Beta (Alliance, Classic Beta PvP): 2g 50s median sold, 7 Sale Events, 1.2/day".
+function RecommendationTable.betaLine(beta, itemKey)
+  local p = betaPrice(beta, itemKey)
+  if not p then
+    return nil
+  end
+  local how = p.sold and " median sold, " or " median listed, not sold, "
+  local rate = p.perDay and string.format(", %.1f/day", p.perDay) or ""
+  return "Beta (" .. beta.faction .. ", " .. beta.realm .. "): " .. Money.format(p.price) .. how
+    .. plural(p.saleEvents, "Sale Event") .. rate
+end
+
+-- Puts value at place pos of a row's n cells or sort keys, moving the rest along. Keys can
+-- hold nils, so the length operator can't be trusted to find the end.
+local function insertAt(list, n, pos, value)
+  for i = n, pos, -1 do
+    list[i + 1] = list[i]
+  end
+  list[pos] = value
+end
+
+-- Where the Beta column goes in a section's columns: before the Note, else last.
+local function betaPlace(columns)
+  for c, name in ipairs(columns) do
+    if name == "Note" then
+      return c
+    end
+  end
+  return #columns + 1
+end
+
 -- What an empty tab says, in place of its rows.
 local NOTHING = {
   ["Holdings"] = "Nothing in Holdings right now",
@@ -487,8 +535,14 @@ end
 -- holdersOf is the entry's held: which Characters hold each Item Key. inBags(itemKey), given
 -- for Holdings only, says whether the logged-in Character has it in its bags. budget, given
 -- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
-local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget)
+-- beta is the entry's Beta Prior, and adds its column while the Brain writes one (#90).
+local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta)
   local held = RecommendationTable.heldUnits(rows)
+  local n, place = #columns, betaPlace(columns)
+  if beta then
+    columns = { unpack(columns) }
+    insertAt(columns, n, place, "Beta")
+  end
   local out = { title = title, columns = columns, rows = {}, sort = default }
   local folded, over = 0, 0
   for _, r in ipairs(rows) do
@@ -503,6 +557,14 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
       if inBags and inBags(r.itemKey) then
         rowCells[1] = RecommendationTable.BAG .. " " .. name
       end
+      local rowKeys = keys(r, name, rowCells)
+      local rowTooltip = tooltip(r, nameOf, held, holdersOf)
+      if beta then
+        local p = betaPrice(beta, r.itemKey)
+        insertAt(rowCells, n, place, RecommendationTable.betaCell(beta, r.itemKey))
+        insertAt(rowKeys, n, place, p and p.price)
+        rowTooltip[#rowTooltip + 1] = RecommendationTable.betaLine(beta, r.itemKey)
+      end
       out.rows[#out.rows + 1] = {
         -- What a selection finds the row by after a redraw (#77). A Buy Under has a way
         -- out instead of an action, and two Characters can each Craft one output.
@@ -510,10 +572,10 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         record = r,
         itemString = r.itemKey and itemString(r.itemKey),
         cells = rowCells,
-        keys = keys(r, name, rowCells),
+        keys = rowKeys,
         worth = (r.price or 0) * (r.quantity or 0),
         order = #out.rows + 1,
-        tooltip = tooltip(r, nameOf, held, holdersOf),
+        tooltip = rowTooltip,
       }
     end
   end
@@ -643,7 +705,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         { column = 5, descending = true },
         nameOf,
         holdersOf,
-        inBags
+        inBags,
+        nil,
+        entry.beta
       ),
       section(
         "Shopping List",
@@ -655,7 +719,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nameOf,
         holdersOf,
         nil,
-        budget
+        budget,
+        entry.beta
       ),
       section(
         "Flips to Craft",
@@ -667,7 +732,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nameOf,
         holdersOf,
         nil,
-        budget
+        budget,
+        entry.beta
       ),
       section(
         "Prediction buys",
@@ -677,7 +743,10 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         predictionBuyKeys,
         { column = 5, descending = false },
         nameOf,
-        holdersOf
+        holdersOf,
+        nil,
+        nil,
+        entry.beta
       ),
       -- In the Brain's order, best profit per unit first: no column sorts it by default, so
       -- the rows fall through to the tie-break on their order (a Buy Under's worth is 0).
@@ -690,7 +759,10 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         buyUnderKeys,
         {},
         nameOf,
-        holdersOf
+        holdersOf,
+        nil,
+        nil,
+        entry.beta
       ),
     },
   }
