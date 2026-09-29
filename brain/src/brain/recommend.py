@@ -47,6 +47,13 @@ from brain.mailbox import MailKind
 from brain.predictions import Prediction
 from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
 
+# A replay's stand-in for the own-Market Sell Rate (#84, ADR-0015): (Item Key, the cheapest
+# other player's unit price left once the buys are made, None if none) -> the price to
+# post at, or None without one. Only the replay builds one: a baseline is never a Brain
+# price. Given one, it prices every Sell and Flip, there's no room limit on what sells
+# within the Sale Horizon, and no deposits are expected lost waiting to sell.
+Pricer = Callable[[str, int | None], float | None]
+
 
 class Action(StrEnum):
     VENDOR = "Vendor"
@@ -394,12 +401,14 @@ def recommend_market(
     as_of: int | None = None,
     buy_under: bool = True,
     fair_value_cache: FairValueCache | None = None,
+    pricer: Pricer | None = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
     #103). Without `buy_under`, the Buy
     Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
-    `recommend`."""
+    `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
+    the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click."""
     characters = character_markets(conn).get(market, [])
     today = date.fromtimestamp(now)
     active = [p for p in predictions if p.active_on(today)]
@@ -420,6 +429,7 @@ def recommend_market(
         seen,
         fair_value_cache=fair_value_cache,
         skills_as_of=as_of,
+        pricer=pricer,
     )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
@@ -460,9 +470,10 @@ def recommend_market(
             merchant.get(plan.output),
             _unbound(held.get(plan.output, Holding())),
             valuer.effort(plan.output),
-            valuer.queue(plan.output, flips=True),
+            valuer.sale_queue(plan.output, flips=True),
             cut,
             config,
+            valuer.priced(plan.output),
         )
 
     crafts = (
@@ -883,13 +894,14 @@ def _valuer(
     seen: Sequence[Listing] | None = None,
     fair_value_cache: FairValueCache | None = None,
     skills_as_of: int | None = None,
+    pricer: Pricer | None = None,
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
     `_market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
-    the latest, or as of `skills_as_of` (#103)."""
+    the latest, or as of `skills_as_of` (#103). `pricer` as in `recommend_market`."""
     seen = listings(conn, market) if seen is None else seen
     scanned = at is not None
     supply = supply_at(conn, market, at) if scanned else {}
@@ -920,6 +932,7 @@ def _valuer(
             item_info(conn, market.era),
             enchanting_skills(conn, market, skills_as_of),
         ),
+        pricer=pricer,
     )
     return valuer.flips(under, unbound)
 
@@ -972,7 +985,8 @@ class _Disenchanting:
 class _Valuer:
     """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
     on sale, `others` other players' Listings, and `flipped` the ones the Flips buy.
-    `non_stacking` are the Item Keys that don't stack (#73)."""
+    `non_stacking` are the Item Keys that don't stack (#73). A `pricer` replaces the Sell
+    Rate in the Holdings rows, the Flips and the Flip to Craft outputs (#84)."""
 
     def __init__(
         self,
@@ -988,12 +1002,13 @@ class _Valuer:
         config: Config,
         held: Mapping[str, int] = MappingProxyType({}),
         disenchanting: _Disenchanting | None = None,
+        pricer: Pricer | None = None,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
-        self.disenchanting = disenchanting
+        self.disenchanting, self._pricer = disenchanting, pricer
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
@@ -1012,6 +1027,7 @@ class _Valuer:
             self._config,
             self.held if held is None else held,
             self.disenchanting,
+            self._pricer,
         )
 
     def deposit(self, item_key: str) -> float:
@@ -1033,6 +1049,26 @@ class _Valuer:
             priors = (c.sell_rate_prior_hours_holdings, c.sale_size_prior_events_holdings)
         per_day = _units_per_day(self.rates.get(item_key), *priors)
         return _Queue(per_day / 24, self.deposit(item_key), c.post_duration_hours)
+
+    def sale_queue(self, item_key: str, flips: bool) -> _Queue:
+        """The queue a Sell or Flip waits in: `queue`, or with a pricer one that loses no
+        deposits (#84)."""
+        if self._pricer is None:
+            return self.queue(item_key, flips)
+        return _Queue(0.0, 0.0, self._config.post_duration_hours)
+
+    def priced(self, item_key: str) -> Callable[[int | None], float | None] | None:
+        """The pricer's price for an Item Key from the cheapest other player's unit price
+        left, never above what a merchant charges (#63); None without a pricer."""
+        if self._pricer is None:
+            return None
+        pricer, merchant = self._pricer, self.merchant.get(item_key)
+
+        def price(cheapest: int | None) -> float | None:
+            post_at = pricer(item_key, cheapest)
+            return None if post_at is None else _ceiling(post_at, merchant)
+
+        return price
 
     def effort(self, item_key: str) -> int:
         """What a Flip is charged for each unit of an Item Key it buys, and again for each
@@ -1058,11 +1094,12 @@ class _Valuer:
                 self.vendor.get(item_id_of(item_key)),
                 self.merchant.get(item_key),
                 unbound.get(item_key, 0),
-                self.queue(item_key, flips=True),
+                self.sale_queue(item_key, flips=True),
                 self.effort(item_key),
                 self.stack(item_key),
                 self.cut,
                 self._config,
+                self.priced(item_key),
             )
         ]
         return self.after({}, unbound), buys
@@ -1086,6 +1123,9 @@ class _Valuer:
         return self._post_at_or_under(item_key, None)
 
     def _post_at_or_under(self, item_key: str, cap: float | None) -> float | None:
+        if (price := self.priced(item_key)) is not None:
+            left = without(self.others.get(item_key, []), self.flipped.get(item_key, []))
+            return price(_cheapest(left))
         return _post_at(
             self.supply.get(item_key, []),
             self.others.get(item_key, []),
@@ -1098,20 +1138,34 @@ class _Valuer:
         rate = self.rates.get(item_key)
         has_data = self.has_data(item_key)
         post_at = self.post_at(item_key) if has_data else None
+        c = self._config
+        room = (
+            math.inf
+            if self._pricer is not None
+            else sellable_units(
+                rate,
+                c.sell_rate_prior_hours_holdings,
+                c.sale_size_prior_events_holdings,
+                c.sale_horizon_seconds,
+            )
+        )
         return _holding_rows(
             item_key,
             holding,
             has_data,
             post_at,
-            rate,
+            room,
+            rate.sale_events if rate else None,
             self.vendor.get(item_id_of(item_key)),
-            self.queue(item_key, flips=False),
+            self.sale_queue(item_key, flips=False),
             self.cut,
-            self._config,
         )
 
     def has_data(self, item_key: str) -> bool:
-        """Whether there's a Fair Value and a Sell Rate with sales to value it by."""
+        """Whether there's a Fair Value and a Sell Rate with sales to value it by, or with
+        a pricer, whether it has a price (#84)."""
+        if self._pricer is not None:
+            return self.post_at(item_key) is not None
         rate = self.rates.get(item_key)
         value = fair_value(self.supply.get(item_key, []), self._config)
         return value is not None and rate is not None and bool(rate.sale_events)
@@ -1304,14 +1358,15 @@ def _holding_rows(
     holding: Holding,
     has_data: bool,
     post_at: float | None,
-    rate: SellRate | None,
+    room: float,
+    sale_events: int | None,
     vendor_price: int | None,
     queue: _Queue,
     cut: float,
-    config: Config,
 ) -> list[Row]:
     """How held units split between Sell, posted at `post_at` like a Flip (#64), and
     Vendor. With no Listing to price against there's no `post_at`, and they're Vendored.
+    At most `room` units Sell: those that sell within the Sale Horizon.
     A held unit Sells only while it beats the Vendor Price less the deposits it's expected
     to lose waiting its turn in the `queue` (#78), so the tail of a slow seller is Vendored."""
     rows = []
@@ -1322,15 +1377,7 @@ def _holding_rows(
         rows.append(Row(item_key, None, unbound, note="no data"))
     elif unbound:
         sell_price = 0.0 if post_at is None else post_at * (1 - cut)
-        sellable = min(
-            unbound,
-            sellable_units(
-                rate,
-                config.sell_rate_prior_hours_holdings,
-                config.sale_size_prior_events_holdings,
-                config.sale_horizon_seconds,
-            ),
-        )
+        sellable = min(unbound, room)
         selling = 0
         if post_at is not None:
             while selling < sellable and sell_price - queue.lost(selling) > (vendor_price or 0):
@@ -1345,7 +1392,7 @@ def _holding_rows(
                     price=post_at,
                     profit=profit,
                     margin=None if vendor_price is None else profit / selling - vendor_price,
-                    sale_events=rate.sale_events,
+                    sale_events=sale_events,
                 )
             )
         vendoring += unbound - selling
@@ -1848,16 +1895,22 @@ def _outlet(
     queue: _Queue,
     cut: float,
     config: Config,
+    pricer: Callable[[int | None], float | None] | None = None,
 ) -> _Outlet:
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells
     within the Sale Horizon under the Flip priors, less the `held` units, counting only
     the Sale Events at or above its post price (#107), and its units wait in the `queue`
     at that rate. It resells like them, posted under the cheapest other Listing, as if the
     Flip to Craft were the only buy (#86), and never above what a merchant charges (#63).
-    `others` is other players' asks."""
-    post_at = _post_at(supply, others, [], config, merchant_cost)
+    `others` is other players' asks. A `pricer` (`_Valuer.priced`) sets the post price
+    instead, with no room limit (#84)."""
+    if pricer is None:
+        post_at = _post_at(supply, others, [], config, merchant_cost)
+        room = _flip_room(_demand_at(rate, post_at), config)
+    else:
+        post_at = pricer(min((unit for unit, _ in others), default=None))
+        room = 0 if post_at is None else math.inf
     demand = _demand_at(rate, post_at)
-    room = _flip_room(demand, config)
     if room:
         room = max(0, room - held)
         queue = _flip_queue(queue, demand, config)
@@ -2177,6 +2230,7 @@ def _flips(
     stack: float,
     cut: float,
     config: Config,
+    pricer: Callable[[int | None], float | None] | None = None,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
@@ -2196,6 +2250,9 @@ def _flips(
     it, and one bought to Sell the effort of posting it too (#73), and the deposits it's
     expected to lose waiting its turn in the `queue` after the `held` units (#78), at the
     Sell Rate at its post price.
+
+    A `pricer` (`_Valuer.priced`) sets the post price instead, with no room limit and no
+    minimum of Sale Events (#84).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -2207,14 +2264,17 @@ def _flips(
     after = _cheapest_from(offers)
     bought = 0
     for i, (unit, quantity) in enumerate(offers):
-        take, post_at = _sell_take(
-            quantity,
-            bought,
-            _undercut(after[i + 1], own, config, merchant_cost),
-            _undercut(unit, own, config, merchant_cost),
-            lambda price: _room_at(rate, price, held, config),
-        )
-        if not take:
+        if pricer is None:
+            take, post_at = _sell_take(
+                quantity,
+                bought,
+                _undercut(after[i + 1], own, config, merchant_cost),
+                _undercut(unit, own, config, merchant_cost),
+                lambda price: _room_at(rate, price, held, config),
+            )
+        else:
+            take, post_at = quantity, pricer(after[i + 1])
+        if not take or post_at is None:
             break
         prefix = [*prefix, (unit, take)]
         bought += take
@@ -2227,8 +2287,11 @@ def _flips(
         if _resells(resale, unit, vendor_price, effort, lost, config):
             profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
             profit -= at_price.lost_by(held, bought)
-            days = (held + bought) / (at_price.units_per_hour * 24)
-            runs.append(_SellRun(prefix, post_at, profit, days, demand.sale_events))
+            # With a pricer and no Sell Rate at the price, there's nothing to wait by.
+            per_hour = at_price.units_per_hour
+            days = (held + bought) / (per_hour * 24) if per_hour else math.inf
+            events = demand.sale_events if demand else 0
+            runs.append(_SellRun(prefix, post_at, profit, days, events))
         if take < quantity:
             break  # the rest of this Listing is left, so no longer run buys past it
     buys: list[_VendorBuy | _FlipToSell] = []

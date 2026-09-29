@@ -11,6 +11,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.recommend import Action, CraftOutput, recommend_market
 from brain.replay import Policy, db_market, db_min_buyout, replay
 
 T0 = 1_790_000_000
@@ -481,6 +482,82 @@ def test_the_brain_is_replayed_without_deposits_and_graded_with_them(db):
     assert graded[Policy.BRAIN_WITHOUT_DEPOSITS] == pytest.approx(
         6 * 99 * 0.95 - 2 * 48 - 2 * 2 * 48 - 6 * 80
     )
+
+
+def test_without_the_sell_rate_a_flip_buys_past_its_room_and_posts_at_db_market(db):
+    # 1 Linen at 1000 sold in the hour before the replayed Scan, T0 + 1 h, which shows 5
+    # more at 200 that stay up. Then 3 at 1000 sell each hour.
+    cheap = row(quantity=5, unit=200)
+    scans = [
+        scan(T0, row(quantity=20, unit=1000)),
+        scan(T0 + HOUR, row(quantity=19, unit=1000), cheap),
+        scan(T0 + 2 * HOUR, row(quantity=16, unit=1000), cheap),
+        scan(T0 + 3 * HOUR, row(quantity=13, unit=1000), cheap),
+        scan(T0 + 4 * HOUR, row(quantity=10, unit=1000), cheap),
+    ]
+    result = run(db, scans, [character_read(money=10_000)], since=T0 + HOUR, until=T0 + HOUR)
+
+    # The Brain's Sell Rate has room for 3 in 3 h, so it could only take part of the
+    # Listing at 200, posted at 199 under the rest of it: no profit, so it buys nothing.
+    # Without the Sell Rate there's no room limit: all 5 are bought and posted at
+    # DBMarket, 600 (T0's Scan is worth 1000, T0 + 1 h's 200), since 999 under the next
+    # ask is over it. All 5 sell to the 1000 buyers.
+    graded = result[MARKET].graded
+    assert graded[Policy.BRAIN] == 0
+    assert graded[Policy.BRAIN_WITHOUT_SELL_RATE] == pytest.approx(5 * 600 * 0.95 - 5 * 200)
+
+
+def test_without_the_sell_rate_an_item_key_with_no_sale_events_is_priced_by_db_market(db):
+    # 5 Ore at 100 sat unsold up to the replayed Scan, T0 + 1 h, then 2 sell each hour.
+    scans = [
+        scan(T0, row(ORE, quantity=5)),
+        scan(T0 + HOUR, row(ORE, quantity=5)),
+        scan(T0 + 2 * HOUR, row(ORE, quantity=3)),
+        scan(T0 + 3 * HOUR, row(ORE, quantity=1)),
+        scan(T0 + 4 * HOUR),
+    ]
+    result = run(
+        db,
+        scans,
+        [character_read(item(ORE_LINK, count=3), vendor_prices={2770: 10})],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    # The Brain has no Sale Event to value the 3 held Ore by ("no data"), so it holds on to
+    # them. Without the Sell Rate, DBMarket is 100, and they go up at 99, under the
+    # cheapest ask, and sell. Held untouched, they'd be Vendored at the end of the horizon,
+    # when no Ore is listed.
+    graded = result[MARKET].graded
+    assert graded[Policy.BRAIN] == 0
+    assert graded[Policy.BRAIN_WITHOUT_SELL_RATE] == pytest.approx(3 * 99 * 0.95 - 3 * 10)
+
+
+def test_a_pricer_prices_a_flip_to_craft_output_with_no_room_limit_under_its_merchant_cost(db):
+    # A merchant sells Bolts at 1500, and the pricer asks 5000 for one.
+    import_scans(db, linen_selling_then_crashing(bolts=True), Era.BETA, CONFIG)
+    read = character_read(
+        money=10_000,
+        recipes=[recipe(reagents=((2589, 2), (2320, 1)))],
+        merchant_costs={2320: 10, 2996: 1500},
+    )
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    m = recommend_market(
+        db,
+        CONFIG,
+        MARKET,
+        [],
+        T0 + HOUR,
+        as_of=T0 + HOUR,
+        buy_under=False,
+        pricer=lambda item_key, cheapest: 5000 if item_key == "2996" else None,
+    )
+
+    # The Bolt Sell Rate has room for 3 in 3 h. With the pricer there's no limit, so all
+    # 18 Linen on sale make 9 Bolts, every one posted at the merchant's 1500.
+    crafts = [r for r in m.shopping_list if r.action is Action.CRAFT]
+    assert [r.made for r in crafts] == [CraftOutput(units=9, selling=9, post_at=1500)]
 
 
 # --- Realized profit, the confirmation ---

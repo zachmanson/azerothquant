@@ -44,6 +44,7 @@ from brain.recommend import (
     BOUND_ON_CRAFT,
     Action,
     MarketRecommendations,
+    Pricer,
     Row,
     auction_cut,
     cheapest,
@@ -65,6 +66,8 @@ class Policy(StrEnum):
     BRAIN_WITHOUT_SUB_CRAFTS = "Brain without Sub-crafts"
     BRAIN_WITHOUT_FLIPS_TO_CRAFT = "Brain without Flips to Craft"
     BRAIN_WITHOUT_DEPOSITS = "Brain without Deposits"
+    # Priced by the emulated TSM's rule instead of the own-Market Sell Rate (#84).
+    BRAIN_WITHOUT_SELL_RATE = "Brain without own-Market Sell Rate"
 
 
 # Each Brain run's config, from the full Brain's.
@@ -73,6 +76,8 @@ _BRAINS: dict[Policy, Callable[[Config], Config]] = {
     Policy.BRAIN_WITHOUT_SUB_CRAFTS: lambda c: replace(c, craft_chain_depth=1),
     Policy.BRAIN_WITHOUT_FLIPS_TO_CRAFT: lambda c: replace(c, flips_to_craft=False),
     Policy.BRAIN_WITHOUT_DEPOSITS: lambda c: replace(c, deposits=False),
+    # With the pricer the replay gives it (`_tsm_pricer`).
+    Policy.BRAIN_WITHOUT_SELL_RATE: lambda c: c,
 }
 
 
@@ -211,10 +216,21 @@ def replay(
             others = supply_at(conn, market, t, others_only=True)
             gold = pooled_gold(conn, market.era, market.realm, market.faction, t)
             recipes = known_recipes(conn, market, as_of=t)
+            market_value = db_market(conn, market, t, scan_values)
+            pricers: dict[Policy, Pricer | None] = {
+                Policy.BRAIN_WITHOUT_SELL_RATE: _tsm_pricer(market_value, vendor)
+            }
             moves = {
                 policy: _brain(
                     recommend_market(
-                        conn, run(config), market, predictions, t, as_of=t, buy_under=False
+                        conn,
+                        run(config),
+                        market,
+                        predictions,
+                        t,
+                        as_of=t,
+                        buy_under=False,
+                        pricer=pricers.get(policy),
                     ),
                     vendor,
                     config.shopping_list_rows,
@@ -228,7 +244,7 @@ def replay(
                     vendor,
                     recipes,
                     merchant,
-                    db_market(conn, market, t, scan_values),
+                    market_value,
                     db_min_buyout(conn, market, t),
                     gold,
                 ),
@@ -412,9 +428,22 @@ def _tsm(
     held = _tsm_crafts(held, others, recipes, merchant, market_value, min_buyout, gold, moves)
     for item_key, h in held.items():
         vendor_price = vendor.get(item_id_of(item_key))
-        price = _tsm_price(market_value.get(item_key), others.get(item_key), vendor_price)
+        asks = others.get(item_key)
+        cheapest_ask = min(unit for unit, _ in asks) if asks else None
+        price = _tsm_price(market_value.get(item_key), cheapest_ask, vendor_price)
         _exit(moves, item_key, h, price, vendor_price)
     return moves
+
+
+def _tsm_pricer(market_value: Mapping[str, float], vendor: Mapping[int, int]) -> Pricer:
+    """The emulated TSM's price rule (`_tsm_price`) as the Brain's pricer, for the Brain
+    without its own-Market Sell Rate (#84). An Item Key without a DBMarket has no price."""
+
+    def pricer(item_key: str, cheapest_ask: int | None) -> float | None:
+        vendor_price = vendor.get(item_id_of(item_key))
+        return _tsm_price(market_value.get(item_key), cheapest_ask, vendor_price)
+
+    return pricer
 
 
 def _tsm_crafts(
@@ -510,15 +539,16 @@ def _tsm_craft(
 
 
 def _tsm_price(
-    market_value: float | None, asks: Supply | None, vendor_price: int | None
+    market_value: float | None, cheapest_ask: int | None, vendor_price: int | None
 ) -> float | None:
-    """The emulated TSM's price to post at; None without a DBMarket. It never posts above
-    the normal price, even when the cheapest Listing is dearer."""
+    """The emulated TSM's price to post at, from the cheapest other player's unit price;
+    None without a DBMarket. It never posts above the normal price, even when the cheapest
+    Listing is dearer."""
     if market_value is None:
         return None
     normal = max(market_value, vendor_price or 0)
     floor = max(_TSM_FLOOR_SHARE * market_value, vendor_price or 0)
-    undercut = min(unit for unit, _ in asks) - 1 if asks else None
+    undercut = cheapest_ask - 1 if cheapest_ask is not None else None
     return undercut if undercut is not None and floor <= undercut < normal else normal
 
 

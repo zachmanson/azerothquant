@@ -567,6 +567,7 @@ def test_replay_prints_each_markets_policies_with_the_brains_lead_over_each(tmp_
         "Brain without Sub-crafts",
         "Brain without Flips to Craft",
         "Brain without Deposits",
+        "Brain without own-Market Sell Rate",
     ]
     assert "Realized profit over the range: 0c" in text
 
