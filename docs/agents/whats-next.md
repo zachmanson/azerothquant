@@ -1,3 +1,17 @@
+2026-09-28 (later 41): #88 SLICE 2 DONE (9886c89), with /tdd then /code-review. Addon half of Buy Under: a 5th Recommendation Table tab `Buy Under (N)` (Item, Buy Under, Way out, Units, Seen, Note), the tooltip line `AQ: Buy Under 21s: Craft <output> (<crafter>), seen 14 Scans / 7d` (forLink and forItemName), `BuyUnderMatch.lua` (plain Lua + busted: by link, or itemID + row name for suffixed browse rows), and `BuyUnderHighlight.lua` (glue: a green wash via `ScrollUtil.AddInitializedFrameCallback` on the browse, item and commodity lists, plus a re-flag on ITEM_KEY_ITEM_INFO_RECEIVED). The .toc gained both files, so the client needs a restart. The PC check is a comment on #85.
+- Decided with the user: Units shows "no limit", not ∞ (the font may lack the glyph). The tab is the 5th. The tooltip line has the "AQ: " prefix.
+- Review fixes made: "auction" renamed to "listing" (CONTEXT bans "auction"), the CONTEXT Recommendation Table entry now lists Buy Unders, the default sort is written as `{}` with a comment (Brain order via the tie-break), and rows already on show get flagged at hook time.
+- Review notes left as they are: the itemID + name match exists in both `BuyUnderMatch.matches` and `TooltipLines.forItemName`, and `TooltipLines.itemKey` is exported for the matcher (it could move next to `RecommendationTable.itemString`).
+- Gotchas:
+  - `lowValue` treats a row with `way` as not low, and `heldUnits` skips rows with no `quantity`. Slice 3's group rows must carry `way` too.
+  - `RecommendationTable.wayOut` needs `output` and `crafter` on a Craft row. Slice 3 adds a "Disenchant" way: give it a branch there.
+  - The glue relies on untested client facts: `row.rowData` being set at init, `buyoutAmount` being the total for the Listing, and the browse `minPrice` being per unit. They are listed on #85.
+  - Blizzard's CallbackRegistry keeps one callback per owner, so hook with an owner table of your own, never the Blizzard frame.
+
+Next, in order:
+1. Not at the PC: #88 slice 3, Disenchant (/tdd; the second comment on #88, plus the gotchas above). Then #101, #102, #77, #84, and triage #103.
+2. Next PC sitting: unchanged from "later 38", plus the #88 slice 2 check on #85 (restart the client first).
+
 2026-09-28 (later 40): #88 SLICE 1 DONE (bd7f467), with /tdd then /code-review. #88 is split in 3 slices (agreed with the user): 1 the Brain, 2 the Addon, 3 Disenchant.
 - Slice 1: `BuyUnder` / `MarketRecommendations.buy_under` in recommend.py (`_buy_unders`, `_way_out`, `_sell_way`, `_craft_way`, `_under_margin`), `history.cheapest_seen` (one query, distinct Scans), `_Sources.chain_without` for a Craft way's other reagents (Holdings ignored). The config keys `buy_under_min_sightings`/`buy_under_window_days`, a Buy Under section in `brain recommend`, and `buyUnder` in Recommendations.lua (`{ itemKey, price, way, units?, seen, windowDays, listedNow?, recipe?, output?, crafter? }`; `output` is the Craft output Item Key, for the tab's `Craft <output> (<crafter>)`). CONTEXT **Buy Under**, and ADR-0019.
 - Decisions made in the build: a way with 0 units isn't a way (falls back to the next); Craft units are whole crafts (`room // quantity_min * qty`); a Craft output that binds on craft, or whose bind type is unknown, counts only its Vendor Price; the replay passes `buy_under=False` (it adds ~4.5 s per recommend on the real history, mostly the query).
