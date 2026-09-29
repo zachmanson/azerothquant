@@ -1,3 +1,16 @@
+2026-09-29 (later 2): #107 DONE and closed (c8d9002), with /tdd then /code-review. `SellRate` now carries `sale_prices` (each Sale Event's price and units). `max_sale_price` is now a property, and `at_or_above(P)` gives the rate at a price. When the Brain decides whether to buy something to Sell, it counts only the Sale Events at or above the post price. The helpers are `_demand_at`, `_room_at`, `_flip_queue` and `_sell_take`, used by `_flips` (each run at its own post price; it stops after a partial take), `_outlet`, `_hold_buys` and `_sell_way` (via `_Valuer.flip_post_at`). Held units keep the whole rate and the max cap (`_Valuer.post_at`). CONTEXT (Sell, Sell Rate, Flip, Buy Under) and ADR-0019 say so. Replay on beta at a 24 h horizon over 23 Scans: the Brain went from -14g 94s 22c to +5g 67s 00c (table on #107).
+- Review notes left as they are (also on #107):
+  - A Flip to Sell's `stack`/`posts` still uses the whole rate's Sale Event size.
+  - `_flip_queue` repeats the Flip-prior branch of `_Valuer.queue`.
+- Gotchas:
+  - `brain replay` at the default 7-day horizon grades 0 Scans until the beta history is longer than 7 days (#83). For a check now, copy history.sqlite into the scratchpad with a config.toml there that sets `sale_horizon_days = 1` above `[[installs]]` (the history path resolves next to the config). Each run takes ~32 min. Before and after can run in parallel, since each process imports its code at start.
+  - On this machine `git stash push` / `git stash pop` left the index EMPTY: every file showed as staged-deleted and untracked. `git reset -q` fixes it (index only, the working tree is intact). To check that a test is red on old code, use `git archive HEAD brain/src | tar -x -C <scratch>/old` and `PYTHONPATH=<scratch>/old/brain/src` instead of stash.
+  - `addon/AzerothQuant/Recommendations.lua` shows as modified because the Brain's import writes it. Don't commit it.
+
+Next, in order:
+1. #105 slice 3, only if the user wants more (see below), or close #105 and take #71's reload-ready guess once the user has run a real watch pass with the new build.
+2. Not at the PC: #77, #84, then triage #103 and #104.
+
 2026-09-29 (later): #107 TRIAGED, now ready-for-agent + core. The spec is the issue comment. In short, when the Brain decides whether to buy something to Sell, the Sell Rate only counts Sale Events priced at or above the post price P. That covers Flip to Sell, Flip to Craft output, the Hold buy Max Loss resale and Buy Under's Sell way. It also replaces the `max_sale_price` cap on those paths. Held units don't change. NEXT: build #107.
 - Gotchas:
   - The item is 14747 on Classic Beta PvP Alliance (item names aren't in history.sqlite; the addon's Recommendations.lua has itemKeys). Of its 8 Sale Events, only 2 (the 2g 99s pair on 09-27) are at or above the 2g 48s 99c post price.
