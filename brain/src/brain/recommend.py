@@ -26,6 +26,7 @@ from brain.history import (
     KnownRecipe,
     Market,
     character_markets,
+    cheapest_seen,
     enchanting_skills,
     holdings,
     item_info,
@@ -289,6 +290,29 @@ class CharacterHolding:
 
 
 @dataclass(frozen=True)
+class BuyUnder:
+    """The most one unit of an Item Key is worth paying on the Auction House, from its best
+    way out less the Flip margin (#88). It isn't an Action: the Addon only flags Listings
+    at or under it, and the player buys (ADR-0003).
+
+    `units` is how many units it's good for, None for no limit. `seen` is how many
+    distinct Scans in the last `window_days` saw another player's Listing at or under it,
+    and `listed_now` whether the latest one did. A Craft way names its recipe, output and
+    crafter."""
+
+    item_key: str
+    price: int
+    way: Action
+    units: int | None
+    seen: int
+    window_days: int
+    listed_now: bool = False
+    recipe_id: int | None = None
+    output: str | None = None
+    crafter: str | None = None
+
+
+@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -316,6 +340,8 @@ class MarketRecommendations:
     # Where the held units are, by Item Key: the raw Holdings before any craft uses them.
     # Recommendations pool the Characters; this only says whose they are (#38).
     held: dict[str, list[CharacterHolding]] = field(default_factory=dict)
+    # Buy Unders, most profit per unit at the Buy Under first (#88). No Budget applies.
+    buy_under: list[BuyUnder] = field(default_factory=list)
 
     @property
     def spend(self) -> int:
@@ -346,9 +372,11 @@ def recommend_market(
     predictions: Sequence[Prediction],
     now: int,
     as_of: int | None = None,
+    buy_under: bool = True,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings and
-    gold are the latest, or as of `as_of` (a replay, #80)."""
+    gold are the latest, or as of `as_of` (a replay, #80). Without `buy_under`, the Buy
+    Unders are left out: a replay doesn't grade them (#88)."""
     characters = character_markets(conn).get(market, [])
     today = date.fromtimestamp(now)
     active = [p for p in predictions if p.active_on(today)]
@@ -448,7 +476,129 @@ def recommend_market(
         grades=graded,
         pooled_return=pooled,
         held=_whose(by_character),
+        buy_under=_buy_unders(conn, config, market, now, valuer, plans) if buy_under else [],
     )
+
+
+@dataclass(frozen=True)
+class _WayOut:
+    """An Item Key's best way out for one unit bought (#88): what it brings before the
+    Flip margin (`way_out_value`), and how many units it's good for (None: no limit)."""
+
+    value: float
+    way: Action
+    units: int | None
+    plan: "_Plan | None" = None  # a Craft way's
+
+
+def _buy_unders(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    now: int,
+    valuer: "_Valuer",
+    plans: list["_Plan"],
+) -> list[BuyUnder]:
+    """The Buy Unders as of the Scan requested at `now` (#88): every Item Key whose best
+    way out leaves a price that enough distinct Scans in the window saw another player's
+    Listing at or under. The Holdings don't move them: a Craft way's other reagents come
+    from their cheapest current source (ADR-0014's, with nothing held)."""
+    window = config.buy_under_window_days
+    sources = _Sources(
+        held={},
+        crafted={},
+        asks=valuer.others,
+        merchant=valuer.merchant,
+        valuer=valuer,
+        under=set(),
+        plans=plans,
+        spent=Counter(),
+        config=config,
+    )
+    result: list[tuple[float, BuyUnder]] = []
+    for item_key, cheapest in cheapest_seen(conn, market, now - window * 86400, now).items():
+        out = _way_out(item_key, valuer, config, sources)
+        if out is None:
+            continue
+        net = out.value - valuer.effort(item_key)
+        price = _under_margin(net, config)
+        seen = sum(unit <= price for unit in cheapest.values())
+        if price <= 0 or seen < config.buy_under_min_sightings:
+            continue
+        listed_now = cheapest.get(now, price + 1) <= price
+        plan = out.plan
+        buy = BuyUnder(
+            item_key,
+            price,
+            out.way,
+            out.units,
+            seen,
+            window,
+            listed_now,
+            plan.recipe.recipe_id if plan else None,
+            plan.output if plan else None,
+            plan.character if plan else None,
+        )
+        result.append((net - price, buy))
+    result.sort(key=lambda pair: -pair[0])
+    return [buy for _, buy in result]
+
+
+def _way_out(
+    item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None" = None
+) -> _WayOut | None:
+    """The best of an Item Key's ways out for one more unit, or None without any: Vendor,
+    Sell, or with `sources` a Craft it's a reagent of. A way with no units left isn't
+    one."""
+    ways = [_sell_way(item_key, valuer, config)]
+    vendor = valuer.vendor.get(item_id_of(item_key))
+    if vendor is not None:
+        ways.append(_WayOut(vendor, Action.VENDOR, None))
+    if sources is not None:
+        ways += [_craft_way(item_key, plan, sources, config) for plan in sources.uses(item_key)]
+    return max((w for w in ways if w is not None), key=lambda w: w.value, default=None)
+
+
+def _craft_way(item_key: str, plan: "_Plan", sources: "_Sources", config: Config) -> _WayOut | None:
+    """One unit of a reagent of `plan`: its share of the output's way out (Sell or Vendor
+    only, never crafted further, ADR-0014), after the other reagents' cheapest current
+    source and the effort of buying them. None if the others can't be sourced."""
+    chain = sources.chain_without(plan, item_key)
+    if chain is None:
+        return None
+    needs, made = plan.needs, plan.recipe.quantity_min
+    # One whose bind type is unknown counts as bound: it may not sell.
+    bound = plan.recipe.bind_type is None or plan.recipe.bind_type in BOUND_ON_CRAFT
+    out = _way_out(plan.output, sources.valuer, config) if not bound else None
+    vendor = sources.valuer.vendor.get(item_id_of(plan.output))
+    if bound and vendor is not None:
+        out = _WayOut(vendor, Action.VENDOR, None)
+    if out is None:
+        return None
+    value = (out.value * made - sources.cost(chain)) / needs[item_key]
+    units = None if out.units is None else out.units // made * needs[item_key]
+    return _WayOut(value, Action.CRAFT, units, plan) if units != 0 else None
+
+
+def _sell_way(item_key: str, valuer: "_Valuer", config: Config) -> _WayOut | None:
+    """One more unit posted as a Flip would post it (`_Valuer.post_at`), after the cut,
+    the effort of posting it and the deposits it's expected to lose queued behind the
+    unbound held units. It's good for what sells within the Sale Horizon after them."""
+    held = valuer.held.get(item_key, 0)
+    room = _flip_room(valuer.rates.get(item_key), config) - held
+    post_at = valuer.post_at(item_key)
+    if room <= 0 or post_at is None:
+        return None
+    lost, _ = valuer.flip_lost(item_key, 1)
+    value = post_at * (1 - valuer.cut) - valuer.effort(item_key) - lost
+    return _WayOut(value, Action.SELL, room)
+
+
+def _under_margin(net: float, config: Config) -> int:
+    """The price B that leaves the Flip margin out of `net`, floored to the copper:
+    B + max(flip_min_margin_copper, flip_min_margin_share × B) = net."""
+    share, floor = config.flip_min_margin_share, config.flip_min_margin_copper
+    return math.floor(min(net / (1 + share), net - floor))
 
 
 def held_at_writing(
@@ -1302,9 +1452,32 @@ class _Sources:
             makers.setdefault(plan.output, []).append(plan)
         return makers
 
+    @cached_property
+    def _uses(self) -> dict[str, list[_Plan]]:
+        uses: dict[str, list[_Plan]] = {}
+        for plan in self.plans:
+            for key in plan.needs:
+                uses.setdefault(key, []).append(plan)
+        return uses
+
+    def uses(self, item_key: str) -> list[_Plan]:
+        """The plans that take `item_key` as a reagent."""
+        return self._uses.get(item_key, [])
+
     def chain(self, plan: _Plan) -> _Chain | None:
         """One craft of `plan` with its reagents sourced; None if they can't be."""
         return self._craft(plan, 1, 1, frozenset({plan.output}), _Chain())
+
+    def chain_without(self, plan: _Plan, item_key: str) -> _Chain | None:
+        """One craft of `plan` with every reagent but `item_key` sourced, and `item_key`
+        never Sub-crafted on the way (a Buy Under's Craft way, #88); None if they can't
+        be."""
+        chain: _Chain | None = _Chain()
+        path = frozenset({plan.output, item_key})
+        for key, n in plan.needs.items():
+            if key != item_key and chain is not None:
+                chain = self._source(key, n, 1, path, chain)
+        return chain
 
     def _craft(
         self, plan: _Plan, crafts: int, depth: int, path: frozenset[str], chain: _Chain

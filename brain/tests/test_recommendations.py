@@ -8,6 +8,7 @@ from brain.recommend import (
     Action,
     Blocked,
     BlockReason,
+    BuyUnder,
     CharacterHolding,
     MarketRecommendations,
     MatYield,
@@ -437,4 +438,40 @@ def test_a_real_lua_reads_which_characters_hold_each_item_key(tmp_path, lua):
     assert out.splitlines() == [
         "Alt-One	4	0	0",
         "Kash-Patel	17	30	5",
+    ]
+
+
+def test_a_real_lua_reads_the_buy_unders(tmp_path, lua):
+    buy_under = [
+        BuyUnder(
+            "2589",
+            2070,
+            Action.CRAFT,
+            units=12,
+            seen=14,
+            window_days=7,
+            listed_now=True,
+            recipe_id=2963,
+            output="2996",
+            crafter="Kash-Patel",
+        ),
+        BuyUnder("2770", 833, Action.VENDOR, units=None, seen=1, window_days=7),
+    ]
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render({}, markets=[MarketRecommendations(MARKET, 1790000000, 0, buy_under=buy_under)]),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, b in ipairs(r.recommendations["Quel\'Thalas"].Horde.buyUnder) do '
+        "print(b.itemKey, b.price, b.way, b.units, b.seen, b.windowDays, b.listedNow, "
+        "b.recipe, b.output, b.crafter) end",
+    )
+
+    assert out.splitlines() == [
+        "2589	2070	Craft	12	14	7	true	2963	2996	Kash-Patel",
+        "2770	833	Vendor	nil	1	7	nil	nil	nil	nil",
     ]

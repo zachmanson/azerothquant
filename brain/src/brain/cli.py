@@ -44,6 +44,7 @@ from brain.lots import start_of
 from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import (
     Action,
+    BuyUnder,
     MarketRecommendations,
     Row,
     held_units,
@@ -481,6 +482,19 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
             for r in m.prediction_buys
         ],
     )
+    buy_under = _table(
+        ["Item", "Buy Under", "Way out", "Units", "Seen"],
+        [
+            [
+                b.item_key,
+                _money(b.price),
+                _way_out_label(b),
+                "no limit" if b.units is None else str(b.units),
+                _seen(b),
+            ]
+            for b in m.buy_under
+        ],
+    )
     graded = _table(
         ["Prediction", "Graded", "Proceeds", "Open value", "Cost", "Return"],
         [
@@ -515,6 +529,7 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         f"{shopping}\n"
         f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
         f"{prediction_buys}\n"
+        f"Buy Under\n{buy_under}\n"
         f"{record}\n"
         f"{graded}"
     )
@@ -530,6 +545,18 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
         + "\n"
         for line in (headers, *rows)
     )
+
+
+def _way_out_label(buy: BuyUnder) -> str:
+    if buy.way is Action.CRAFT:
+        return f"Craft {buy.output} ({buy.crafter})"
+    return buy.way.value
+
+
+def _seen(buy: BuyUnder) -> str:
+    scans = "Scan" if buy.seen == 1 else "Scans"
+    now = ", listed now" if buy.listed_now else ""
+    return f"{buy.seen} {scans} / {buy.window_days}d{now}"
 
 
 def _action(row: Row) -> str:

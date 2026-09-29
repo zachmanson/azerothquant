@@ -188,6 +188,10 @@ _Avoid_: cost basis, buy price
 The most one unit of an Item Key is worth via its best Action, where Disenchant values its outputs at those outputs' own Best Exit Value. Craft chains backward instead: a Craft's short reagents can be Sub-crafted, but its output is valued by Sell and Vendor only, never by crafting it further (ADR-0014). Best Exit Value itself counts no crafts, and takes nothing on the Shopping List as bought (ADR-0017).
 _Avoid_: value, worth
 
+**Buy Under**:
+The most one unit of an Item Key is worth paying on the Auction House, worked out ahead of the Scan from its best way out (Vendor, Sell, a Craft it's a reagent of, or Disenchant once #88's Disenchant slice lands), less the Flip margin and effort cost. It exists so the player can buy short-lived Listings live, since Scans every 15 minutes miss them. It shows only if past Scans saw a Listing at or under it. It isn't an Action and isn't a Flip: the Addon only flags it, and the player buys (ADR-0003, ADR-0019).
+_Avoid_: snipe, target price, max price
+
 **Recommendation**:
 The best Action for one Candidate Item, with quantity, price ceiling, the full Action path, expected profit and return per day.
 _Avoid_: signal, tip

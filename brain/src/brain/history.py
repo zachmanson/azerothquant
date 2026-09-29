@@ -1211,6 +1211,29 @@ def latest_character_read_times(conn: sqlite3.Connection, era: Era) -> dict[tupl
     return {(realm, character): at for realm, character, at in rows}
 
 
+def cheapest_seen(
+    conn: sqlite3.Connection, market: Market, since: int, until: int
+) -> dict[str, dict[int, int]]:
+    """Per Item Key, the cheapest unit buyout among other players' Listings that each of
+    the Market's Scans requested from `since` to `until` saw, by the Scan's requested_at.
+    A Scan saw a Listing when it's between the Listing's first and last-seen Scans (#88)."""
+    rows = conn.execute(
+        "SELECT l.item_key, s.requested_at, MIN(l.unit_buyout) FROM scan s"
+        " JOIN market m ON m.id = s.market_id"
+        " JOIN listing l ON l.market_id = s.market_id AND NOT l.own"
+        " JOIN scan first ON first.id = l.first_seen_scan_id"
+        " JOIN scan last ON last.id = l.last_seen_scan_id"
+        f" WHERE {_MARKET_FILTER} AND s.requested_at BETWEEN ? AND ?"
+        " AND first.requested_at <= s.requested_at AND last.requested_at >= s.requested_at"
+        " GROUP BY l.item_key, s.id ORDER BY l.item_key, s.requested_at",
+        (*_market_params(market), since, until),
+    )
+    result: dict[str, dict[int, int]] = {}
+    for item_key, at, unit in rows:
+        result.setdefault(item_key, {})[at] = unit
+    return result
+
+
 def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
     """requested_at of every Scan imported for the Market, oldest first."""
     rows = conn.execute(

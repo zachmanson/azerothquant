@@ -211,7 +211,9 @@ def replay(
             gold = pooled_gold(conn, market.era, market.realm, market.faction, t)
             moves = {
                 policy: _brain(
-                    recommend_market(conn, run(config), market, predictions, t, as_of=t),
+                    recommend_market(
+                        conn, run(config), market, predictions, t, as_of=t, buy_under=False
+                    ),
                     vendor,
                     config.shopping_list_rows,
                 )

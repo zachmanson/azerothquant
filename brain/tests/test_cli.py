@@ -823,3 +823,52 @@ def test_disenchants_says_when_there_are_none(tmp_path):
     open_history(config.history_path).close()
 
     assert run_disenchants(config) == "No Disenchant Results yet.\n"
+
+
+def test_recommend_prints_the_buy_unders(tmp_path):
+    # Linen Vendors for 10s, but 2 of them make a Bolt that Vendors for 50s: 25s a Linen,
+    # less 20% of the Buy Under, is 20s 83c. A 5s Listing was seen in the one Scan.
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    scan = {
+        "requestedAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "faction": "Alliance",
+        "character": "Kash-Patel",
+        "listings": [
+            {"itemString": "item:2589", "quantity": 20, "buyout": 20 * 500, "timeLeft": 4}
+        ],
+    }
+    bolt = {
+        "recipeID": 2963,
+        "outputItemID": 2996,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
+    }
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "vendorPrices": {2589: 1000, 2996: 5000},
+        "professions": {197: {"readAt": 1_790_000_000, "professionID": 197, "recipes": [bolt]}},
+        "professionList": [{"professionID": 197}],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, [scan], Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
+
+    assert ["Buy Under"] in lines
+    assert ["Item", "Buy Under", "Way out", "Units", "Seen"] in lines
+    assert [
+        "2589",
+        "20s 83c",
+        "Craft 2996 (Kash-Patel)",
+        "no limit",
+        "1 Scan / 7d, listed now",
+    ] in lines

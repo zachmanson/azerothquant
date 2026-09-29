@@ -18,6 +18,7 @@ from brain.recommend import (
     Action,
     Blocked,
     BlockReason,
+    BuyUnder,
     CharacterHolding,
     Grade,
     ReagentBuy,
@@ -3078,3 +3079,194 @@ def test_hold_rows_get_no_roi(db):
 
     [hold] = result[MARKET].holdings
     assert (hold.action, hold.paid, hold.roi) == (Action.HOLD, None, None)
+
+
+# --- Buy Under (#88) ---
+
+
+def test_the_vendor_way_buys_under_the_vendor_price_less_the_margin(db):
+    # A Vendor Price of 10s: the Buy Under B keeps 20% of B (over the 1 silver floor), so
+    # B = 1000 / 1.2 = 833.33, floored to the copper. A Vendor way never runs out.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=500))],
+        [character_read(vendor_prices={2589: 1000})],
+    )
+
+    assert result[MARKET].buy_under == [
+        BuyUnder(LINEN_KEY, 833, Action.VENDOR, units=None, seen=1, window_days=7, listed_now=True)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("latest", "seen"),
+    [(T0 + 7 * DAY, 2), (T0 + 7 * DAY + 1, 1), (T0 + 7 * DAY + HOUR + 1, 0)],
+)
+def test_a_buy_under_counts_the_scans_in_the_window_that_saw_a_listing_under_it(db, latest, seen):
+    # The Buy Under is 833 (as above). Two Listings under it in the first Scan count
+    # once, the one still up an hour later counts again, and the latest Scan's Listing
+    # is dearer. The window is the 7 days up to the latest Scan, edge included.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=500), row(quantity=5, unit=600)),
+            scan(T0 + HOUR, row(quantity=20, unit=500)),
+            scan(latest, row(quantity=20, unit=900)),
+        ],
+        [character_read(vendor_prices={2589: 1000})],
+    )
+
+    assert [(b.seen, b.listed_now) for b in result[MARKET].buy_under] == (
+        [(seen, False)] if seen else []
+    )
+
+
+def linen_sold_under_1000(unit=1000):
+    """A 5 at 5s that was bought, and 2 of a 20 at `unit`: one Sale Event of 7 units in
+    an hour, so 21 sell within the 3 h horizon, posted at `unit` less a copper."""
+    return [
+        scan(T0, row(quantity=20, unit=unit), row(quantity=5, unit=500)),
+        scan(T0 + HOUR, row(quantity=18, unit=unit)),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("merchant_costs", "min_sale_events", "expected"),
+    [
+        # 999 after the 5% cut is 949.05: B = 949.05 / 1.2. The 5 held units sell first.
+        (None, 1, [(790, Action.SELL, 16)]),
+        # Never posted above what a merchant charges: 800 after the cut is 760.
+        ({2589: 800}, 1, [(633, Action.SELL, 16)]),
+        # No Sell way without the minimum of Sale Events for a Flip, and no Vendor Price.
+        (None, 2, []),
+    ],
+)
+def test_the_sell_way_buys_under_the_price_a_flip_would_post_at(
+    db, merchant_costs, min_sale_events, expected
+):
+    result = run(
+        db,
+        linen_sold_under_1000(),
+        [character_read(item(count=5), merchant_costs=merchant_costs)],
+        config=replace(CONFIG, flip_min_sale_events=min_sale_events),
+    )
+
+    assert [(b.price, b.way, b.units) for b in result[MARKET].buy_under] == expected
+
+
+THREAD = "item:2320::::::::20:1490"
+THREAD_LINK = "|cffffffff|Hitem:2320::::::::20:1490:::::::::|h[Coarse Thread]|h|r"
+
+
+@pytest.mark.parametrize("held_thread", [0, 5])
+def test_the_craft_way_buys_a_reagent_under_its_best_recipes_output_less_the_rest(db, held_thread):
+    # A Bolt Vendors for 50s and takes 2 Linen and a Thread, whose cheapest source is
+    # another player's 30c Listing, even with Thread held: (5000 - 30) / 2 = 2485 per
+    # Linen. The other recipe, 3 Linen into a 60s Vendor, gives only 2000 per Linen.
+    # B = 2485 / 1.2. The Bolt Vendors, so the Buy Under never runs out.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=500), row(THREAD, quantity=20, unit=30))],
+        [
+            character_read(
+                *([item(THREAD_LINK, count=held_thread)] if held_thread else []),
+                vendor_prices={2996: 5000, 4305: 6000},
+                recipes=[
+                    recipe(reagents=((2589, 2), (2320, 1))),
+                    recipe(recipe_id=9999, output=4305, reagents=((2589, 3),)),
+                ],
+            )
+        ],
+    )
+
+    assert [b for b in result[MARKET].buy_under if b.item_key == LINEN_KEY] == [
+        BuyUnder(
+            LINEN_KEY,
+            2070,
+            Action.CRAFT,
+            units=None,
+            seen=1,
+            window_days=7,
+            listed_now=True,
+            recipe_id=2963,
+            output=BOLT_KEY,
+            crafter="Kash-Patel",
+        )
+    ]
+
+
+def test_a_craft_way_to_a_sell_is_good_for_the_outputs_room_in_reagent_units(db):
+    # 2 Bolts sell an hour, so 6 within the 3 h horizon, and one is held: room for 5
+    # more Bolts, 2 Linen each. Linen itself has no sales, so no Sell way.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=100), row(BOLT, quantity=20, unit=1000)),
+            scan(T0 + HOUR, row(quantity=20, unit=100), row(BOLT, quantity=18, unit=1000)),
+        ],
+        [character_read(item(BOLT_LINK), recipes=[recipe()])],
+    )
+
+    [linen] = [b for b in result[MARKET].buy_under if b.item_key == LINEN_KEY]
+    # 999 after the cut is 949.05 per Bolt, 474.525 per Linen, less the 1 silver floor.
+    assert (linen.price, linen.way, linen.units) == (374, Action.CRAFT, 10)
+
+
+def test_a_buy_under_with_no_units_left_isnt_shown(db):
+    # 21 sell within the horizon (as above), and 21 are held.
+    result = run(db, linen_sold_under_1000(), [character_read(item(count=21))])
+
+    assert result[MARKET].buy_under == []
+
+
+def test_buy_unders_come_most_profit_per_unit_first(db):
+    # Linen's margin at its Buy Under is 1000 - 833, Ore's 2000 - 1666.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=500), row(ORE, quantity=20, unit=500))],
+        [character_read(vendor_prices={2589: 1000, 2770: 2000})],
+    )
+
+    assert [(b.item_key, b.price) for b in result[MARKET].buy_under] == [
+        (ORE_KEY, 1666),
+        (LINEN_KEY, 833),
+    ]
+
+
+def test_a_craft_way_whose_output_may_bind_counts_only_its_vendor_price(db):
+    # As above, but the Bolt's bind type is unknown, so it may not sell, and it has no
+    # Vendor Price: no way out for the Linen.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=100), row(BOLT, quantity=20, unit=1000)),
+            scan(T0 + HOUR, row(quantity=20, unit=100), row(BOLT, quantity=18, unit=1000)),
+        ],
+        [character_read(recipes=[recipe(bind_type=None)])],
+    )
+
+    assert [b for b in result[MARKET].buy_under if b.item_key == LINEN_KEY] == []
+
+
+@pytest.mark.parametrize(("sightings", "shown"), [(1, True), (2, False)])
+def test_a_buy_under_needs_the_minimum_of_sightings(db, sightings, shown):
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=500))],
+        [character_read(vendor_prices={2589: 1000})],
+        config=replace(CONFIG, buy_under_min_sightings=sightings),
+    )
+
+    assert bool(result[MARKET].buy_under) is shown
+
+
+def test_the_buy_under_of_a_unit_that_doesnt_stack_pays_for_the_buy(db):
+    # Linen only ever seen one at a time doesn't stack, so buying one costs the 5s effort:
+    # B = (1000 - 500) less the 1 silver floor, since 20% of it is less.
+    result = run(
+        db,
+        [scan(T0, row(unit=300))],
+        [character_read(vendor_prices={2589: 1000})],
+    )
+
+    assert [b.price for b in result[MARKET].buy_under] == [400]

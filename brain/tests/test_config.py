@@ -276,6 +276,8 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.ah_deposit_share == 0.6
     assert config.post_duration_hours == 24
     assert config.disenchant_check_min_results == 20
+    assert config.buy_under_min_sightings == 1
+    assert config.buy_under_window_days == 7
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -300,6 +302,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "ah_deposit_share = 0.15\n"
         "post_duration_hours = 12\n"
         "disenchant_check_min_results = 50\n"
+        "buy_under_min_sightings = 3\n"
+        "buy_under_window_days = 14\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -323,6 +327,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.ah_deposit_share == 0.15
     assert config.post_duration_hours == 12
     assert config.disenchant_check_min_results == 50
+    assert (config.buy_under_min_sightings, config.buy_under_window_days) == (3, 14)
 
 
 @pytest.mark.parametrize(
@@ -355,6 +360,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("craft_chain_depth", "0"),  # counts the top craft
         ("craft_chain_depth", "2.5"),
         ("craft_chain_depth", "true"),
+        ("buy_under_min_sightings", "0"),
+        ("buy_under_window_days", "1.5"),
         ("disenchant_check_min_results", "1"),  # an interval needs 2
         ("disenchant_check_min_results", "2.5"),
         ("disenchant_check_min_results", "true"),

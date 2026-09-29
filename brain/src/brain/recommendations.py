@@ -32,7 +32,14 @@ from brain.history import (
     latest_scan_times,
 )
 from brain.lua_literal import assignment
-from brain.recommend import Action, Blocked, MarketRecommendations, ReagentBuy, Row
+from brain.recommend import (
+    Action,
+    Blocked,
+    BuyUnder,
+    MarketRecommendations,
+    ReagentBuy,
+    Row,
+)
 
 FILE_NAME = "Recommendations.lua"
 GLOBAL_NAME = "AzerothQuantRecommendations"
@@ -61,6 +68,11 @@ _HEADER = (
     "-- the cut) and roiHint = true when it's a good time to sell (only a hint).\n"
     "-- held[itemKey] says which Characters hold it, by name: { { character, bags, bank,\n"
     "-- bound } }, where bound is the part of bags and bank that can't be mailed or sold.\n"
+    "-- buyUnder lists the Buy Unders, the most to pay per unit on the Auction House:\n"
+    '-- { itemKey, price, way = "Vendor"|"Sell"|"Craft", units (nil for no limit), seen\n'
+    "-- (Scans that saw a Listing at or under it), windowDays, listedNow = true when the\n"
+    "-- latest Scan did }, and a Craft way's recipe (recipeID), output (Item Key) and\n"
+    "-- crafter.\n"
 )
 
 
@@ -106,6 +118,7 @@ def _recommendations(markets: Sequence[MarketRecommendations]) -> dict[str, dict
                 ]
                 for item_key, whose in m.held.items()
             },
+            "buyUnder": [_buy_under(b) for b in m.buy_under],
         }
         if m.budget is not None:  # a Lua table can't hold nil
             by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
@@ -158,6 +171,26 @@ def _row(row: Row) -> dict[str, object]:
         out["via"] = [
             {"itemKey": v.item_key, "crafts": v.crafts, "character": v.character} for v in row.via
         ]
+    return out
+
+
+def _buy_under(buy: BuyUnder) -> dict[str, object]:
+    out: dict[str, object] = {
+        "itemKey": buy.item_key,
+        "price": buy.price,
+        "way": str(buy.way),
+        "seen": buy.seen,
+        "windowDays": buy.window_days,
+    }
+    optional = {
+        "units": buy.units,
+        "recipe": buy.recipe_id,
+        "output": buy.output,
+        "crafter": buy.crafter,
+    }
+    out |= {key: value for key, value in optional.items() if value is not None}
+    if buy.listed_now:
+        out["listedNow"] = True
     return out
 
 

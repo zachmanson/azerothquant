@@ -92,6 +92,8 @@ DEFAULT_CRAFT_CHAIN_DEPTH = 3
 DEFAULT_DISENCHANT_CHECK_MIN_RESULTS = 20
 DEFAULT_SHOPPING_LIST_ROWS = 50
 DEFAULT_CRAFT_LIST_ROWS = 25
+DEFAULT_BUY_UNDER_MIN_SIGHTINGS = 1
+DEFAULT_BUY_UNDER_WINDOW_DAYS = 7
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
@@ -177,6 +179,10 @@ class Config:
     shopping_list_rows: int = DEFAULT_SHOPPING_LIST_ROWS
     # How many Flips to Craft it shows besides, most profit first, in their own tab (#87).
     craft_list_rows: int = DEFAULT_CRAFT_LIST_ROWS
+    # A Buy Under shows only once this many distinct Scans in the last
+    # buy_under_window_days saw another player's Listing at or under it (#88).
+    buy_under_min_sightings: int = DEFAULT_BUY_UNDER_MIN_SIGHTINGS
+    buy_under_window_days: int = DEFAULT_BUY_UNDER_WINDOW_DAYS
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
@@ -358,6 +364,16 @@ def load_config(path: Path) -> Config:
             raise ConfigError(
                 f"{path}: {key} must be a whole number of rows of at least 1, got {rows!r}"
             )
+    sightings = raw.get("buy_under_min_sightings", DEFAULT_BUY_UNDER_MIN_SIGHTINGS)
+    window_days = raw.get("buy_under_window_days", DEFAULT_BUY_UNDER_WINDOW_DAYS)
+    for key, n, unit in (
+        ("buy_under_min_sightings", sightings, "Scans"),
+        ("buy_under_window_days", window_days, "days"),
+    ):
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ConfigError(
+                f"{path}: {key} must be a whole number of {unit} of at least 1, got {n!r}"
+            )
     roi_hint = _parse_number(
         path, raw.get("roi_hint", DEFAULT_ROI_HINT), "roi_hint", lambda x: x >= 0, "of at least 0"
     )
@@ -407,6 +423,8 @@ def load_config(path: Path) -> Config:
         disenchant_check_min_results=min_results,
         shopping_list_rows=shopping_rows,
         craft_list_rows=craft_rows,
+        buy_under_min_sightings=sightings,
+        buy_under_window_days=window_days,
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,
