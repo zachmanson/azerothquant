@@ -1,3 +1,17 @@
+2026-09-28 (later 44): #102 DONE (3ef8724), with /tdd then /code-review. A bound unit is Disenchanted only by the Character who holds it, and only if that Character can (`_disenchants(..., bound)`, `_bound_by`, `_holders`, `_NextUnit`). Otherwise it's Vendored. Unbound units stay pooled. `exit_values` runs the Disenchant marginal rule once over all of `held` (`_Valuer.best_exit` is gone), and so do Grades' open units. The replay passes `market_bound` for its untouched Holdings. ADR-0018 and CONTEXT (Disenchant, Best Exit Value) say so.
+- Review fixes made: Grades are valued jointly too (the Spec review caught them), a `_bound(h)` helper, `_NextUnit` instead of a bare tuple, and "Sale Horizon" instead of "sale slots" in the docs.
+- Review notes left as they are:
+  - The replay queries `_by_character` twice per tick (`market_holdings` + `market_bound`).
+  - `exit_values` with `bound` left out Disenchants no bound unit. That's safe today, since only the replay passes bound units.
+  - A crafted bound-on-craft output has no holder in `bound`, so it isn't Disenchanted (#77 territory).
+  - One Item Key can now get two Disenchant rows, one per Character.
+- Gotchas:
+  - Grade freeze tests now monkeypatch `brain.recommend.exit_values` (`valued_at_nothing`), not `_exit_value`. `held_at_writing` still uses `_exit_value`.
+
+Next, in order:
+1. Not at the PC: #77, #84, then triage #103.
+2. Next PC sitting: unchanged from "later 38", plus the #88 slice 2 and slice 3 checks on #85 (restart the client first).
+
 2026-09-28 (later 43): #101 DONE (9565f97), with /tdd then /code-review. Per day = profit / max(days, 1) in `per_day` (recommend.py) and `measures` (RecommendationTable.lua), and CONTEXT **Per day** says so. Tests: `per_day` unit tests, a Shopping List ranking test (a fast one-off Tin no longer takes a Per day top row from a bigger Linen Flip), and an Addon spec (days 0.125 shows the Profit). Both reviews came back clean apart from wording, which was fixed.
 - Gotchas:
   - Never use `git stash push <path>` to check a test goes red. Here it failed on a pathspec, and the `git stash pop` after it popped the user's older `stash@{0}` ("pre-pull local changes 2026-09-28"). That conflicted, and the recovery (`git reset`) cleared the `skip-worktree` flag on `addon/AzerothQuant/Recommendations.lua`, which then had to be set again (README.md, line 84). `stash@{0}` is still there, untouched. To check red, edit the code by hand instead.
