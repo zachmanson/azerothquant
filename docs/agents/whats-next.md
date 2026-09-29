@@ -1,3 +1,15 @@
+2026-09-29 (later 16): AT THE PC. Fixed a #109 bug (98b4da2): after /reload the Budget and Days to Sell boxes showed blank over saved values, and an Enter in a blank box wiped the setting. The frame's OnShow now fills both boxes and clears focus. Checked in game. Results are on #85 and #109.
+- #108: `--why-not` ran; the near misses are all Flip margin and none are on the Shopping List. 17 of 20 show `?` for the name (the Brain lacks their names). Not filed yet.
+- #93: not exercised. At Budget 0.1g the only Craft (4s 74c) fit. Set the Budget to 0.01 to force the all-over-Budget case.
+
+Next, in order:
+1. At the PC: #93 at Budget 0.01g (open Flips to Craft), then #106's LoadOnDemand spike (steps on #85), then the older #85 items (Buy Under tab, AH wash, Disenchant groups).
+2. Not at the PC: grill #90 (Beta Prior column) before Live on Nov 4; #91 has the same deadline.
+
+- Gotchas:
+  - RecommendationFrame.lua has no busted seam. Any change to it needs an in-game check on #85.
+  - addon/AzerothQuant/Recommendations.lua is still modified locally (Brain output). Don't commit it.
+
 2026-09-29 (later 15): TRIAGE DONE, nothing built. needs-triage is empty.
 - #92 closed: fixed by #105. The latest `Import took` lines (on #71) are 11-23 s warm and 31 s cold, down from 33-56 s.
 - #106: its LoadOnDemand spike is added to #85's checklist. Relabelled `needs-pc` + `later`.
