@@ -1,3 +1,13 @@
+2026-09-30 (later 39): Grilled #110. The spec is on the issue (comment 5912789542), and it's ready-for-agent. The Beta Sell Rate feeds only a Prediction buy's Max Loss room, behind `beta_sell_rate_weight` (default 0.0, off). It borrows all of Beta's Sale Events and window hours, each weighted w, and counts a Beta Sale Event when its price is at or above `post_at × Beta FV / Live FV`. It stops 14 days after Live's first Scan. There's a CLI ratio line, `--why-not`, an Addon tooltip marker, and a replay ablation row when w > 0. It needs ADR-0024 and CONTEXT.md edits (Era exception, new term **Beta Sell Rate**). Two slices, both before Nov 4.
+
+Next, in order (grill first where not ready-for-agent):
+1. #110 slice 1 (Brain): /tdd. Then slice 2 (Addon tooltip).
+2. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82
+3. When at the PC: run the #85 checks (#97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Then grill #39 using the probe results.
+4. On dates: Nov 4 #91's list. ~Nov 6: read #110's ratio line for #91's Item Keys and set `beta_sell_rate_weight = 0.5` if they're close. Nov 18: look back and close #110.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. The Max Loss room is `_room_at` inside `_hold_buys` (recommend.py). Only that path borrows; Flips must not. Sibling pooling (ADR-0022) is the pattern for weighted events counting toward `flip_min_sale_events`.
+
 2026-09-30 (later 38): Tried to start #39, but it has no spec (only the two-line body, labelled ready-for-human + later). Posted the #97 slice 1 check and a #39 throttle probe on #85 (comment 5912630536). Both wait on the PC.
 
 Next, in order (grill first where not ready-for-agent):
