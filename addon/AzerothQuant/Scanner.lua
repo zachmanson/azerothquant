@@ -15,6 +15,7 @@ local Scan = ns.Scan
 local Prune = ns.Prune
 local Nudge = ns.Nudge
 local Chat = ns.Chat
+local DataAddon = ns.DataAddon
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
@@ -229,11 +230,16 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
       behindAtLoad = Nudge.afterLoad(db.scans, time(), C_Timer.After, function()
+        -- Load already used: its own chat line said whether to reload.
+        if DataAddon.loaded() then
+          return nil
+        end
         reloadReady = true
+        return DataAddon.canLoad() and "Load" or "Reload"
       end, Chat.say)
       if savedAtLoad > 0 and not behindAtLoad then
         Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
-          .. " (scripts\\play.bat), Reload again in a few seconds.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
+          .. " (scripts\\play.bat), Load (or Reload) once it's done.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
       end
     end
   elseif event == "PLAYER_LOGOUT" then
@@ -283,9 +289,24 @@ ns.Scanner = {
   waiting = function()
     return (db and #db.scans or 0) - savedAtLoad, savedAtLoad, behindAtLoad
   end,
-  -- True once the Brain should have imported the Scans saved at load, so Reload pulses.
+  -- True once the Brain should have imported the Scans saved at load, so Reload (or
+  -- Load) pulses.
   reloadReady = function()
     return reloadReady
+  end,
+  -- After the Load button loaded a copy (DataAddon.load), which pruned by its stamps:
+  -- fresh is whether it caught up. Recounts what's waiting, and whether the Brain is
+  -- behind, from what's left. Saved Scans are the ones with savedAt; the rest were taken
+  -- since the load. A stale copy leaves Reload pulsing.
+  afterDataLoad = function(fresh)
+    savedAtLoad = 0
+    for _, scan in ipairs(db.scans) do
+      if scan.savedAt then
+        savedAtLoad = savedAtLoad + 1
+      end
+    end
+    behindAtLoad = Nudge.brainBehind(db.scans, time()) ~= nil
+    reloadReady = not fresh
   end,
   addPulse = addPulse,
   setPulsing = setPulsing,

@@ -1,7 +1,8 @@
 @echo off
 rem Starts a fresh `brain watch` in its own window, then the Battle.net app.
 rem Launch the game from this instead of Battle.net and every in-game Reload is
-rem imported on its own; a second Reload then loads the new Recommendations.
+rem imported on its own; the Recommendation Table's Load button then loads the new
+rem Recommendations without a second Reload (#106).
 rem
 rem Any watcher from an earlier run is stopped first: a long-running one keeps
 rem writing Recommendations with the Brain code it started with.

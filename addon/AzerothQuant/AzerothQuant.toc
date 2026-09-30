@@ -5,7 +5,8 @@
 ## SavedVariables: AzerothQuantDB
 
 # Written by the Brain (never edit). It must exist when the client starts, since new
-# files aren't picked up on /reload, so the Addon ships a stub.
+# files aren't picked up on /reload, so the Addon ships a stub. The Brain writes the same
+# file into AzerothQuant_Data, a LoadOnDemand addon it creates, for the Load button (#106).
 Recommendations.lua
 
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
@@ -19,6 +20,7 @@ DisenchantCapture.lua
 KnownRecipes.lua
 MerchantCosts.lua
 Prune.lua
+Freshness.lua
 Nudge.lua
 DisenchantGroup.lua
 RecommendationTable.lua
@@ -27,6 +29,7 @@ TooltipLines.lua
 BuyUnderMatch.lua
 
 # WoW glue (thin; not unit tested)
+DataAddon.lua
 Scanner.lua
 Mailbox.lua
 Professions.lua

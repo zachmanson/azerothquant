@@ -17,6 +17,7 @@ local CraftChain = ns.CraftChain
 local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
+local DataAddon = ns.DataAddon
 local Chat = ns.Chat
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
@@ -649,8 +650,13 @@ local function createTabs()
 end
 
 -- Reloading flushes SavedVariables (new Scans reach the Brain) and rereads
--- Recommendations.lua (a Brain import reaches the table). Not mid-Scan, which would lose it.
+-- Recommendations.lua. Not mid-Scan, which would lose it. The Brain imports what the
+-- reload saved and writes a new Recommendations.lua a minute or so later; when the
+-- startup copy missed it, the button becomes Load, which reads the Brain's copy in
+-- AzerothQuant_Data without a second reload (DataAddon.lua, #106). Load works once per
+-- reload, and can run mid-Scan since it doesn't reload.
 local RELOAD_TIP = "Reload the UI: saves new Scans for the Brain and loads its latest Recommendations."
+local LOAD_TIP = "Load the Brain's latest Recommendations (once per reload)."
 local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
 
 local function reload()
@@ -659,6 +665,18 @@ local function reload()
     return
   end
   ReloadUI()
+end
+
+local function loadRecommendations()
+  if not DataAddon.canLoad() then
+    Chat.say("Nothing new to load: /aq reload instead.")
+    return
+  end
+  local fresh = DataAddon.load()
+  if fresh ~= nil then
+    Scanner.afterDataLoad(fresh)
+    redraw()
+  end
 end
 
 local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Prediction buys. "
@@ -748,12 +766,19 @@ local function createReloadButton()
   button:SetSize(70, 22)
   button:SetText("Reload")
   button:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
-  button:SetScript("OnClick", reload)
+  button:SetScript("OnClick", function()
+    if DataAddon.canLoad() then
+      loadRecommendations()
+    else
+      reload()
+    end
+  end)
   -- Disabled buttons get no OnEnter unless told to, and the tooltip must say why it's off.
   button:SetMotionScriptsWhileDisabled(true)
   button:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText(Scanner.busy() and BUSY_TIP or RELOAD_TIP, 1, 1, 1, 1, true)
+    local tip = DataAddon.canLoad() and LOAD_TIP or Scanner.busy() and BUSY_TIP or RELOAD_TIP
+    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", GameTooltip_Hide)
@@ -769,12 +794,19 @@ local function createReloadButton()
   -- Pulses once the Brain should have imported the Scans saved at load (#71).
   local pulse = Scanner.addPulse(button)
 
-  -- A Scan starts and ends on its own clock, so follow it while the frame is shown.
+  -- A Scan starts and ends on its own clock, so follow it while the frame is shown. So
+  -- does Load, which is used up once clicked.
   button:SetScript("OnUpdate", function(self)
-    local busy = Scanner.busy()
-    self:SetEnabled(not busy)
-    Scanner.setPulsing(pulse, Scanner.reloadReady() and not busy)
-    local text = RecommendationTable.waitingNote(Scanner.waiting())
+    local canLoad = DataAddon.canLoad()
+    local label = canLoad and "Load" or "Reload"
+    if self:GetText() ~= label then
+      self:SetText(label)
+    end
+    local enabled = canLoad or not Scanner.busy()
+    self:SetEnabled(enabled)
+    Scanner.setPulsing(pulse, Scanner.reloadReady() and enabled)
+    local unsaved, unimported, behind = Scanner.waiting()
+    local text = RecommendationTable.waitingNote(unsaved, unimported, behind, canLoad)
     if text ~= note:GetText() then
       note:SetText(text)
       if text then
@@ -900,10 +932,12 @@ SlashCmdList.AZEROTHQUANT = function(msg)
     toggle()
   elseif msg:match("^%s*reload%s*$") then
     reload()
+  elseif msg:match("^%s*load%s*$") then
+    loadRecommendations()
   elseif msg:match("^%s*debug%s*$") then
     Chat.toggleDebug()
   else
-    Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload,"
+    Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload, /aq load,"
       .. " /aq debug (toggle chat lines you don't need to act on)")
   end
 end

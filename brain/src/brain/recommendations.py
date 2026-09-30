@@ -2,7 +2,10 @@
 
 The Brain writes it into the Addon's folder in each install, never into
 SavedVariables, since the client overwrites SavedVariables on every logout
-(ADR-0001). The client reads it on login or `/reload`.
+(ADR-0001). The client reads it on login or `/reload`. It writes the same file into
+AzerothQuant_Data too, a LoadOnDemand addon the Brain creates, whose files the client
+reads when the Addon's Load button loads it, so a new import needs no second reload
+(ADR-0021).
 
 It holds, per Market, when the latest imported Scan was requested.
 The Addon then deletes every stored Scan in that Market requested at or before
@@ -92,8 +95,24 @@ _HEADER = (
 )
 
 
+DATA_ADDON = "AzerothQuant_Data"
+_DATA_TOC = (
+    "## Title: AzerothQuant Data\n"
+    "## Notes: The Brain's latest Recommendations, loaded by the Addon's Load button."
+    " Written by the Brain; edits are overwritten.\n"
+    "## LoadOnDemand: 1\n"
+    "## Dependencies: AzerothQuant\n"
+    "\n"
+    f"{FILE_NAME}\n"
+)
+
+
 def addon_folder(install: Install) -> Path:
     return install.path / "Interface" / "AddOns" / "AzerothQuant"
+
+
+def data_addon_folder(install: Install) -> Path:
+    return install.path / "Interface" / "AddOns" / DATA_ADDON
 
 
 def render(
@@ -318,9 +337,29 @@ def write_recommendations(
         [m for m in markets if m.market.era is install.era],
         beta_priors,
     )
+    # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
+    # cost it.
+    _write_atomically(path, text)
+    data = data_addon_folder(install)
+    data.mkdir(exist_ok=True)
+    _write_atomically(data / f"{DATA_ADDON}.toc", _data_toc(folder))
+    _write_atomically(data / FILE_NAME, text)
+    return path
+
+
+def _data_toc(addon: Path) -> str:
+    """The Data addon's TOC, with the Addon's Interface line so the client doesn't list it
+    as out of date whenever the Addon's is current."""
+    toc = addon / "AzerothQuant.toc"
+    lines = toc.read_text(encoding="utf-8").splitlines() if toc.is_file() else []
+    interface = [line + "\n" for line in lines if line.startswith("## Interface:")]
+    return "".join(interface[:1]) + _DATA_TOC
+
+
+def _write_atomically(path: Path, text: str) -> None:
     # Write a temp file and swap it in, so the client never reads a half-written file. The
     # temp name is unique so a `brain import` running beside `brain watch` can't clash.
-    fd, temp = tempfile.mkstemp(dir=folder, prefix=FILE_NAME + ".", suffix=".tmp")
+    fd, temp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -328,4 +367,3 @@ def write_recommendations(
     except BaseException:
         Path(temp).unlink(missing_ok=True)
         raise
-    return path

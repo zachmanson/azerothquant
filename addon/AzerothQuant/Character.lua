@@ -195,6 +195,8 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     -- Anything added to SavedVariables here is saved, on logout and on /reload alike.
     -- Never read gold or bags here (see top); with no good read this session, skip it.
     if not carried then
+      -- No Read this logout, so none for the next load's freshness check to wait on.
+      db.lastSavedRead = nil
       return
     end
     disenchants:flush()
@@ -210,5 +212,8 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
       daysToSell = market and db.daysToSell and db.daysToSell[market],
     }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs(), disenchants.results)
     table.insert(db.characterReads, read)
+    -- Kept apart from characterReads (pruned) so the next load can tell whether a copy of
+    -- Recommendations.lua has caught up with this logout (Freshness.lua, #106).
+    db.lastSavedRead = { realm = read.realm, character = read.character, readAt = read.readAt }
   end
 end)

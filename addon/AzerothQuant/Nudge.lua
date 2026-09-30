@@ -34,10 +34,15 @@ end
 -- How long after a load `brain watch` should have imported the Scans it saved and
 -- rewritten Recommendations.lua: a guess, since the Addon can't see that file change.
 -- Tune it by the "Import took Xs" lines `brain watch` logs, plus its 3 s
--- settle time (#71). Real imports on the Beta took 11-23 s (2026-09-29, after #105's
--- speedups): the slowest plus the settle plus a few seconds.
-Nudge.RELOAD_READY_AFTER = 30
-Nudge.RELOAD_READY_LINE = "The Brain should be done: Reload to see the new Scan."
+-- settle time (#71). A cold pass on the Beta took 59 s (2026-09-29, after #90's Beta
+-- Prior): that plus the settle plus a margin. Too early costs more since #106: a Load
+-- clicked before the Brain is done locks in the stale copy until the next reload.
+Nudge.RELOAD_READY_AFTER = 70
+-- By the button that pulses: Load, or Reload when the Data addon is missing (#106).
+Nudge.READY_LINES = {
+  Load = "The Brain should be done: Load to see the new Scan.",
+  Reload = "The Brain should be done: Reload to see the new Scan.",
+}
 
 -- Called at PLAYER_LOGOUT (which a /reload fires too), as SavedVariables is written:
 -- stamps every Scan saved for the first time with savedAt = now. One saved before keeps
@@ -70,10 +75,11 @@ end
 
 -- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
 -- in chat and asks after brain watch. Otherwise, if any Scans are waiting, waits
--- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the Reload button's pulse)
--- and says so in chat once (#71). "The Brain should be done" would be a false promise
--- when it's behind, so it's one or the other. `after` and `say` are C_Timer.After and the
--- chat line. Returns whether the Brain is behind.
+-- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the button's pulse and
+-- returns which button that is: "Load", "Reload", or nil when Load was already clicked)
+-- and says so in chat once (#71, #106). "The Brain should be done" would be a false
+-- promise when it's behind, so it's one or the other. `after` and `say` are C_Timer.After
+-- and the chat line. Returns whether the Brain is behind.
 function Nudge.afterLoad(scans, now, after, ready, say)
   local behind = Nudge.brainBehind(scans, now)
   if behind then
@@ -83,8 +89,10 @@ function Nudge.afterLoad(scans, now, after, ready, say)
   end
   if #scans > 0 then
     after(Nudge.RELOAD_READY_AFTER, function()
-      ready()
-      say(Nudge.RELOAD_READY_LINE)
+      local button = ready()
+      if button then
+        say(Nudge.READY_LINES[button])
+      end
     end)
   end
   return false

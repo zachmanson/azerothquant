@@ -1129,4 +1129,11 @@ describe("RecommendationTable.waitingNote", function()
     assert.are.equal("3 Scans waiting: Reload to send them to the Brain",
       RecommendationTable.waitingNote(1, 2, true))
   end)
+
+  it("asks for a Load instead once the Brain has them, when the button is Load (#106)", function()
+    assert.are.equal("2 Scans waiting: Load once the Brain has them",
+      RecommendationTable.waitingNote(0, 2, false, true))
+    assert.are.equal("3 Scans waiting: Reload to send them to the Brain",
+      RecommendationTable.waitingNote(1, 2, false, true))
+  end)
 end)

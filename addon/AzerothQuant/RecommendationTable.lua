@@ -620,8 +620,9 @@ end
 -- unsaved: taken since the last reload, so still only in memory. unimported: saved at the
 -- last reload, waiting on the Brain. Unsaved ones need a reload first, whatever the rest.
 -- behind: the Brain hasn't imported Scans it should have (Nudge.brainBehind, #104), so
--- no Reload of the saved ones helps until `brain watch` runs.
-function RecommendationTable.waitingNote(unsaved, unimported, behind)
+-- no Reload of the saved ones helps until `brain watch` runs. canLoad: the button is Load
+-- (DataAddon.lua, #106), which picks up the Brain's import without a reload.
+function RecommendationTable.waitingNote(unsaved, unimported, behind, canLoad)
   local n = unsaved + unimported
   if n == 0 then
     return nil
@@ -630,7 +631,7 @@ function RecommendationTable.waitingNote(unsaved, unimported, behind)
   local them = n == 1 and "it" or "them"
   local step = unsaved > 0 and "Reload to send " .. them .. " to the Brain"
     or behind and "start brain watch"
-    or "Reload once the Brain has " .. them
+    or (canLoad and "Load" or "Reload") .. " once the Brain has " .. them
   -- Short: it sits right of the header lines, left of the Reload button.
   return scans .. " waiting: " .. step
 end

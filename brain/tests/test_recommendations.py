@@ -3,9 +3,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from brain.beta_prior import BetaPrice, BetaPrior
-from brain.config import Era
+from brain.config import Era, Install
 from brain.disenchant import Group
-from brain.history import Market
+from brain.history import Market, open_history
 from brain.recommend import (
     Action,
     Blocked,
@@ -21,7 +21,13 @@ from brain.recommend import (
     Row,
     SubCraft,
 )
-from brain.recommendations import FILE_NAME, GLOBAL_NAME, render
+from brain.recommendations import (
+    FILE_NAME,
+    GLOBAL_NAME,
+    addon_folder,
+    render,
+    write_recommendations,
+)
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
 
@@ -632,3 +638,38 @@ def test_a_market_without_a_beta_prior_has_no_beta(tmp_path, lua):
     out = _run_in_lua(lua, file, 'print(r.recommendations["Quel\'Thalas"].Horde.beta)')
 
     assert out == "nil"
+
+
+def _addon_install(tmp_path: Path) -> Install:
+    """An install with the Addon and its TOC in it."""
+    install = Install(tmp_path / "wow", Era.BETA)
+    addon_folder(install).mkdir(parents=True)
+    (addon_folder(install) / "AzerothQuant.toc").write_text(
+        "## Interface: 16001\n## Title: AzerothQuant\n", encoding="utf-8"
+    )
+    return install
+
+
+def test_the_brain_mirrors_recommendations_into_a_load_on_demand_data_addon(tmp_path):
+    # The client reads a LoadOnDemand addon's files when it's loaded, so the Addon's Load
+    # button can pick up this copy without a reload (ADR-0021).
+    install = _addon_install(tmp_path)
+
+    conn = open_history(tmp_path / "history.db")
+    try:
+        written = write_recommendations(conn, install)
+    finally:
+        conn.close()
+
+    data = install.path / "Interface" / "AddOns" / "AzerothQuant_Data"
+    assert (data / FILE_NAME).read_text(encoding="utf-8") == written.read_text(encoding="utf-8")
+    assert (data / "AzerothQuant_Data.toc").read_text(encoding="utf-8") == (
+        "## Interface: 16001\n"
+        "## Title: AzerothQuant Data\n"
+        "## Notes: The Brain's latest Recommendations, loaded by the Addon's Load button."
+        " Written by the Brain; edits are overwritten.\n"
+        "## LoadOnDemand: 1\n"
+        "## Dependencies: AzerothQuant\n"
+        "\n"
+        "Recommendations.lua\n"
+    )
