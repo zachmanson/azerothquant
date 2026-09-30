@@ -9,6 +9,10 @@
 -- when it was first saved, so the next load can tell the Brain is behind (#104). It also
 -- lends the Scan button's pulse (addPulse, setPulsing) to the Reload button.
 --
+-- Every stamp here is GetServerTime(), not time(), so Scans from different players'
+-- clients order on one clock in the Scan Pool (#117). The cooldown and Nudge checks
+-- compare against the same clock.
+--
 -- Read-only: nothing here buys, posts or cancels (ADR-0003).
 local _, ns = ...
 local Scan = ns.Scan
@@ -50,7 +54,7 @@ local function cooldownRemaining()
   if not db.lastScanAt then
     return 0
   end
-  return math.max(0, db.lastScanAt + COOLDOWN_SECONDS - time())
+  return math.max(0, db.lastScanAt + COOLDOWN_SECONDS - GetServerTime())
 end
 
 -- A pulsing glow over a button (the Scan button here, Reload in RecommendationFrame.lua),
@@ -106,7 +110,7 @@ local function refreshButton()
 end
 
 local function tick()
-  local now = time()
+  local now = GetServerTime()
   if Nudge.due(db.lastScanAt, checkedAt, now) then
     Chat.debug("Scan ready: a second Scan now completes an Observation Window.")
   end
@@ -129,7 +133,7 @@ end
 
 local function finish(rows)
   cancel(noResponseTimer)
-  pending.readAt = time()
+  pending.readAt = GetServerTime()
   local scan = Scan.build(pending, rows, UnitName("player"), sellPrice, itemInfo)
   table.insert(db.scans, scan)
   db.nextScanId = db.nextScanId + 1
@@ -186,7 +190,7 @@ local function requestScan()
   end
   pending = {
     id = db.nextScanId,
-    requestedAt = time(),
+    requestedAt = GetServerTime(),
     realm = GetRealmName(),
     character = table.concat({ UnitFullName("player") }, "-"), -- e.g. "Kash-Patel" (spike #1)
     faction = marketFaction,
@@ -229,7 +233,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       end
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
-      behindAtLoad = Nudge.afterLoad(db.scans, time(), C_Timer.After, function()
+      behindAtLoad = Nudge.afterLoad(db.scans, GetServerTime(), C_Timer.After, function()
         -- Load already used: its own chat line said whether to reload.
         if DataAddon.loaded() then
           return nil
@@ -245,7 +249,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "PLAYER_LOGOUT" then
     -- SavedVariables is written right after this, on a /reload too.
     if db then
-      Nudge.stampSaved(db.scans, time())
+      Nudge.stampSaved(db.scans, GetServerTime())
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
@@ -255,7 +259,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     refreshButton()
     -- Start checking from now, so a cooldown that ended while the AH was closed
     -- doesn't nudge on open.
-    checkedAt = time()
+    checkedAt = GetServerTime()
     cancel(ticker)
     ticker = C_Timer.NewTicker(1, tick)
   elseif event == "AUCTION_HOUSE_CLOSED" then
@@ -270,7 +274,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if not pending or reading then
       return
     end
-    pending.firstUpdateAt = pending.firstUpdateAt or time()
+    pending.firstUpdateAt = pending.firstUpdateAt or GetServerTime()
     cancel(noResponseTimer)
     cancel(debounceTimer)
     debounceTimer = C_Timer.NewTimer(QUIET_SECONDS, readRows)
@@ -305,7 +309,7 @@ ns.Scanner = {
         savedAtLoad = savedAtLoad + 1
       end
     end
-    behindAtLoad = Nudge.brainBehind(db.scans, time()) ~= nil
+    behindAtLoad = Nudge.brainBehind(db.scans, GetServerTime()) ~= nil
     reloadReady = not fresh
   end,
   addPulse = addPulse,
