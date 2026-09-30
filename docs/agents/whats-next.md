@@ -1,15 +1,16 @@
 2026-09-30 (later 34): QUEUE CHANGE. The user dropped the core/later split for ordering: work open tickets by need. Date-gated items are unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, #58's tooltip check, first `brain flips` grades).
 
+Update, same day: #109 and #108 turned out to be built already (fa56555, c0c7021). #109 was checked Brain-side on Scan 46 by forcing Days to Sell. Flips to Sell drop out whole instead of shrinking, because on Beta they're wall buyouts (see the #109 comment). It works as designed and only needs the user's OK to close. #108 has a finding: `--why-not` says "Flip margin fail" with a passing margin when Days to Sell cuts a wall buyout. Room is priced as if only the cheapest Listing were bought (see the #108 comment).
+
 Next, in order (grill first where not ready-for-agent):
-1. #109 player-set stock horizon (Qty 170-205 rows tie up gold)
+1. #108 fix: make `--why-not` name room (at the wall-clearing post price) as the reason for a wall buyout cut short, then close #108. Close #109 if the user agrees.
 2. #97 take a row off once bought (double-buy risk)
 3. #39 search the AH from a Shopping List row (needs in-game throttle probe)
 4. #110 Beta Prior as an engine nudge: grill before Nov 4, since without it #91's Predictions buy nothing at launch
 5. #76 Disenchant as an exit
-6. #108 why near-miss items didn't make the list
-7. #55 loot and for-use buys
-8. #81 Post / Cancel from a row (in-game probe first)
-9. Then: #89, #54, #44, #61, #14, #19, #10, #82
+6. #55 loot and for-use buys
+7. #81 Post / Cancel from a row (in-game probe first)
+8. Then: #89, #54, #44, #61, #14, #19, #10, #82
 
 - Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it.
 
