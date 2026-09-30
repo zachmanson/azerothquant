@@ -9,10 +9,13 @@
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
     brain pool push  upload the player's Scans the Scan Pool doesn't have yet
     brain pool pull [--since DATE]  download and import other members' Scans
+    brain pool key add NAME     make a member key for NAME and print it (the pool admin only)
+    brain pool key revoke NAME  revoke NAME's key and roll back their Scans (the pool admin only)
 
 All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
 here touches the game process (ADR-0003). Only `brain watch` and `brain pool` go online, and
-only with pool_url and pool_key set: to the Scan Pool, with stripped Scans (ADR-0026).
+only with pool_url and pool_key set: to the Scan Pool, with stripped Scans (ADR-0026). `brain
+pool key` needs pool_url and pool_admin_secret instead, and sends only the member's name.
 """
 
 import argparse
@@ -55,7 +58,7 @@ from brain.history import (
     scan_times,
 )
 from brain.lots import happened_at, start_of
-from brain.pool import HttpPool, Pool
+from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import (
@@ -1058,6 +1061,28 @@ def _pool(config: Config, command: str, since: date | None) -> int:
     return 1 if report.failed else 0
 
 
+def _pool_key(config: Config, action: str, name: str) -> int:
+    if config.pool_url is None or config.pool_admin_secret is None:
+        log.error(
+            "Only the pool admin can add or revoke keys: set pool_url and pool_admin_secret "
+            "(the Worker's ADMIN_SECRET) in the config"
+        )
+        return 1
+    admin = PoolAdmin(config.pool_url, config.pool_admin_secret)
+    try:
+        if action == "add":
+            key = admin.add_key(name)
+            log.info("Give %s this key; the pool won't show it again:", name)
+            print(key)
+        else:
+            admin.revoke_key(name)
+            log.info("Revoked %s; their Scans leave every Brain at its next pull", name)
+    except PoolError as e:
+        log.error("The Scan Pool refused: %s", e)
+        return 1
+    return 0
+
+
 def make_pool(config: Config) -> Pool | None:
     """The Scan Pool, or None when it's off (pool_url and pool_key unset)."""
     if config.pool_url is None or config.pool_key is None:
@@ -1174,6 +1199,12 @@ def main(argv: list[str] | None = None) -> int:
         type=date.fromisoformat,
         help="go back to this day (YYYY-MM-DD, UTC) instead of the last pull",
     )
+    keys = pool_commands.add_parser("key", help="the pool admin only: add or revoke member keys")
+    key_commands = keys.add_subparsers(dest="key_command", required=True)
+    key_commands.add_parser("add", help="make a member key and print it").add_argument("name")
+    key_commands.add_parser(
+        "revoke", help="revoke a member's key and roll back their Scans"
+    ).add_argument("name")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -1183,6 +1214,8 @@ def main(argv: list[str] | None = None) -> int:
         log.error("Can't load the config: %s", e)
         return 2
 
+    if args.command == "pool" and args.pool_command == "key":
+        return _pool_key(config, args.key_command, args.name)
     if args.command == "pool":
         return _pool(config, args.pool_command, getattr(args, "since", None))
     if args.command == "import":

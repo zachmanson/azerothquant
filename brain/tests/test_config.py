@@ -489,6 +489,7 @@ def test_the_scan_pool_is_off_unless_configured(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
     assert config.pool_url is None and config.pool_key is None
+    assert config.pool_admin_secret is None
     assert config.pool_sync_seconds == 5 * 60
     assert config.pool_backfill_days == 30
     assert config.pool_min_completeness == 0.8
@@ -499,6 +500,7 @@ def test_the_scan_pool_settings_can_be_set(tmp_path):
     settings = (
         "pool_url = 'https://pool.example.workers.dev'\n"
         "pool_key = 'k123'\n"
+        "pool_admin_secret = 's3cret'\n"
         "pool_sync_minutes = 2\n"
         "pool_backfill_days = 90\n"
         "pool_min_completeness = 0.5\n"
@@ -508,6 +510,7 @@ def test_the_scan_pool_settings_can_be_set(tmp_path):
 
     assert config.pool_url == "https://pool.example.workers.dev"
     assert config.pool_key == "k123"
+    assert config.pool_admin_secret == "s3cret"
     assert config.pool_sync_seconds == 2 * 60
     assert config.pool_backfill_days == 90
     assert config.pool_min_completeness == 0.5
@@ -522,6 +525,8 @@ def test_the_scan_pool_settings_can_be_set(tmp_path):
         "pool_url = 5\npool_key = 'k'",
         "pool_url = 'ftp://pool'\npool_key = 'k'",
         "pool_url = 'https://pool'\npool_key = ''",
+        "pool_admin_secret = ''",
+        "pool_admin_secret = 5",
         "pool_sync_minutes = 0",
         "pool_backfill_days = 1.5",
         "pool_min_completeness = 1.5",

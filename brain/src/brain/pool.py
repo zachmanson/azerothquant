@@ -156,23 +156,59 @@ class HttpPool:
     def _request(
         self, method: str, path: str, body: bytes | None = None, headers: dict | None = None
     ) -> bytes:
-        request = urllib.request.Request(
-            self.url + path,
-            data=body,
-            method=method,
-            headers={"Authorization": f"Bearer {self.key}", **(headers or {})},
-        )
+        return _request(self.url, self.key, self.timeout, method, path, body, headers)
+
+
+class PoolAdmin:
+    """The Worker's member keys, with its ADMIN_SECRET (pool/README.md)."""
+
+    def __init__(self, url: str, secret: str, timeout: float = 60):
+        self.url = url.rstrip("/")
+        self.secret = secret
+        self.timeout = timeout
+
+    def add_key(self, name: str) -> str:
+        """A new member key for `name`. The Worker shows it only this once."""
+        body = json.dumps({"name": name}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        answer = _request(self.url, self.secret, self.timeout, "POST", "/keys", body, headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return response.read()
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                raise PoolBusy(f"{method} {path}: rate limited") from None
-            raise PoolError(f"{method} {path}: HTTP {e.code} {_reason(e)}") from None
-        except (urllib.error.URLError, OSError, UnicodeError) as e:
-            # UnicodeError: a header the HTTP library can't send, say a realm name outside
-            # Latin-1.
-            raise PoolError(f"{method} {path}: {e}") from None
+            return str(json.loads(answer)["key"])
+        except (ValueError, KeyError, TypeError) as e:
+            raise PoolError(f"the pool's answer to a new key has no key: {e}") from None
+
+    def revoke_key(self, name: str) -> None:
+        """Revoke `name`'s key. The pool rolls back all their Scans."""
+        path = f"/keys/{urllib.parse.quote(name, safe='')}"
+        _request(self.url, self.secret, self.timeout, "DELETE", path)
+
+
+def _request(
+    url: str,
+    token: str,
+    timeout: float,
+    method: str,
+    path: str,
+    body: bytes | None = None,
+    headers: dict | None = None,
+) -> bytes:
+    request = urllib.request.Request(
+        url + path,
+        data=body,
+        method=method,
+        headers={"Authorization": f"Bearer {token}", **(headers or {})},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise PoolBusy(f"{method} {path}: rate limited") from None
+        raise PoolError(f"{method} {path}: HTTP {e.code} {_reason(e)}") from None
+    except (urllib.error.URLError, OSError, UnicodeError) as e:
+        # UnicodeError: a header the HTTP library can't send, say a realm name outside
+        # Latin-1.
+        raise PoolError(f"{method} {path}: {e}") from None
 
 
 def _reason(error: urllib.error.HTTPError) -> str:

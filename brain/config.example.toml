@@ -29,6 +29,9 @@
 # by hand. Must come before the first [[installs]].
 # pool_url = 'https://azerothquant-pool.<you>.workers.dev'
 # pool_key = '<the key the pool admin gave you>'
+# The pool admin only: the Worker's ADMIN_SECRET, for `brain pool key add <name>` (prints
+# the new member's key) and `brain pool key revoke <name>` (their Scans leave every Brain).
+# pool_admin_secret = '<ADMIN_SECRET>'
 # How often `brain watch` pulls, besides right before each import. Defaults to 5.
 # pool_sync_minutes = 5
 # How far back the first pull reaches. Defaults to 30.

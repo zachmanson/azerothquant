@@ -9,7 +9,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from brain.config import Era
-from brain.pool import HttpPool, PoolBusy, PoolEntry, PoolError, PoolPage, strip_scan
+from brain.pool import (
+    HttpPool,
+    PoolAdmin,
+    PoolBusy,
+    PoolEntry,
+    PoolError,
+    PoolPage,
+    strip_scan,
+)
 from brain.scan import Scan
 
 
@@ -68,11 +76,19 @@ class _StubWorker(BaseHTTPRequestHandler):
 
     requests: list[tuple[str, str, dict, bytes]] = []
     status = 201
+    error = "something went wrong"
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         self.requests.append(("POST", self.path, dict(self.headers), body))
+        if self.path == "/keys":
+            self._reply(self.status, {"name": json.loads(body)["name"], "key": "newkey"})
+            return
         self._reply(self.status, {"id": "abc"})
+
+    def do_DELETE(self):
+        self.requests.append(("DELETE", self.path, dict(self.headers), b""))
+        self._reply(self.status, {"name": "bob", "revoked": True})
 
     def do_GET(self):
         self.requests.append(("GET", self.path, dict(self.headers), b""))
@@ -113,6 +129,8 @@ class _StubWorker(BaseHTTPRequestHandler):
         )
 
     def _reply(self, status, payload):
+        if status >= 400:
+            payload = {"error": self.error}
         data = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -131,6 +149,7 @@ T0 = 1_790_000_000
 def worker():
     _StubWorker.requests = []
     _StubWorker.status = 201
+    _StubWorker.error = "something went wrong"
     server = HTTPServer(("127.0.0.1", 0), _StubWorker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -196,3 +215,30 @@ def test_the_first_listing_asks_for_the_whole_index(worker):
 def test_fetching_unzips_the_scan(worker):
     assert HttpPool(worker, "k").fetch("abc") == {"requestedAt": T0}
     assert _StubWorker.requests[0][1] == "/scans/abc"
+
+
+def test_adding_a_member_key_sends_the_name_with_the_admin_secret(worker):
+    key = PoolAdmin(worker, "s3cret").add_key("bob")
+
+    assert key == "newkey"
+    [(method, path, headers, body)] = _StubWorker.requests
+    assert (method, path) == ("POST", "/keys")
+    assert headers["Authorization"] == "Bearer s3cret"
+    assert headers["Content-Type"] == "application/json"
+    assert json.loads(body) == {"name": "bob"}
+
+
+def test_revoking_a_member_key_deletes_it_by_name(worker):
+    PoolAdmin(worker, "s3cret").revoke_key("bob the/2nd")
+
+    [(method, path, headers, _)] = _StubWorker.requests
+    assert (method, path) == ("DELETE", "/keys/bob%20the%2F2nd")
+    assert headers["Authorization"] == "Bearer s3cret"
+
+
+def test_a_taken_name_is_a_pool_error_with_the_worker_s_reason(worker):
+    _StubWorker.status = 409
+    _StubWorker.error = "name already taken"
+
+    with pytest.raises(PoolError, match="409 name already taken"):
+        PoolAdmin(worker, "s3cret").add_key("bob")

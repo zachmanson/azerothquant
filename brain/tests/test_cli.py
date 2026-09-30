@@ -48,7 +48,7 @@ from brain.history import (
     vendor_prices,
 )
 from brain.lots import NamedSet
-from brain.pool import strip_scan
+from brain.pool import PoolError, strip_scan
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import Prediction
 from brain.recommend import grades
@@ -274,6 +274,82 @@ def test_pool_commands_sync_by_hand(tmp_path, monkeypatch):
     assert len(pool.pushed()) == 2
     with closing(open_history(config.history_path)) as conn:
         assert FRIEND_SCAN_AT in scan_times(conn, MARKET)
+
+
+class _FakeAdmin:
+    """The Worker's /keys endpoints: bob's name is taken, and only bob has a key."""
+
+    revoked: list[str] = []
+
+    def __init__(self, url, secret):
+        self.url, self.secret = url, secret
+
+    def add_key(self, name):
+        if name == "bob":
+            raise PoolError("POST /keys: HTTP 409 name already taken")
+        return f"key-for-{name}-from-{self.url}-with-{self.secret}"
+
+    def revoke_key(self, name):
+        if name != "bob":
+            raise PoolError(f"DELETE /keys/{name}: HTTP 404 no such key")
+        self.revoked.append(name)
+
+
+def _as_pool_admin(tmp_path, monkeypatch, **pool_settings):
+    config = dataclasses.replace(config_for(tmp_path), **pool_settings)
+    monkeypatch.setattr("brain.cli.load_config", lambda path: config)
+    monkeypatch.setattr("brain.cli.PoolAdmin", _FakeAdmin)
+    _FakeAdmin.revoked = []
+
+
+def test_pool_key_add_prints_the_new_member_s_key(tmp_path, monkeypatch, capsys):
+    _as_pool_admin(
+        tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
+    )
+
+    assert main(["pool", "key", "add", "alice"]) == 0
+
+    assert capsys.readouterr().out.strip() == "key-for-alice-from-https://pool-with-s3"
+
+
+def test_pool_key_revoke_revokes_by_name(tmp_path, monkeypatch):
+    _as_pool_admin(
+        tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
+    )
+
+    assert main(["pool", "key", "revoke", "bob"]) == 0
+
+    assert _FakeAdmin.revoked == ["bob"]
+
+
+def test_a_refused_key_command_fails_with_the_worker_s_reason(tmp_path, monkeypatch, caplog):
+    _as_pool_admin(
+        tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
+    )
+
+    assert main(["pool", "key", "add", "bob"]) == 1
+    assert main(["pool", "key", "revoke", "carol"]) == 1
+
+    assert "name already taken" in caplog.text
+    assert "no such key" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"pool_url": "https://pool", "pool_key": "k"}, {"pool_admin_secret": "s3"}],
+    ids=["no admin secret", "no pool url"],
+)
+def test_the_key_commands_fail_clearly_without_the_admin_secret_and_url(
+    tmp_path, monkeypatch, caplog, capsys, settings
+):
+    _as_pool_admin(tmp_path, monkeypatch, **settings)
+    missing = "pool_admin_secret" if "pool_url" in settings else "pool_url"
+
+    assert main(["pool", "key", "add", "alice"]) == 1
+    assert main(["pool", "key", "revoke", "bob"]) == 1
+
+    assert capsys.readouterr().out == ""
+    assert missing in caplog.text
 
 
 def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_path):

@@ -197,6 +197,19 @@ def test_a_rollback_never_deletes_an_own_scan_but_pushes_it_again(db, config, po
     assert again.pushed == 1
 
 
+def test_rolling_back_a_scan_this_brain_never_pulled_is_a_no_op(db, config, pool):
+    import_scans(db, [scan(T0, row(quantity=5))], Era.BETA, config)
+    pull(db, pool, config, now=T0 + DAY)
+    pool.roll_back("never-seen")
+
+    report = pull(db, pool, config, now=T0 + DAY)
+
+    assert report.rolled_back == 0
+    assert not report.failed
+    assert scan_times(db, MARKET) == [T0]
+    assert [listing.quantity for listing in listings(db, MARKET)] == [5]
+
+
 def test_a_network_error_warns_and_leaves_the_history_as_it_was(db, config, pool):
     import_scans(db, [scan(T0)], Era.BETA, config)
     pool.upload(Era.BETA, strip_scan(scan(T0 + MINUTE)))

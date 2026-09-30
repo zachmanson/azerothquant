@@ -158,6 +158,8 @@ class Config:
     # off and nothing leaves the PC.
     pool_url: str | None = None
     pool_key: str | None = None
+    # The Worker's ADMIN_SECRET, for `brain pool key add/revoke`. Only the pool admin has it.
+    pool_admin_secret: str | None = None
     # `brain watch` pulls this often, besides right before each import.
     pool_sync_seconds: int = DEFAULT_POOL_SYNC_MINUTES * 60
     # The first pull reaches back this far.
@@ -308,6 +310,11 @@ def load_config(path: Path) -> Config:
             f"got {rematch_hours!r}"
         )
     pool_url, pool_key = _parse_pool_access(path, raw)
+    pool_admin_secret = raw.get("pool_admin_secret")
+    if pool_admin_secret is not None and (
+        not isinstance(pool_admin_secret, str) or not pool_admin_secret
+    ):
+        raise ConfigError(f"{path}: pool_admin_secret must be the Worker's ADMIN_SECRET")
     pool_sync_minutes = _parse_whole(
         path, raw.get("pool_sync_minutes", DEFAULT_POOL_SYNC_MINUTES), "pool_sync_minutes", 1
     )
@@ -527,6 +534,7 @@ def load_config(path: Path) -> Config:
         pool_completeness_window=completeness_window,
         pool_url=pool_url,
         pool_key=pool_key,
+        pool_admin_secret=pool_admin_secret,
         pool_sync_seconds=pool_sync_minutes * 60,
         pool_backfill_days=backfill_days,
         archive_dir=path.parent / archive,

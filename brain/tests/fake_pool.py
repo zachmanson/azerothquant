@@ -47,10 +47,10 @@ class FakePool:
         entries = []
         rolled_back = []
         for kind, pool_id in page:
-            era, raw, uploader = self.scans[pool_id]
             if kind == "rollback":
                 rolled_back.append(pool_id)
                 continue
+            era, raw, uploader = self.scans[pool_id]
             entries.append(
                 PoolEntry(
                     id=pool_id,
