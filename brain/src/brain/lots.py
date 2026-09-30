@@ -93,8 +93,8 @@ GroupKey = tuple[int, str, int, int]
 class NamedSet:
     """What one Scan named to buy (#55, ADR-0025), per unit the most it named for each Item
     Key: a Flip to Sell or Vendor row's dearest Listing, a Flip to Craft's Auction House
-    reagent's most to pay, or a Buy Under. A Disenchant source group's Buy Under names
-    every item in the group."""
+    reagent's most to pay, a Flip to Disenchant's dearest Listing of it (#89), or a Buy
+    Under. A Disenchant source group's Buy Under names every item in the group."""
 
     items: Mapping[str, float] = field(default_factory=dict)
     groups: Mapping[GroupKey, float] = field(default_factory=dict)

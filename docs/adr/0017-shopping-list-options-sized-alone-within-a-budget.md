@@ -58,3 +58,17 @@ Not changed: how each option is sized (profit per gold within the Budget), the S
 ## Amendment: the fold runs on the gold left once a row is marked Bought (#97)
 
 Options are still sized alone, so buying one doesn't re-size the rest, but the player's gold does go down. Once the player marks a buy-side row **Bought** (right-click in the Recommendation Table), the Shopping List and Flips to Craft tabs fold the options that cost more than the **gold left**: the lesser of the Budget less what the marks spent and the gold on hand (all the gold on hand with no Budget set). A manual mark spends the row's Cost. The fold only hides options, never re-sizes one, and never hides a marked row. With nothing marked it's the Budget, as before. Re-sizing is still the next Brain run's job.
+
+## Amendment: Flips to Disenchant: one option per Disenchant source group, own tab (#89)
+
+A **Flip to Disenchant** buys other players' Listings of a Disenchant source group's items on the current Scan, Disenchants them, and takes the mats' way out. It is sized alone within the Budget like any option, and nothing else assumes it bought.
+
+**Per group, not per item.** Every item in a group yields the same expected mats, so buying five of one group fills the same mats' Sell room. Sized apart, each item's option would count on room the others take. One greedy loop per group, like a recipe's Flips to Craft: take the cheapest Listing left, value one more Disenchant's expected mats at the margin (held mats take the room first, as in ADR-0018, then the option's own earlier Disenchants), and buy it if that, less the effort of buying a unit that doesn't stack, clears the Flip margin on its buyout and fits the gold left. Stop at the first Listing that doesn't. The Disenchanter is the group's: a Character whose skill covers its highest item level. With none, there's no option.
+
+**Only where Disenchant is best.** A Listing is a candidate only if Disenchant is its item's best way out for one unit. Otherwise the tab would show a worse alternative to a Flip to Sell or Vendor of the same Listing, and the two would compete for the same buy.
+
+**No Craft chaining.** A mat that feeds a Craft is valued by its way out, which already gives it the Craft's credit, with the Flip margin charged once, as in a Buy Under. The option never buys the Craft's other reagents: once the mats are held, the Holdings Craft Action takes over. One gap: a Craft way's room doesn't shrink as the option's own Disenchants add mats, so a big option can overcount it.
+
+**Output.** The rows are cut by Profit to `disenchant_list_rows` (10) and merged into the one `shopping` list, most profit first, as Flips to Craft are (#87). A row's `disenchant` field (its group and the Listings it buys) marks it, as `buys` marks a craft row. The Addon shows them in a **Flips to Disenchant** tab after Flips to Craft, labelled by group, with Way out, Listings, Profit and Cost, and the Listings bought in the tooltip. It folds over the Budget like the others. #55's named set names each Item Key it bought, up to its dearest Listing of that Item Key, but not the group, whose Buy Under names it at the standing price.
+
+**Replay.** It takes a Flip to Disenchant like any option, in profit order while the gold lasts, and skips one that buys or makes an Item Key an option already taken does (its expected mats count as made). Its units are held to the horizon, valued at their Best Exit Value, which is their Disenchant worth then. It gets no Flip Grade: only Flips to Sell are graded.

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
+from brain.disenchant import Group
 from brain.grades_file import freeze_named
 from brain.history import (
     Market,
@@ -15,8 +16,18 @@ from brain.history import (
 )
 from brain.lots import NamedSet
 from brain.predictions import Prediction
-from brain.recommend import Action, CraftOutput, recommend_market
-from brain.replay import Policy, db_market, db_min_buyout, replay
+from brain.recommend import (
+    Action,
+    CraftOutput,
+    DisenchantFlip,
+    ListingBuy,
+    MarketRecommendations,
+    MatYield,
+    ReagentBuy,
+    Row,
+    recommend_market,
+)
+from brain.replay import Policy, _brain, _taken, db_market, db_min_buyout, replay
 
 T0 = 1_790_000_000
 HOUR = 3600
@@ -712,3 +723,48 @@ def test_the_brain_is_replayed_without_the_beta_sell_rate_only_when_it_is_on(db)
     assert on.graded[Policy.BRAIN_WITHOUT_BETA_SELL_RATE] == 0
     assert on.graded[Policy.BRAIN] != 0
     assert Policy.BRAIN_WITHOUT_BETA_SELL_RATE not in off.graded
+
+
+GREENS = Group(2, "armor", 16, 20, ())
+DUST_KEY = "10940"
+
+
+def flip_to_disenchant(profit=500):
+    """A Flip to Disenchant of 2 Green Chests (9999) and another green (9998)."""
+    flip = DisenchantFlip(
+        GREENS, (ListingBuy("9999", 100), ListingBuy("9998", 150), ListingBuy("9999", 300))
+    )
+    return Row(
+        "",
+        Action.DISENCHANT,
+        3,
+        price=300,
+        profit=profit,
+        cost=550,
+        character="Bob",
+        mats=(MatYield(DUST_KEY, 5.625),),
+        listings=3,
+        disenchant=flip,
+    )
+
+
+def test_a_taken_flip_to_disenchant_blocks_later_options_on_its_items_or_mats():
+    dust_craft = Row(DUST_KEY, Action.CRAFT, 1, profit=300, cost=50, buys=(ReagentBuy("2", 1, 50),))
+    other_green = Row("9998", Action.SELL, 1, price=160, profit=200, cost=160)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=10)
+    m = MarketRecommendations(
+        MARKET, T0, 10000, shopping_list=[flip_to_disenchant(), dust_craft, other_green, linen]
+    )
+
+    # A Flip to Disenchant isn't one of the Flips to Sell and Vendor the row cap counts.
+    shopping, _ = _taken(m, flip_rows=2)
+
+    assert shopping == [flip_to_disenchant(), linen]
+
+
+def test_a_taken_flip_to_disenchants_units_are_kept_for_their_best_exit_value():
+    m = MarketRecommendations(MARKET, T0, 10000, shopping_list=[flip_to_disenchant()])
+
+    moves = _brain(m, {}, flip_rows=50)
+
+    assert (moves.spent, dict(moves.kept)) == (550, {"9999": 2, "9998": 1})

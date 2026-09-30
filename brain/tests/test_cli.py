@@ -1233,6 +1233,44 @@ def test_recommend_prints_the_disenchant_buy_unders(tmp_path):
     assert ["Green armor ilvl 16-20", "18s 12c", "Disenchant (Bob)", "no limit", seen] in lines
 
 
+def test_recommend_prints_a_flip_to_disenchant_by_its_group(tmp_path):
+    # As above, with 1g to spend: the mats' 2675 less the 5s effort nets 2175 on the 10s
+    # Listing, 11s 75c profit.
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    scan = {
+        "requestedAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "faction": "Alliance",
+        "character": "Kash-Patel",
+        "listings": [{"itemString": "item:9999", "quantity": 1, "buyout": 1000, "timeLeft": 4}],
+        "itemInfo": {
+            9999: {"itemLevel": 18, "quality": 2, "classID": 4, "equipLoc": "INVTYPE_CHEST"}
+        },
+    }
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Bob",
+        "faction": "Alliance",
+        "money": 10000,
+        "bags": [],
+        "vendorPrices": {9999: 50, 10940: 1000, 10939: 2000, 10978: 4000},
+        "professions": {
+            333: {"readAt": 1_790_000_000, "professionID": 333, "skillLevel": 90, "recipes": []}
+        },
+        "professionList": [{"professionID": 333}],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, [scan], Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in run_recommend(config).splitlines()]
+
+    assert ["Green armor ilvl 16-20", "Disenchant", "1", "10s 00c", "11s 75c"] in [
+        line[:5] for line in lines
+    ]
+
+
 def test_recommend_why_not_leaves_the_checks_after_the_first_failed_one_unreached(tmp_path):
     text = run_recommend(_near_misses(tmp_path), why_not="2996")
 

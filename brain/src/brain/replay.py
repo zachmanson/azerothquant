@@ -304,8 +304,9 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
     held too (their Best Exit Value at the horizon is their mats', #76), and the Shopping
     List options and Prediction buys the player would take (`_taken`). A Flip to Craft's
     output is posted and vendored as it was valued; a Craft Action's is in the Holdings
-    rows. Held units a taken Flip to Craft uses come off the least profitable Holdings
-    rows of their Item Key."""
+    rows. A Flip to Disenchant's units are held on to, like a Disenchant row's (#89). Held
+    units a taken Flip to Craft uses come off the least profitable Holdings rows of their
+    Item Key."""
     moves = _Moves()
     shopping, prediction_buys = _taken(m, flip_rows)
     used: Counter[str] = Counter()
@@ -336,6 +337,8 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
                 moves.posts.append(_Post(r.item_key, r.made.selling, r.made.post_at))
             vendor_price = vendor.get(item_id_of(r.item_key), 0)
             moves.vendored += (r.made.units - r.made.selling) * vendor_price
+        elif r.disenchant is not None:
+            moves.kept.update(b.item_key for b in r.disenchant.buys)
     for r in prediction_buys:
         moves.spent += r.cost
         moves.kept[r.item_key] += r.quantity
@@ -345,18 +348,21 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
 def _taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], list[Row]]:
     """The Shopping List options and Prediction buys a player would take, since each option
     was sized as if the only buy (#86): most profit first while the gold (or the Budget)
-    lasts, skipping any that buys, uses or makes an Item Key one already taken does. Only
-    the top `flip_rows` Flips to Sell and to Vendor by Profit are options, so the rows
-    kept for Per click, Per day or ROI (#98) leave the replay as it was. The Prediction
-    buys then get what's left, in order."""
+    lasts, skipping any that buys, uses or makes an Item Key one already taken does (a
+    Flip to Disenchant makes its expected mats, #89). Only the top `flip_rows` Flips to
+    Sell and to Vendor by Profit are options, so the rows kept for Per click, Per day or
+    ROI (#98) leave the replay as it was. The Prediction buys then get what's left, in
+    order."""
     gold = m.spend
     shopping: list[Row] = []
     keys: set[str] = set()
-    flips = [r for r in m.shopping_list if r.action is not Action.CRAFT]
+    flips = [r for r in m.shopping_list if r.action in (Action.SELL, Action.VENDOR)]
     top = {id(r) for r in flips[:flip_rows]}
-    options = [r for r in m.shopping_list if r.action is Action.CRAFT or id(r) in top]
+    options = [
+        r for r in m.shopping_list if r.action not in (Action.SELL, Action.VENDOR) or id(r) in top
+    ]
     for r in options:
-        touched = {r.item_key, *(b.item_key for b in r.buys), *(u.item_key for u in r.uses)}
+        touched = _touched(r)
         if r.cost is None or r.cost > gold or touched & keys:
             continue
         shopping.append(r)
@@ -368,6 +374,13 @@ def _taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], list[Ro
             prediction_buys.append(r)
             gold -= r.cost
     return shopping, prediction_buys
+
+
+def _touched(r: Row) -> set[str]:
+    """The Item Keys a Shopping List option buys, uses or makes."""
+    if r.disenchant is not None:
+        return {*(b.item_key for b in r.disenchant.buys), *(m.item_key for m in r.mats)}
+    return {r.item_key, *(b.item_key for b in r.buys), *(u.item_key for u in r.uses)}
 
 
 def _exit(

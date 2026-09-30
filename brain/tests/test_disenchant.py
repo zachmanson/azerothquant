@@ -17,7 +17,15 @@ from brain.history import (
 )
 from brain.lots import start_of
 from brain.predictions import Prediction
-from brain.recommend import Action, BuyUnder, MatYield, exit_values, grades, recommend
+from brain.recommend import (
+    Action,
+    BuyUnder,
+    ListingBuy,
+    MatYield,
+    exit_values,
+    grades,
+    recommend,
+)
 
 T0 = 1_790_000_000
 REALM = "Classic Beta PvP"
@@ -595,3 +603,138 @@ def test_a_group_listing_over_its_buy_under_isnt_a_sighting(db):
     buys = buy_unders_of(db, group_scans(other_unit=1813), [enchanter()])
 
     assert [(b.price, b.seen) for b in buys if b.group is not None] == [(1812, 1)]
+
+
+# --- Flip to Disenchant (#89) ---
+
+OTHER_ITEM = "item:9998::::::::20:1490"
+# Dust sells 6 in the horizon, else Vendors for 10. The Essence and the Shard Vendor dear.
+FLIP_PRICES = MAT_PRICES | {10940: 10, 9998: 50}
+# 0.3 x 2000 + 0.05 x 4000 = 800 for the Essence and the Shard, and 1.875 dust at
+# 99 less the 5% cut while it sells, less the 5s effort of buying a green.
+SOLD_DUST_NET = 800 + 1.875 * 99 * 0.95 - 500
+
+
+def flip_scans(*listings):
+    """Dust selling 6 in the horizon (`market_scans`), and in the latest Scan other
+    players' greens of the armor 16-20 group: (item string, unit buyout) each."""
+    scans = market_scans(dust_selling=True)
+    for s in scans:
+        s["itemInfo"][9998] = info(20, equip_loc="INVTYPE_LEGS")
+    scans[-1]["listings"] += [
+        {"itemString": item, "quantity": 1, "buyout": unit, "timeLeft": 4}
+        for item, unit in listings
+    ]
+    return scans
+
+
+def flips_to_disenchant(db, scans, reads, config=RECOMMEND_CONFIG):
+    """The Flips to Disenchant, with 1g to spend unless the first Read has gold."""
+    reads[0]["money"] = reads[0]["money"] or 10000
+    import_scans(db, scans, Era.BETA, config)
+    import_character_reads(db, reads, Era.BETA, config)
+    [result] = recommend(db, config)
+    return [r for r in result.shopping_list if r.disenchant is not None]
+
+
+def test_a_flip_to_disenchant_buys_a_groups_cheapest_listings_while_the_mats_room_lasts(db):
+    # The first 3 Disenchants' dust all sells (5.625 of 6), so each nets SOLD_DUST_NET and
+    # clears the margin up to 376. The 4th's dust mostly Vendors: 0.375 x 94.05 + 1.5 x 10
+    # + 800 - 500 = 350.27, which only clears up to 250, so the 320 Listing stops it.
+    listed = [(GREEN_ITEM, 300), (OTHER_ITEM, 150), (GREEN_ITEM, 100), (OTHER_ITEM, 320)]
+
+    [row] = flips_to_disenchant(db, flip_scans(*listed), [enchanter(vendor_prices=FLIP_PRICES)])
+
+    assert row.disenchant.buys == (
+        ListingBuy(GREEN, 100),
+        ListingBuy(OTHER, 150),
+        ListingBuy(GREEN, 300),
+    )
+    assert (row.action, row.character, row.quantity, row.listings, row.cost) == (
+        Action.DISENCHANT,
+        "Bob",
+        3,
+        3,
+        550,
+    )
+    assert row.profit == pytest.approx(3 * SOLD_DUST_NET - 550)
+    assert mats_of(row) == tuple(MatYield(m.item_key, round(3 * m.quantity, 6)) for m in GREEN_MATS)
+
+
+CHEAP_GREENS = [(GREEN_ITEM, 100), (OTHER_ITEM, 150), (GREEN_ITEM, 300)]
+
+
+def test_a_listing_whose_item_has_a_better_way_out_than_disenchant_isnt_bought(db):
+    # The other piece Vendors for 20s, more than its mats bring: that's a Flip to Vendor.
+    reads = [enchanter(vendor_prices=FLIP_PRICES | {9998: 2000})]
+
+    [row] = flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), reads)
+
+    assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(GREEN, 300))
+
+
+DUST_LINK = "|cffffffff|Hitem:10940::::::::20:1490:::::::::|h[Strange Dust]|h|r"
+
+
+def test_held_mats_take_the_mats_room_first(db):
+    # 6 held dust take every sale slot, so each Disenchant's dust Vendors: 800 + 18.75
+    # - 500 = 318.75, which clears up to 218.
+    reader = enchanter(vendor_prices=FLIP_PRICES)
+    reader["bags"] = [{"bag": 0, "slot": 1, "link": DUST_LINK, "count": 6, "isBound": False}]
+
+    [row] = flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), [reader])
+
+    assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(OTHER, 150))
+    assert row.profit == pytest.approx(2 * 318.75 - 250)
+
+
+def test_no_flip_to_disenchant_without_a_character_who_can_disenchant(db):
+    reader = read("Bob", T0, {})
+    reader["vendorPrices"] = FLIP_PRICES
+
+    assert flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), [reader]) == []
+
+
+def test_the_budget_cuts_a_flip_to_disenchant(db):
+    reader = enchanter(vendor_prices=FLIP_PRICES)
+    reader["budget"] = 299
+
+    [row] = flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), [reader])
+
+    assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(OTHER, 150))
+
+
+def test_a_mat_that_feeds_a_craft_brings_the_crafts_credit_to_a_flip_to_disenchant(db):
+    # 2 Greater Magic Essence make a wand that Vendors for 1g: 5000 per Essence, so one
+    # Disenchant nets 1.875 x 94.05 + 0.3 x 5000 + 200 - 500, which clears a 700 Listing.
+    wand = {
+        "recipeID": 1,
+        "outputItemID": 7777,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": GREATER_MAGIC, "quantity": 2, "reagentType": 1}],
+    }
+    reads = [enchanter(vendor_prices=FLIP_PRICES | {7777: 10000}, recipes=[wand])]
+
+    [row] = flips_to_disenchant(db, flip_scans((GREEN_ITEM, 700)), reads)
+
+    assert row.profit == pytest.approx(1.875 * 99 * 0.95 + 0.3 * 5000 + 200 - 500 - 700)
+
+
+WEAPON_ITEM = "item:9996::::::::20:1490"
+
+
+def test_flips_to_disenchant_are_cut_to_the_most_profitable(db):
+    # A green weapon's group is apart from the armor's. It yields mostly Essence, which
+    # Vendors dear here, so its one Listing makes more than the armor's three.
+    scans = flip_scans(*CHEAP_GREENS, (WEAPON_ITEM, 300))
+    for s in scans:
+        s["itemInfo"][9996] = info(18, class_id=WEAPON, equip_loc="INVTYPE_WEAPON")
+    config = replace(RECOMMEND_CONFIG, disenchant_list_rows=1)
+
+    both = flips_to_disenchant(db, scans, [enchanter(vendor_prices=FLIP_PRICES)])
+    assert [r.disenchant.group.kind for r in both] == ["weapon", "armor"]
+    [kept] = recommend(db, config)[0].shopping_list
+
+    assert kept == both[0]

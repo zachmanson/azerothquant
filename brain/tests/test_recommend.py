@@ -26,7 +26,9 @@ from brain.recommend import (
     ChainNode,
     CharacterHolding,
     Check,
+    DisenchantFlip,
     Grade,
+    ListingBuy,
     MarketRecommendations,
     NodeKind,
     ReagentBuy,
@@ -4156,4 +4158,24 @@ def test_a_scan_names_its_flips_their_auction_house_reagents_and_its_buy_unders(
 
     assert named_set(m) == NamedSet(
         items={"2589": 45, "2592": 35}, groups={(2, "armor", 21, 25): 300}
+    )
+
+
+def test_a_flip_to_disenchant_names_each_item_it_buys_up_to_its_dearest_listing():
+    # Not the group: its Buy Under names that, at the standing price, so a dearer unit of
+    # another item in it isn't named.
+    greens = Group(2, "armor", 16, 20, ())
+    flip = DisenchantFlip(
+        greens, (ListingBuy("9999", 100), ListingBuy("9998", 150), ListingBuy("9999", 300))
+    )
+    m = MarketRecommendations(
+        MARKET,
+        T0,
+        GOLD,
+        shopping_list=[Row("", Action.DISENCHANT, 3, price=300, disenchant=flip)],
+        buy_under=[BuyUnder(None, 200, Action.DISENCHANT, None, 3, 7, group=greens)],
+    )
+
+    assert named_set(m) == NamedSet(
+        items={"9999": 300, "9998": 150}, groups={(2, "armor", 16, 20): 200}
     )

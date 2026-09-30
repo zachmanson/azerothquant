@@ -92,6 +92,7 @@ DEFAULT_CRAFT_CHAIN_DEPTH = 3
 DEFAULT_DISENCHANT_CHECK_MIN_RESULTS = 20
 DEFAULT_SHOPPING_LIST_ROWS = 50
 DEFAULT_CRAFT_LIST_ROWS = 25
+DEFAULT_DISENCHANT_LIST_ROWS = 10
 DEFAULT_BUY_UNDER_MIN_SIGHTINGS = 1
 DEFAULT_BUY_UNDER_WINDOW_DAYS = 7
 # Days the Beta Prior column shows for, from a Market's first Scan (#90).
@@ -187,6 +188,8 @@ class Config:
     shopping_list_rows: int = DEFAULT_SHOPPING_LIST_ROWS
     # How many Flips to Craft it shows besides, most profit first, in their own tab (#87).
     craft_list_rows: int = DEFAULT_CRAFT_LIST_ROWS
+    # And how many Flips to Disenchant, most profit first, in theirs (#89).
+    disenchant_list_rows: int = DEFAULT_DISENCHANT_LIST_ROWS
     # A Buy Under shows only once this many distinct Scans in the last
     # buy_under_window_days saw another player's Listing at or under it (#88).
     buy_under_min_sightings: int = DEFAULT_BUY_UNDER_MIN_SIGHTINGS
@@ -385,7 +388,12 @@ def load_config(path: Path) -> Config:
         )
     shopping_rows = raw.get("shopping_list_rows", DEFAULT_SHOPPING_LIST_ROWS)
     craft_rows = raw.get("craft_list_rows", DEFAULT_CRAFT_LIST_ROWS)
-    for key, rows in (("shopping_list_rows", shopping_rows), ("craft_list_rows", craft_rows)):
+    disenchant_rows = raw.get("disenchant_list_rows", DEFAULT_DISENCHANT_LIST_ROWS)
+    for key, rows in (
+        ("shopping_list_rows", shopping_rows),
+        ("craft_list_rows", craft_rows),
+        ("disenchant_list_rows", disenchant_rows),
+    ):
         if isinstance(rows, bool) or not isinstance(rows, int) or rows < 1:
             raise ConfigError(
                 f"{path}: {key} must be a whole number of rows of at least 1, got {rows!r}"
@@ -469,6 +477,7 @@ def load_config(path: Path) -> Config:
         disenchant_check_min_results=min_results,
         shopping_list_rows=shopping_rows,
         craft_list_rows=craft_rows,
+        disenchant_list_rows=disenchant_rows,
         buy_under_min_sightings=sightings,
         buy_under_window_days=window_days,
         beta_column_days=beta_days,

@@ -45,6 +45,8 @@ local COLUMN_WIDTHS = {
   -- Per click, Per day and ROI after Profit (#98).
   ["Shopping List"] = { 160, 45, 40, 80, 80, 90, 80, 80, 50, 80 },
   ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95 },
+  -- Item, Way out, Listings, Profit, then Cost. It never has a Beta column (#89).
+  ["Flips to Disenchant"] = { 200, 330, 70, 110 },
   ["Prediction buys"] = { 230, 150, 50, 120 },
   ["Buy Under"] = { 230, 90, 250, 70, 110 },
 }
@@ -646,7 +648,9 @@ end
 
 -- Bottom tabs, one per section, in the order RecommendationTable.build gives them. A click
 -- is remembered, so /aq recs reopens that tab.
-local TAB_TITLES = { "Holdings", "Shopping List", "Flips to Craft", "Prediction buys", "Buy Under" }
+local TAB_TITLES = {
+  "Holdings", "Shopping List", "Flips to Craft", "Flips to Disenchant", "Prediction buys", "Buy Under",
+}
 
 local function createTabs()
   for i, title in ipairs(TAB_TITLES) do
@@ -703,7 +707,7 @@ local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Pred
   .. "Blank for all your gold. Options over it hide now; Reload to re-size the rest."
 
 local DAYS_TIP = "Most days a unit you buy to Sell may take to sell: caps Flips to Sell, "
-  .. "Flips to Craft and Buy Unders. Blank for the Sale Horizon, never more than it. "
+  .. "Flips to Craft and to Disenchant, and Buy Unders. Blank for the Sale Horizon, never more than it. "
   .. "Reload to re-size."
 
 -- A box left of `anchor` for one per-Market setting. Enter saves it (blank clears it);

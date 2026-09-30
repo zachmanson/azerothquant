@@ -14,6 +14,8 @@ from brain.recommend import (
     BuyUnder,
     ChainNode,
     CharacterHolding,
+    DisenchantFlip,
+    ListingBuy,
     MarketRecommendations,
     MatYield,
     NodeKind,
@@ -756,3 +758,47 @@ def test_a_merged_prediction_buy_is_partly_from_beta_if_any_of_its_rooms_was():
     (row,) = _spend_on_predictions(buys, 100000, _Caps(100000, Config(installs=())))
 
     assert _row(row)["roomFromBeta"] is True
+
+
+def flip_to_disenchant():
+    group = Group(quality=2, kind="armor", min_level=16, max_level=20, mats=())
+    return Row(
+        "",
+        Action.DISENCHANT,
+        2,
+        price=300,
+        profit=400,
+        cost=400,
+        character="Bob",
+        mats=(MatYield("10940", 3.75),),
+        listings=2,
+        disenchant=DisenchantFlip(group, (ListingBuy("9999", 100), ListingBuy("9998", 300))),
+    )
+
+
+def test_a_flip_to_disenchant_row_carries_its_group_disenchanter_mats_and_listings():
+    out = _row(flip_to_disenchant())
+
+    assert "itemKey" not in out
+    assert out["disenchant"] == {
+        "group": {"quality": 2, "class": "armor", "minLevel": 16, "maxLevel": 20},
+        "disenchanter": "Bob",
+        "mats": [{"itemKey": "10940", "quantity": 3.75}],
+        "buys": [{"itemKey": "9999", "price": 100}, {"itemKey": "9998", "price": 300}],
+    }
+
+
+def test_a_real_lua_reads_a_flip_to_disenchant(tmp_path, lua):
+    m = MarketRecommendations(MARKET, 1790000000, 0, shopping_list=[flip_to_disenchant()])
+    file = tmp_path / FILE_NAME
+    file.write_text(render({}, markets=[m]), encoding="utf-8")
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local d = r.recommendations["Quel\'Thalas"].Horde.shoppingList[1].disenchant '
+        "print(d.group.class, d.group.minLevel, d.disenchanter, d.mats[1].itemKey, "
+        "d.buys[2].itemKey, d.buys[2].price)",
+    )
+
+    assert out.splitlines() == ["armor	16	Bob	10940	9998	300"]

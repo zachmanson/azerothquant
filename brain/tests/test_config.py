@@ -271,6 +271,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.craft_chain_depth == 3
     assert config.shopping_list_rows == 50
     assert config.craft_list_rows == 25
+    assert config.disenchant_list_rows == 10
     assert config.roi_hint == 0.2
     assert config.non_stacking_effort_copper == 500
     assert config.ah_deposit_share == 0.6
@@ -300,6 +301,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "craft_chain_depth = 1\n"
         "shopping_list_rows = 10\n"
         "craft_list_rows = 5\n"
+        "disenchant_list_rows = 3\n"
         "roi_hint = 0.5\n"
         "non_stacking_effort_copper = 0\n"
         "ah_deposit_share = 0.15\n"
@@ -328,6 +330,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.craft_chain_depth == 1
     assert config.shopping_list_rows == 10
     assert config.craft_list_rows == 5
+    assert config.disenchant_list_rows == 3
     assert config.roi_hint == 0.5
     assert config.non_stacking_effort_copper == 0
     assert config.ah_deposit_share == 0.15
@@ -384,6 +387,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("shopping_list_rows", "2.5"),
         ("craft_list_rows", "0"),
         ("craft_list_rows", "2.5"),
+        ("disenchant_list_rows", "0"),
+        ("disenchant_list_rows", "2.5"),
         ("roi_hint", '"0.2"'),
         ("roi_hint", "true"),
         ("roi_hint", "-0.1"),

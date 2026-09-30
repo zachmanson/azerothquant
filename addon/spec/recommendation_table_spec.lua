@@ -229,7 +229,7 @@ describe("RecommendationTable.build", function()
 
   it("says when a Prediction buy's room came partly from the Beta Sell Rate (#110)", function()
     local function tooltip(r)
-      return build(entry({ predictionBuys = { r } }), AS_OF, names).sections[4].rows[1].tooltip
+      return build(entry({ predictionBuys = { r } }), AS_OF, names).sections[5].rows[1].tooltip
     end
     local buy = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens" }
     local fromBeta = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens", roomFromBeta = true }
@@ -446,6 +446,49 @@ describe("RecommendationTable.build", function()
     assert.are.equal("1 over the Budget (Reload to re-size)", crafts.more)
   end)
 
+  it("puts Flips to Disenchant in their own tab after Flips to Craft, by group, each Listing in the tooltip (#89)", function()
+    local function flipToDisenchant(cost)
+      return {
+        action = "Disenchant", quantity = 2, price = 300, profit = 400.0, cost = cost, character = "Bob", listings = 2,
+        mats = { { itemKey = "10940", quantity = 3.75 } },
+        disenchant = {
+          group = { quality = 2, class = "armor", minLevel = 16, maxLevel = 20 },
+          disenchanter = "Bob",
+          mats = { { itemKey = "10940", quantity = 3.75 } },
+          buys = { { itemKey = "9999", price = 100 }, { itemKey = "9998", price = 300 } },
+        },
+      }
+    end
+    local greens = {
+      ["item:9999"] = "Green Chest",
+      ["item:9998"] = "Green Legs",
+      ["item:10940"] = "Strange Dust",
+    }
+    local view = build(
+      entry({ shoppingList = { flipToDisenchant(400), flipToDisenchant(3000) } }),
+      AS_OF,
+      function(itemString)
+        return greens[itemString]
+      end,
+      nil,
+      2000
+    )
+
+    local shopping, disenchants = view.sections[2], view.sections[4]
+    assert.are.equal("Shopping List (0)", shopping.tab)
+    assert.are.equal("Flips to Disenchant", disenchants.title)
+    assert.are.same({ "Item", "Way out", "Listings", "Profit", "Cost" }, disenchants.columns)
+    assert.are.same(
+      { "Green armor ilvl 16-20", "Disenchant (Bob) -> Strange Dust", "2", "4s", "4s" },
+      disenchants.rows[1].cells
+    )
+    assert.are.same(
+      { "Buy Green Chest @ 1s", "Buy Green Legs @ 3s", "Expect 3.75 Strange Dust" },
+      disenchants.rows[1].tooltip
+    )
+    assert.are.equal("1 over the Budget (Reload to re-size)", disenchants.more)
+  end)
+
   it("doesn't call a tab empty when its options are only over the Budget (#93)", function()
     local dear = flipToCraft()
     dear.cost = 3000
@@ -560,13 +603,21 @@ describe("RecommendationTable.build", function()
     }))
 
     assert.are.same(
-      { "Holdings (1)", "Shopping List (0)", "Flips to Craft (0)", "Prediction buys (0)", "Buy Under (0)" },
+      {
+        "Holdings (1)",
+        "Shopping List (0)",
+        "Flips to Craft (0)",
+        "Flips to Disenchant (0)",
+        "Prediction buys (0)",
+        "Buy Under (0)",
+      },
       {
         view.sections[1].tab,
         view.sections[2].tab,
         view.sections[3].tab,
         view.sections[4].tab,
         view.sections[5].tab,
+        view.sections[6].tab,
       }
     )
   end)
@@ -584,8 +635,9 @@ describe("RecommendationTable.build", function()
     assert.is_nil(view.sections[2].empty)
     assert.are.equal("Nothing on the Shopping List right now", build(entry()).sections[2].empty)
     assert.are.equal("No Flips to Craft right now", view.sections[3].empty)
-    assert.are.equal("No Prediction buys right now", view.sections[4].empty)
-    assert.are.equal("No Buy Unders right now", view.sections[5].empty)
+    assert.are.equal("No Flips to Disenchant right now", view.sections[4].empty)
+    assert.are.equal("No Prediction buys right now", view.sections[5].empty)
+    assert.are.equal("No Buy Unders right now", view.sections[6].empty)
   end)
 
   it("shows the Shopping List under the Holdings, with Buy as a Flip to Sell's Action", function()
@@ -707,7 +759,7 @@ describe("RecommendationTable.build", function()
       },
     }))
 
-    local buys = view.sections[4]
+    local buys = view.sections[5]
     assert.are.equal("Prediction buys", buys.title)
     assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss" }, buys.columns)
     assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s" }, buys.rows[1].cells)
@@ -720,7 +772,7 @@ describe("RecommendationTable.build", function()
       },
     }))
 
-    local buyUnder = view.sections[5]
+    local buyUnder = view.sections[6]
     assert.are.equal("Buy Under", buyUnder.title)
     assert.are.same({ "Item", "Buy Under", "Way out", "Units", "Seen", "Note" }, buyUnder.columns)
     assert.are.same({ "item:2589", "21s", "Sell", "40", "14 Scans / 7d", "listed now" }, buyUnder.rows[1].cells)
@@ -734,7 +786,7 @@ describe("RecommendationTable.build", function()
       },
     }), AS_OF, nil, nil, 5000)
 
-    local buyUnder = view.sections[5]
+    local buyUnder = view.sections[6]
     assert.are.same({ "item:1", "item:2" }, { buyUnder.rows[1].cells[1], buyUnder.rows[2].cells[1] })
     assert.is_nil(buyUnder.more)
   end)
@@ -753,7 +805,7 @@ describe("RecommendationTable.build", function()
 
     assert.are.same(
       { "Linen Cloth", "90c", "Craft Bolt of Linen Cloth (Kash-Patel)", "no limit", "1 Scan / 7d", "" },
-      view.sections[5].rows[1].cells
+      view.sections[6].rows[1].cells
     )
   end)
 
@@ -771,7 +823,7 @@ describe("RecommendationTable.build", function()
       return ({ ["item:10940"] = "Strange Dust", ["item:10939"] = "Greater Magic Essence" })[itemString]
     end)
 
-    local rows = view.sections[5].rows
+    local rows = view.sections[6].rows
     local way = "Disenchant (Bob) -> Strange Dust, Greater Magic Essence"
     assert.are.same({ "Green weapons ilvl 16-20", "18s 12c", way, "3", "2 Scans / 7d", "" }, rows[1].cells)
     assert.is_nil(rows[1].itemString)
@@ -845,7 +897,7 @@ describe("the Beta Prior column (#90)", function()
     assert.are.same({}, row.tooltip)
   end)
 
-  it("shows on every tab, keyed on the row's Item Key (a Flip to Craft's output)", function()
+  it("shows on every tab with Item Keys, keyed on the row's Item Key (a Flip to Craft's output)", function()
     local flip = { itemKey = "2589", action = "Sell", quantity = 1, price = 10, postAt = 20, profit = 9, cost = 10, listings = 1, posts = 1, days = 1 }
     local craft = flipToCraft()
     craft.itemKey = "4306"
@@ -856,7 +908,9 @@ describe("the Beta Prior column (#90)", function()
       beta = beta(),
     }))
 
-    local shopping, crafts, predictions, buyUnder = unpack(view.sections, 2, 5)
+    -- Not the Flips to Disenchant: a group has no one Item Key (#89).
+    local shopping, crafts, disenchants, predictions, buyUnder = unpack(view.sections, 2, 6)
+    assert.are.same({ "Item", "Way out", "Listings", "Profit", "Cost" }, disenchants.columns)
     assert.are.equal("Beta", shopping.columns[11])
     assert.are.equal(GREY .. "2s 50c|r", shopping.rows[1].cells[11])
     assert.are.equal("Beta", crafts.columns[8])
@@ -935,7 +989,7 @@ describe("rows marked Bought (#97)", function()
     assert.are.equal(0, #view.sections[3].rows)
   end)
 
-  it("marks Flips to Craft and Prediction buys, but not Holdings or Buy Unders", function()
+  it("marks Flips to Craft, Flips to Disenchant and Prediction buys, but not Holdings or Buy Unders", function()
     local hold = { itemKey = "2770", action = "Hold", quantity = 5, price = 90, cost = 450, maxLoss = 200, prediction = "Phase 2" }
     local held = { itemKey = "2770", action = "Hold", quantity = 5, price = 90 }
     local under = { itemKey = "2770", price = 80, way = "Hold", units = 5, seen = 3, windowDays = 7 }
@@ -947,14 +1001,14 @@ describe("rows marked Bought (#97)", function()
     assert.is_nil(view.sections[1].rows[1].bought)
     assert.is_true(view.sections[3].rows[1].bought)
     assert.are.equal("Bought", view.sections[3].rows[1].cells[8])
-    assert.is_true(view.sections[4].rows[1].bought)
-    assert.are.equal("Phase 2", view.sections[4].rows[1].cells[2])
-    assert.is_nil(view.sections[5].rows[1].bought)
+    assert.is_true(view.sections[5].rows[1].bought)
+    assert.are.equal("Phase 2", view.sections[5].rows[1].cells[2])
+    assert.is_nil(view.sections[6].rows[1].bought)
     local markable = {}
     for i, section in ipairs(view.sections) do
       markable[i] = section.markable or false
     end
-    assert.are.same({ false, true, true, true, false }, markable)
+    assert.are.same({ false, true, true, true, true, false }, markable)
   end)
 
   it("keeps a marked row on show even when it's worth nothing now", function()
@@ -1081,7 +1135,7 @@ describe("sorting the Recommendation Table", function()
     end
     local view = build(entry({ predictionBuys = { buy("1", 5000), buy("2", 40), buy("3", 900) } }))
 
-    local buys = view.sections[4]
+    local buys = view.sections[5]
     assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
     assert.are.same({ column = 5, descending = false }, buys.sort)
   end)
@@ -1191,7 +1245,7 @@ describe("RecommendationTable.nextSort", function()
   end)
 
   it("sorts a Buy Under's way out A to Z on its first click, and its units largest first (#88)", function()
-    local buyUnder = build(entry()).sections[5] -- Item, Buy Under, Way out, Units, Seen, Note
+    local buyUnder = build(entry()).sections[6] -- Item, Buy Under, Way out, Units, Seen, Note
     assert.are.same({ column = 3, descending = false }, RecommendationTable.nextSort(buyUnder, buyUnder.sort, 3))
     assert.are.same({ column = 4, descending = true }, RecommendationTable.nextSort(buyUnder, buyUnder.sort, 4))
   end)

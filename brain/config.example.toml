@@ -107,6 +107,9 @@
 # Flips to Craft are cut apart, to craft_list_rows, and shown in their own Flips to Craft
 # tab (#87). Defaults to 25.
 # craft_list_rows = 25
+# Flips to Disenchant likewise, to disenchant_list_rows, in their own Flips to Disenchant
+# tab (#89). Defaults to 10.
+# disenchant_list_rows = 10
 
 # Optional: a Buy Under (the most a unit is worth paying on the Auction House, from its
 # best way out less the Flip margin) shows only once at least buy_under_min_sightings

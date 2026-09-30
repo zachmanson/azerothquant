@@ -29,7 +29,7 @@ from pathlib import Path
 
 from brain.beta_prior import BetaPrior
 from brain.config import Install
-from brain.disenchant import DisenchantTable, load_table
+from brain.disenchant import DisenchantTable, Group, load_table
 from brain.history import (
     Market,
     latest_character_read_times,
@@ -42,6 +42,7 @@ from brain.recommend import (
     Blocked,
     BuyUnder,
     ChainNode,
+    DisenchantFlip,
     MarketRecommendations,
     ReagentBuy,
     Row,
@@ -90,6 +91,9 @@ _HEADER = (
     "-- Disenchant as mats = { { itemKey, quantity } }. A Disenchant source group's entry\n"
     '-- has no itemKey but group = { quality, class = "armor"|"weapon", minLevel, maxLevel }:\n'
     "-- the most to pay for any item in it that can be Disenchanted.\n"
+    "-- A Flip to Disenchant's row (action Disenchant on the shoppingList, no itemKey) has\n"
+    "-- disenchant = { group, disenchanter, mats, buys = { { itemKey, price } } }: the\n"
+    "-- group it buys, as a Buy Under's, and the Listings it buys, cheapest first.\n"
     "-- disenchantExcluded is what can't be Disenchanted, whatever its group: itemIDs and\n"
     "-- equipLocs, each a set.\n"
 )
@@ -230,7 +234,22 @@ def _row(row: Row) -> dict[str, object]:
         ]
     if row.chain:
         out["chain"] = [_node(n) for n in row.chain]
+    if row.disenchant:
+        out["disenchant"] = _disenchant(row.disenchant, row)
     return out
+
+
+def _disenchant(flip: DisenchantFlip, row: Row) -> dict[str, object]:
+    return {
+        "group": _group(flip.group),
+        "disenchanter": row.character,
+        "mats": [{"itemKey": m.item_key, "quantity": m.quantity} for m in row.mats],
+        "buys": [{"itemKey": b.item_key, "price": b.price} for b in flip.buys],
+    }
+
+
+def _group(g: Group) -> dict[str, object]:
+    return {"quality": g.quality, "class": g.kind, "minLevel": g.min_level, "maxLevel": g.max_level}
 
 
 _NODE_KEYS = {
@@ -278,13 +297,7 @@ def _buy_under(buy: BuyUnder) -> dict[str, object]:
     if buy.mats:
         out["mats"] = [{"itemKey": m.item_key, "quantity": m.quantity} for m in buy.mats]
     if buy.group:
-        g = buy.group
-        out["group"] = {
-            "quality": g.quality,
-            "class": g.kind,
-            "minLevel": g.min_level,
-            "maxLevel": g.max_level,
-        }
+        out["group"] = _group(buy.group)
     if buy.listed_now:
         out["listedNow"] = True
     return out

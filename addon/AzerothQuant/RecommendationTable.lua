@@ -75,6 +75,16 @@ local function nameFor(itemKey, nameOf)
   return nameOf(itemString(itemKey)) or ("item:" .. itemKey)
 end
 
+-- A Disenchant's way out, e.g. "Disenchant (Bob) -> Strange Dust, Greater Magic Essence"
+-- (an arrow the game fonts surely have).
+local function disenchantWay(disenchanter, mats, nameOf)
+  local names = {}
+  for _, mat in ipairs(mats or {}) do
+    names[#names + 1] = nameFor(mat.itemKey, nameOf)
+  end
+  return "Disenchant (" .. disenchanter .. ") -> " .. table.concat(names, ", ")
+end
+
 -- A Flip to Craft's reagent buy, e.g. "Buy 12 Linen Cloth @ max 1s 20c". The Brain only
 -- knows names from own Listings, so naming reagents falls to the Addon (ADR-0009).
 local function reagentLine(buy, nameOf)
@@ -155,6 +165,19 @@ function RecommendationTable.matLines(r, nameOf)
   return lines
 end
 
+-- A Flip to Disenchant's Listings to buy by name, cheapest first, then its expected mats
+-- (#89), e.g. "Buy Green Chest @ 1s".
+function RecommendationTable.disenchantLines(r, nameOf)
+  local lines = {}
+  for _, buy in ipairs(r.disenchant.buys) do
+    lines[#lines + 1] = "Buy " .. nameFor(buy.itemKey, nameOf) .. " @ " .. Money.format(buy.price)
+  end
+  for _, line in ipairs(RecommendationTable.matLines(r, nameOf)) do
+    lines[#lines + 1] = line
+  end
+  return lines
+end
+
 -- Which Characters hold an Item Key (#38), one line each in the Brain's order (by name),
 -- e.g. "On Kash-Patel: 12 bags, 30 bank (5 bound)". holders is the entry's held[itemKey].
 function RecommendationTable.holderLines(holders)
@@ -217,12 +240,12 @@ local function roiCell(r)
 end
 
 -- How many units of each Item Key the Holdings hold, which a Paid covers some or all of:
--- every row but a Craft's, whose units are made rather than held, and a Buy Under's, which
--- has none (#88).
+-- every row but a Craft's, whose units are made rather than held, a Buy Under's, which
+-- has none (#88), and a Flip to Disenchant's, which buys a group (#89).
 function RecommendationTable.heldUnits(holdings)
   local held = {}
   for _, r in ipairs(holdings or {}) do
-    if r.quantity and r.action ~= "Craft" then
+    if r.quantity and r.itemKey and r.action ~= "Craft" then
       held[r.itemKey] = (held[r.itemKey] or 0) + r.quantity
     end
   end
@@ -264,6 +287,9 @@ end
 
 -- A row's details. A Craft's list its reagents, since its note only names them by ID.
 local function details(r, nameOf, held, holdersOf)
+  if r.disenchant then
+    return RecommendationTable.disenchantLines(r, nameOf)
+  end
   if r.uses or r.buys then
     return RecommendationTable.reagentLines(r, nameOf, holdersOf)
   end
@@ -386,6 +412,17 @@ local function flipKeys(r, name, cells)
   }
 end
 
+-- A Flip to Disenchant's cells (#89): its group, how its mats get out, the Listings it
+-- buys, its Profit and its Cost.
+local function disenchantCells(r, name, nameOf)
+  local d = r.disenchant
+  return { name, disenchantWay(d.disenchanter, d.mats, nameOf), tostring(r.listings), money(r.profit), money(r.cost) }
+end
+
+local function disenchantKeys(r, name, cells)
+  return { name:lower(), cells[2]:lower(), r.listings, r.profit, r.cost }
+end
+
 local function predictionBuyCells(r, name)
   return { name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss) }
 end
@@ -395,18 +432,13 @@ local function predictionBuyKeys(r, name, cells)
 end
 
 -- How a Buy Under gets out (#88): Vendor, Sell, e.g. "Craft Bolt of Linen Cloth
--- (Kash-Patel)" for a Craft it's a reagent of, or "Disenchant (Bob) -> Strange Dust, Greater
--- Magic Essence" (an arrow the game fonts surely have).
+-- (Kash-Patel)" for a Craft it's a reagent of, or Disenchant (`disenchantWay`).
 function RecommendationTable.wayOut(r, nameOf)
   if r.way == "Craft" then
     return "Craft " .. nameFor(r.output, nameOf) .. " (" .. r.crafter .. ")"
   end
   if r.way == "Disenchant" then
-    local mats = {}
-    for _, mat in ipairs(r.mats or {}) do
-      mats[#mats + 1] = nameFor(mat.itemKey, nameOf)
-    end
-    return "Disenchant (" .. r.disenchanter .. ") -> " .. table.concat(mats, ", ")
+    return disenchantWay(r.disenchanter, r.mats, nameOf)
   end
   return r.way
 end
@@ -489,6 +521,7 @@ local NOTHING = {
   ["Holdings"] = "Nothing in Holdings right now",
   ["Shopping List"] = "Nothing on the Shopping List right now",
   ["Flips to Craft"] = "No Flips to Craft right now",
+  ["Flips to Disenchant"] = "No Flips to Disenchant right now",
   ["Prediction buys"] = "No Prediction buys right now",
   ["Buy Under"] = "No Buy Unders right now",
 }
@@ -569,8 +602,10 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
   local noteAt = columnAt(columns, "Note")
   local folded, over = 0, 0
   for _, r in ipairs(rows) do
-    -- A Disenchant source group's Buy Under is for no one item (#88).
-    local name = r.group and DisenchantGroup.name(r.group) or nameFor(r.itemKey, nameOf)
+    -- A Disenchant source group's Buy Under, or its Flip to Disenchant, is for no one item
+    -- (#88, #89).
+    local group = r.group or (r.disenchant and r.disenchant.group)
+    local name = group and DisenchantGroup.name(group) or nameFor(r.itemKey, nameOf)
     -- What a selection finds the row by after a redraw (#77), and what a Bought mark is
     -- kept under (#97). A Buy Under has a way out instead of an action, and two Characters
     -- can each Craft one output.
@@ -722,10 +757,10 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
     end
     return false
   end
-  -- The Shopping List's Flips to Craft get their own tab (#87).
-  local flips, crafts = {}, {}
+  -- The Shopping List's Flips to Craft and Flips to Disenchant get their own tabs (#87, #89).
+  local flips, crafts, disenchants = {}, {}, {}
   for _, r in ipairs(entry.shoppingList or {}) do
-    local rows = r.action == "Craft" and crafts or flips
+    local rows = r.disenchant and disenchants or r.action == "Craft" and crafts or flips
     rows[#rows + 1] = r
   end
   local shoppingColumns = { "Item", "Action", "Qty", "Max price", "Post at", "Profit", "Cost", "Note" }
@@ -775,6 +810,21 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nil,
         fold,
         entry.beta,
+        marks
+      ),
+      -- No Beta column: a group has no one Item Key to price.
+      section(
+        "Flips to Disenchant",
+        { "Item", "Way out", "Listings", "Profit", "Cost" },
+        disenchants,
+        disenchantCells,
+        disenchantKeys,
+        { column = 4, descending = true },
+        nameOf,
+        holdersOf,
+        nil,
+        fold,
+        nil,
         marks
       ),
       section(

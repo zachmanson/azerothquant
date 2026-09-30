@@ -122,6 +122,23 @@ class ReagentUse:
 
 
 @dataclass(frozen=True)
+class ListingBuy:
+    """One other player's Listing a Flip to Disenchant buys (#89): one unit at `price`."""
+
+    item_key: str
+    price: int
+
+
+@dataclass(frozen=True)
+class DisenchantFlip:
+    """What makes a Shopping List row a Flip to Disenchant (#89): the Disenchant source
+    `group` it buys, and the Listings it buys, cheapest first."""
+
+    group: Group
+    buys: tuple[ListingBuy, ...]
+
+
+@dataclass(frozen=True)
 class SubCraft:
     """A Sub-craft (#33, ADR-0014): `crafts` crafts on `character` of the Known Recipe that
     makes `item_key`, a reagent short further up a Craft's chain."""
@@ -292,6 +309,8 @@ class Row:
     # the Enchanting skill.
     character: str = ""
     mats: tuple[MatYield, ...] = ()  # a Disenchant's expected mats
+    # A Flip to Disenchant's group and Listings (#89). Its `item_key` is "": it buys a group.
+    disenchant: DisenchantFlip | None = None
     uses: tuple[ReagentUse, ...] = ()  # a Craft's held reagents, not the ones it buys
     blocked: Blocked | None = None  # why a Craft can't be made, for the Addon to name
     via: tuple[SubCraft, ...] = ()  # a Craft's Sub-crafts, deepest first (#33)
@@ -639,7 +658,16 @@ def recommend_market(
         if config.flips_to_craft
         else []
     )
-    shopping = _options(buys, crafts, spend, config.shopping_list_rows, config.craft_list_rows)
+    disenchants = _flips_to_disenchant(valuer, plans, set(under), spend, config)
+    shopping = _options(
+        buys,
+        crafts,
+        disenchants,
+        spend,
+        config.shopping_list_rows,
+        config.craft_list_rows,
+        config.disenchant_list_rows,
+    )
     crafted = crafting.counts
     disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
     rows = (
@@ -687,8 +715,9 @@ def recommend_market(
 
 def named_set(m: MarketRecommendations) -> NamedSet:
     """What a Scan's Recommendations named to buy (#55, ADR-0025): its Shopping List's
-    Flips to Sell and Vendor, at their dearest Listing, and Flips to Craft's Auction House
-    reagents, and its Buy Unders, each Item Key at the most any of them named."""
+    Flips to Sell and Vendor, at their dearest Listing, Flips to Craft's Auction House
+    reagents, and Flips to Disenchant's items, each at its dearest Listing bought (#89),
+    and its Buy Unders, each Item Key at the most any of them named."""
     items: dict[str, float] = {}
     groups: dict[GroupKey, float] = {}
 
@@ -701,6 +730,8 @@ def named_set(m: MarketRecommendations) -> NamedSet:
         for buy in r.buys:
             if not buy.merchant:
                 name(items, buy.item_key, buy.max_unit_price)
+        for listing in r.disenchant.buys if r.disenchant else ():
+            name(items, listing.item_key, listing.price)
     for b in m.buy_under:
         if b.group is not None:
             name(groups, b.group.key, b.price)
@@ -892,6 +923,120 @@ def _cheapest_by_group(
         for at, unit in cheapest.items():
             by_scan[at] = min(unit, by_scan.get(at, unit))
     return result
+
+
+def _flips_to_disenchant(
+    valuer: "_Valuer", plans: list["_Plan"], under: set[str], gold: float, config: Config
+) -> list[Row]:
+    """The Flips to Disenchant in this Scan (#89): one option per Disenchant source group
+    with a Character who can Disenchant it, sized alone within `gold` (ADR-0017). Its
+    candidates are other players' Listings of the group's items not `under` a Prediction
+    whose best way out for one unit is Disenchant, so it never repeats a better Flip to
+    Sell or Vendor of the same Listing. A mat that feeds a Craft gets the Craft's credit
+    through its way out, with the Flip margin charged once, as in a Buy Under."""
+    disenchanting = valuer.disenchanting
+    if disenchanting is None:
+        return []
+    sources = _Sources(
+        held={},
+        crafted={},
+        asks=valuer.others,
+        merchant=valuer.merchant,
+        valuer=valuer,
+        under=under,
+        plans=plans,
+        spent=Counter(),
+        config=config,
+    )
+    candidates: dict[Group, list[tuple[int, str]]] = {}
+    for item_key, offers in sorted(valuer.others.items()):
+        group = disenchanting.group(item_key)
+        if group is None or item_key in under:
+            continue
+        out = _way_out(item_key, valuer, config, sources)
+        if out is None or out.way is not Action.DISENCHANT:
+            continue
+        # Armor and weapons don't stack: a Listing is one unit.
+        candidates.setdefault(group, []).extend((unit, item_key) for unit, _ in offers)
+    rows = []
+    for group, listed in candidates.items():
+        disenchanter = disenchanting.disenchanter(group)
+        if disenchanter is None:
+            continue
+        row = _flip_to_disenchant(group, disenchanter, listed, valuer, sources, gold, config)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def _flip_to_disenchant(
+    group: Group,
+    disenchanter: str,
+    listed: list[tuple[int, str]],
+    valuer: "_Valuer",
+    sources: "_Sources",
+    gold: float,
+    config: Config,
+) -> Row | None:
+    """One group's Flip to Disenchant, greedy like a Flip to Craft: each step buys the
+    cheapest `listed` (unit buyout, Item Key) left if one more Disenchant's expected mats,
+    at their ways out on top of the held mats and the earlier steps', less the effort of
+    buying it, clear the Flip margin on its buyout and it fits the gold left. It stops at
+    the first that doesn't. None if none does."""
+    expected = {str(mat): q for mat, q in group.expected.items()}
+    share, floor = config.flip_min_margin_share, config.flip_min_margin_copper
+    added: Counter[str] = Counter()  # expected mats from the steps so far, in fractions
+    bought: list[ListingBuy] = []
+    profit = 0.0
+    for unit, item_key in sorted(listed):
+        net = _mats_value(expected, added, valuer, sources, config)
+        net -= config.non_stacking_effort_copper
+        if unit > gold or net - unit < max(unit * share, floor):
+            break
+        bought.append(ListingBuy(item_key, unit))
+        profit += net - unit
+        gold -= unit
+        added.update(expected)
+    if not bought:
+        return None
+    n = len(bought)
+    return Row(
+        "",
+        Action.DISENCHANT,
+        n,
+        price=bought[-1].price,
+        profit=profit,
+        cost=sum(b.price for b in bought),
+        character=disenchanter,
+        mats=tuple(MatYield(mat, q * n) for mat, q in expected.items()),
+        listings=n,
+        disenchant=DisenchantFlip(group, tuple(bought)),
+    )
+
+
+def _mats_value(
+    expected: Mapping[str, float],
+    added: Mapping[str, float],
+    valuer: "_Valuer",
+    sources: "_Sources",
+    config: Config,
+) -> float:
+    """What one more Disenchant's `expected` mats bring, each at the margin (ADR-0018):
+    the held units, then the `added` ones, take a mat's room first, and the part of it past
+    one way's room goes to the next best."""
+    value = 0.0
+    for mat, q in expected.items():
+        ahead, left = valuer.held.get(mat, 0) + added.get(mat, 0), q
+        while left > 1e-9:
+            at = valuer.after({}, {**valuer.held, mat: ahead})  # a fresh outlet, nothing bought
+            out = _way_out(mat, at, config, sources)
+            if out is None:
+                break
+            take = left if out.units is None else min(left, out.units)
+            value += take * out.value
+            left -= take
+            ahead += take
+    return value
 
 
 def _way_out(
@@ -3432,25 +3577,29 @@ def _resells(
 def _options(
     buys: list[_VendorBuy | _FlipToSell],
     crafts: list[list[_CraftBuy]],
+    disenchants: list[Row],
     gold: float,
     flip_rows: int,
     craft_rows: int,
+    disenchant_rows: int,
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
     profitable first. The Flips to Sell and to Vendor are cut to those in the top
     `flip_rows` by any of Profit, Per click, Per day (Flips to Sell only) or ROI (#98),
     and the Flips to Craft,
-    apart, to the top `craft_rows` by Profit (#87). A Flip to Sell is priced on the run it
-    buys (ADR-0011)."""
+    apart, to the top `craft_rows` by Profit (#87), and the Flips to Disenchant likewise
+    to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011)."""
     flips = _flip_options(buys, gold)
     ranks = _best_ranks(flips)
     crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
     crafted.sort(key=lambda r: -r.profit)
+    disenchanted = sorted(disenchants, key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.
     return sorted(
         [r for r, rank in zip(flips, ranks, strict=True) if rank <= flip_rows]
-        + crafted[:craft_rows],
+        + crafted[:craft_rows]
+        + disenchanted[:disenchant_rows],
         key=lambda r: -r.profit,
     )
 

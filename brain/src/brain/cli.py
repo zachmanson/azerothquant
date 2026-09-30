@@ -562,7 +562,7 @@ def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Fli
         ],
         [
             [
-                r.item_key,
+                _group_name(r.disenchant.group) if r.disenchant else r.item_key,
                 _action(r),
                 str(r.quantity),
                 _money(r.price),
@@ -960,8 +960,9 @@ def _percent(share: float | None) -> str:
 
 
 def _measures(row: Row) -> list[str]:
-    """A Shopping List row's Per click, Per day and ROI (#98). A Flip to Craft has none."""
-    if row.listings is None:
+    """A Shopping List row's Per click, Per day and ROI (#98). A Flip to Craft or to
+    Disenchant has none."""
+    if row.listings is None or row.disenchant is not None:
         return ["", "", ""]
     day = per_day(row)
     return [
