@@ -17,6 +17,7 @@ from brain.lots import Held, start_of
 from brain.predictions import Prediction
 from brain.recommend import (
     Action,
+    BetaRoom,
     Blocked,
     BlockReason,
     BuyUnder,
@@ -29,6 +30,9 @@ from brain.recommend import (
     ReagentUse,
     Row,
     SubCraft,
+    _Caps,
+    _HoldBuy,
+    _spend_on_predictions,
     grades,
     held_at_writing,
     per_day,
@@ -4043,3 +4047,30 @@ def test_the_buy_under_of_a_unit_that_doesnt_stack_pays_for_the_buy(db):
     )
 
     assert [b.price for b in result[MARKET].buy_under] == [400]
+
+
+def test_a_merged_prediction_buy_keeps_the_room_beta_added_to_over_a_bigger_one():
+    # #111: one tier's room was watered down by a quiet Beta, the other's grew with it.
+    buys = [
+        _HoldBuy(
+            "12359",
+            "BWL opens",
+            unit_buyout=100,
+            quantity=5,
+            unit_max_loss=10.0,
+            beta_room=BetaRoom(900.0, room=12, from_beta=-1),
+        ),
+        _HoldBuy(
+            "12359",
+            "BWL opens",
+            unit_buyout=120,
+            quantity=5,
+            unit_max_loss=12.0,
+            beta_room=BetaRoom(950.0, room=8, from_beta=3),
+        ),
+    ]
+
+    (row,) = _spend_on_predictions(buys, 100000, _Caps(100000, DEFAULTS))
+
+    assert row.quantity == 10
+    assert row.beta_room == BetaRoom(950.0, room=8, from_beta=3)

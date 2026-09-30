@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from brain.beta_prior import BetaPrice, BetaPrior
-from brain.config import Era, Install
+from brain.config import Config, Era, Install
 from brain.disenchant import Group
 from brain.history import Market, open_history
 from brain.recommend import (
@@ -21,10 +21,14 @@ from brain.recommend import (
     ReagentUse,
     Row,
     SubCraft,
+    _Caps,
+    _HoldBuy,
+    _spend_on_predictions,
 )
 from brain.recommendations import (
     FILE_NAME,
     GLOBAL_NAME,
+    _row,
     addon_folder,
     render,
     write_recommendations,
@@ -727,3 +731,28 @@ def test_the_brain_mirrors_recommendations_into_a_load_on_demand_data_addon(tmp_
         "\n"
         "Recommendations.lua\n"
     )
+
+
+def test_a_merged_prediction_buy_is_partly_from_beta_if_any_of_its_rooms_was():
+    # #111: a quiet Beta watered the bigger room down, but it grew the other.
+    buys = [
+        _HoldBuy(
+            "12359",
+            "BWL opens",
+            unit_buyout=100,
+            quantity=5,
+            unit_max_loss=10.0,
+            beta_room=BetaRoom(900.0, room=12, from_beta=-1),
+        ),
+        _HoldBuy(
+            "12359",
+            "BWL opens",
+            unit_buyout=120,
+            quantity=5,
+            unit_max_loss=12.0,
+            beta_room=BetaRoom(950.0, room=8, from_beta=3),
+        ),
+    ]
+    (row,) = _spend_on_predictions(buys, 100000, _Caps(100000, Config(installs=())))
+
+    assert _row(row)["roomFromBeta"] is True

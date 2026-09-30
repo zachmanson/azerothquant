@@ -268,7 +268,8 @@ class Row:
     # wrong and the units are let go at today's prices.
     max_loss: float | None = None
     # A Prediction buy's room when the Beta Sell Rate counts for its Item Key (#110): the
-    # biggest room it was bought on.
+    # room it was bought on, preferring one the Beta Sell Rate added to (#111), then the
+    # biggest.
     beta_room: BetaRoom | None = None
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
     # A Craft's Character, the one that knows the recipe, or a Disenchant's, the one with
@@ -2981,7 +2982,7 @@ def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[
             max_loss=r.max_loss + quantity * buy.unit_max_loss,
             beta_room=max(
                 (b for b in (r.beta_room, buy.beta_room) if b is not None),
-                key=lambda b: b.room,
+                key=lambda b: (b.from_beta > 0, b.room),
                 default=None,
             ),
         )
