@@ -1,3 +1,18 @@
+2026-09-30 (later 58): Built #121 (9846a50). The Scan Pool Worker is in `pool/` (TypeScript, Cloudflare Worker, D1 for keys and the index, R2 for bodies), with 35 vitest tests under the Workers pool against the real endpoints and a new `pool` CI job (green). `pool/README.md` has the API table, local dev, secrets and `wrangler deploy`. Decisions made this session: the Scan header (era, realm, faction, requestedAt) goes in `X-Scan-*` HTTP headers, so the Worker never gunzips at all. The cursor is the seq of an ordered `events` log (add/rollback), paged by `limit` (max 1000) with a `more` flag. Revoke also deletes the key's R2 bodies. Keys are stored hashed.
+
+Next, in order (grill first where not ready-for-agent):
+1. Scan Pool (#117): #122 (Brain sync) is next and can start now. Then #123, then #124 (ready-for-human).
+2. #61 (needs-info: grill), #14, #19, #10, #82, #125, #126 (needs-triage). #81 is ready-for-human: do it at the PC.
+3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
+
+- Gotchas: same as later 56, minus the node one, plus these, which the #121 review flagged for #122:
+  - Node 24 is now installed (winget) at `C:\Program Files
+odejs`. A shell started before the install doesn't have it on PATH, so prepend it. npm 11.17 blocks install scripts: `pool/package.json` `allowScripts` approves esbuild and workerd by exact version, so re-approve with `npm approve-scripts` after bumping them. workerd's newest compat date lags; `compatibility_date` is 2026-08-15.
+  - The rate limit is wall clock (spec-literal: one upload per key per Market per 10 min), so an offline backlog drains one Scan per Market per 10 minutes. The Brain must treat 429 as "retry next cycle", not as an error.
+  - A duplicate upload (same Market + requestedAt) returns another member's pool ID. If that member is revoked, the ID shows up in `rolledBack`. A rollback must never delete an own (`source=own`) Scan; just clear its `pool_id` so it re-pushes.
+  - There's no date filter on `GET /scans`. The 30-day backfill pages from cursor 0 (omit `since`) and filters on `requestedAt` in the Brain. Index rows are small; add `since=<time>` to the Worker later if it ever matters.
+  - `addon/AzerothQuant/Recommendations.lua` still has a big uncommitted edit that isn't from these sessions. Leave it out of commits and ask the user about it.
+
 2026-09-30 (later 57): Built #120 (83e8643). Every `time()` in Scanner.lua is now `GetServerTime()`: the Scan stamps (`requestedAt`, `firstUpdateAt`, `readAt`, `savedAt` via `Nudge.stampSaved`) and the cooldown and Nudge checks that compare against them, so they stay on one clock. No busted spec for Scanner.lua; checked by reading the diff, and the addon specs pass (264). Probe line added to #85 (Auction House section). The review filed #126 (needs-triage): Reads, Purchase marks and the rest of the Addon still use `time()`, and the Brain compares some of those with Scan `requestedAt`.
 
 Next, in order (grill first where not ready-for-agent):
