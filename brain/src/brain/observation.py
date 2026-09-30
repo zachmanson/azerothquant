@@ -103,21 +103,22 @@ def _pair_reposts(candidates: list[Disappearance], new: list[Listing]) -> _Pairi
     """Pair off every Repost the data allows.
 
     A Repost pairs a candidate with a new Listing from the same Observation Window with
-    the same Item Key, quantity and own flag, at the same or a lower unit buyout. Going
-    from the most expensive candidate down, each takes the most expensive unpaired new
-    Listing it can. That pairs as many as possible and leaves the cheapest candidates
-    as the sales, the way buyers clear the Auction House.
+    the same Item Key and quantity, at the same or a lower unit buyout. Own doesn't
+    count, since a Pooled Scan sees my auctions as someone else's. Going from the most
+    expensive candidate down, each takes the most expensive unpaired new Listing it can.
+    That pairs as many as possible and leaves the cheapest candidates as the sales, the
+    way buyers clear the Auction House.
     """
     new_prices: dict[tuple, list[int]] = defaultdict(list)
     for n in new:
-        new_prices[(n.item_key, n.quantity, n.own, n.first_seen)].append(n.unit_buyout)
+        new_prices[(n.item_key, n.quantity, n.first_seen)].append(n.unit_buyout)
     for prices in new_prices.values():
         prices.sort()
     cheapest_new = {group: prices[0] for group, prices in new_prices.items()}
 
     pairing = _Pairing(sales=[], reposts=[], coincidences=[])
     for d in sorted(candidates, key=lambda d: d.unit_buyout, reverse=True):
-        group = (d.item_key, d.quantity, d.own, d.gone_at)
+        group = (d.item_key, d.quantity, d.gone_at)
         prices = new_prices.get(group, [])
         cheaper = bisect_right(prices, d.unit_buyout)
         if cheaper:

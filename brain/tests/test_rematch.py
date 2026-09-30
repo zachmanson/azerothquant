@@ -36,13 +36,11 @@ def scan(at, *rows, faction="Alliance"):
     }
 
 
-def row(item=LINEN, quantity=1, unit=100, time_left=4):
-    return {
-        "itemString": item,
-        "quantity": quantity,
-        "buyout": quantity * unit,
-        "timeLeft": time_left,
-    }
+def row(item=LINEN, quantity=1, unit=100, time_left=4, own=False):
+    r = {"itemString": item, "quantity": quantity, "buyout": quantity * unit, "timeLeft": time_left}
+    if own:
+        r["own"] = True
+    return r
 
 
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
@@ -103,9 +101,30 @@ def test_a_late_scan_is_merged_into_its_place_in_time(config, tmp_path):
     assert in_arrival_order(scans, config) == in_time_order(scans, tmp_path)
 
 
+def test_a_rematch_takes_back_own_from_a_listing_it_no_longer_matches_to_an_own_row(
+    config, tmp_path
+):
+    # Arriving before the late Scan, the own row at T0 + 40 min can only continue the
+    # 6-unit Listing (the other one's time-left is already 3), so that one turns own. The
+    # late Scan drops its time-left too, so in time order the own row is a new Listing
+    # and the 6-unit one never was own.
+    scans = [
+        scan(T0, row(quantity=5, time_left=3), row(quantity=6, time_left=4)),
+        scan(
+            T0 + 40 * MINUTE,
+            row(quantity=5, time_left=4, own=True),
+            row(quantity=5, time_left=3),
+        ),
+        scan(T0 + 20 * MINUTE, row(quantity=6, time_left=3), row(quantity=5, time_left=3)),
+    ]
+
+    assert in_arrival_order(scans, config) == in_time_order(scans, tmp_path)
+
+
 def simulated_market(rng: random.Random, scans: int) -> list[dict]:
     """Scans of a Market whose auctions sell down, lose time-left, vanish and get posted,
-    with interchangeable Listings (same Item Key and price) so matching has ties."""
+    with interchangeable Listings (same Item Key and price) so matching has ties. Some
+    auctions are mine, and some Scans show them as someone else's, as a Pooled Scan does."""
     auctions = []
     result = []
     at = T0
@@ -122,11 +141,24 @@ def simulated_market(rng: random.Random, scans: int) -> list[dict]:
                 "unit": rng.choice([100, 120]),
                 "quantity": rng.randint(1, 5),
                 "time_left": rng.randint(2, 4),
+                "own": rng.random() < 0.3,
             }
             for _ in range(rng.randint(0, 4))
         ]
         result.append(
-            scan(at, *(row(a["item"], a["quantity"], a["unit"], a["time_left"]) for a in auctions))
+            scan(
+                at,
+                *(
+                    row(
+                        a["item"],
+                        a["quantity"],
+                        a["unit"],
+                        a["time_left"],
+                        own=a["own"] and rng.random() < 0.7,
+                    )
+                    for a in auctions
+                ),
+            )
         )
         at += rng.choice([10, 20, 30, 50, 3 * 60]) * MINUTE
     return result

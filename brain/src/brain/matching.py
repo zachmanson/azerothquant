@@ -1,7 +1,8 @@
 """Match the Listings of one Scan to those of the previous Scan in the same Market.
 
-There's no auction ID or seller, so Listings with the same Item Key, unit buyout and
-own flag are interchangeable (CONTEXT.md: Listing, ADR-0002). Within each such group
+There's no auction ID or seller, so Listings with the same Item Key and unit buyout are
+interchangeable (CONTEXT.md: Listing, ADR-0002). Own isn't part of that: a Pooled Scan
+shows my auctions as someone else's. Within each such group
 we pick the matching with the fewest new Listings, then the fewest units counted as
 Partial Sales. That is a min-cost maximum matching, solved here as a min-cost max-flow
 over (quantity, time-left) types, because identical Listings don't need their own nodes.
@@ -22,8 +23,6 @@ class Side(Protocol):
     def item_key(self) -> str: ...
     @property
     def unit_buyout(self) -> int: ...
-    @property
-    def own(self) -> bool: ...
     @property
     def quantity(self) -> int: ...
     @property
@@ -76,7 +75,7 @@ def match[P: Side, C: Side](
 
 
 def _identity(listing: Side) -> tuple:
-    return (listing.item_key, listing.unit_buyout, listing.own)
+    return (listing.item_key, listing.unit_buyout)
 
 
 def _match_group[P: Side, C: Side](ps: list[P], cs: list[C], can_match) -> list[tuple[P, C]]:

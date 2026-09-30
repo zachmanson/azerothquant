@@ -233,14 +233,25 @@ def test_identical_listings_are_interchangeable(db):
     ]
 
 
-def test_own_and_not_own_at_the_same_price_never_match(db):
-    t1 = T0 + 20 * MINUTE
-    run(db, scan(T0, row(own=True)), scan(t1, row(own=False)))
+def test_my_auction_seen_as_someone_elses_in_between_stays_one_own_listing(db):
+    # The middle Scan (a Pooled Scan, ADR-0002 amendment) has nothing own.
+    t1, t2 = T0 + 20 * MINUTE, T0 + 40 * MINUTE
+    run(db, scan(T0, row(own=True)), scan(t1, row(own=False)), scan(t2, row(own=True)))
 
-    assert sorted(listings(db, MARKET)) == [
-        listing(t1, t1, own=False),
-        listing(T0, T0, own=True),
-    ]
+    assert listings(db, MARKET) == [listing(T0, t2, own=True)]
+    assert partial_sales(db, MARKET) == []
+
+
+def test_a_listing_stays_own_after_a_scan_shows_it_as_not_own(db):
+    run(db, scan(T0, row(own=True)), scan(T0 + 20 * MINUTE, row(own=False)))
+
+    assert listings(db, MARKET) == [listing(T0, T0 + 20 * MINUTE, own=True)]
+
+
+def test_a_listing_first_seen_as_not_own_becomes_own_when_a_scan_shows_it_as_own(db):
+    run(db, scan(T0, row(own=False)), scan(T0 + 20 * MINUTE, row(own=True)))
+
+    assert listings(db, MARKET) == [listing(T0, T0 + 20 * MINUTE, own=True)]
 
 
 def test_different_prices_or_item_keys_never_match(db):

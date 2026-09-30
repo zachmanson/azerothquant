@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS time_left_drop (
     time_left_before INTEGER NOT NULL,
     UNIQUE (listing_id, scan_id)
 );
+-- The Scan where a Listing first seen as not own was seen as own (#119), so a re-match
+-- can take own back. Once own, a Listing stays own, so it turns own at most once.
+CREATE TABLE IF NOT EXISTS turned_own (
+    listing_id INTEGER PRIMARY KEY REFERENCES listing (id),
+    scan_id INTEGER NOT NULL REFERENCES scan (id)
+);
+CREATE INDEX IF NOT EXISTS turned_own_by_scan ON turned_own (scan_id);
 -- A re-match deletes the drops seen in its Market's tail by Scan.
 CREATE INDEX IF NOT EXISTS partial_sale_by_scan ON partial_sale (scan_id);
 CREATE INDEX IF NOT EXISTS time_left_drop_by_scan ON time_left_drop (scan_id);
@@ -601,15 +608,19 @@ def _latest_scan(conn: sqlite3.Connection, market_id: int) -> tuple[int | None, 
     return latest if latest else (None, None)
 
 
+# What a Scan saw happen to a Listing, one row per (Listing, Scan). A re-match deletes them.
+_SEEN_IN_A_SCAN = ("partial_sale", "time_left_drop", "turned_own")
+
+
 def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
     """Put the Market's history back as it was before its Scans from `since` on were
-    imported. Those Scans go, with the Listings first seen in them and every drop seen in
-    them. A Listing seen both before and in them gets back its last Scan, quantity and
-    time-left as of the latest Scan before `since`."""
+    imported. Those Scans go, with the Listings first seen in them and every drop and turn
+    to own seen in them. A Listing seen both before and in them gets back its last Scan,
+    quantity, time-left and own as of the latest Scan before `since`."""
     tail = "SELECT id FROM scan WHERE market_id = ? AND requested_at >= ?"
     in_tail = (market_id, since)
     born_in_tail = f"SELECT id FROM listing WHERE first_seen_scan_id IN ({tail})"
-    for table in ("partial_sale", "time_left_drop"):
+    for table in _SEEN_IN_A_SCAN:
         conn.execute(f"DELETE FROM {table} WHERE listing_id IN ({born_in_tail})", in_tail)
     conn.execute(f"DELETE FROM listing WHERE id IN ({born_in_tail})", in_tail)
 
@@ -631,7 +642,12 @@ def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
             f" WHERE last_seen_scan_id IN ({tail})",
             (before[0], *in_tail, *in_tail, *in_tail),
         )
-    for table in ("partial_sale", "time_left_drop"):
+    conn.execute(
+        "UPDATE listing SET own = 0 WHERE id IN (SELECT listing_id FROM turned_own"
+        f" WHERE scan_id IN ({tail}))",
+        in_tail,
+    )
+    for table in _SEEN_IN_A_SCAN:
         conn.execute(f"DELETE FROM {table} WHERE scan_id IN ({tail})", in_tail)
     conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
 
@@ -658,9 +674,10 @@ def _insert_scan(conn: sqlite3.Connection, market_id: int, scan: Scan, config: C
 
     conn.executemany(
         # A Listing first seen before the Addon recorded names picks one up when it can.
+        # Once own, always own (ADR-0002).
         "UPDATE listing SET last_seen_scan_id = ?, quantity = ?, time_left = ?,"
-        " item_name = COALESCE(item_name, ?) WHERE id = ?",
-        [(scan_id, c.quantity, c.time_left, c.item_name, p.id) for p, c in result.matched],
+        " own = own OR ?, item_name = COALESCE(item_name, ?) WHERE id = ?",
+        [(scan_id, c.quantity, c.time_left, c.own, c.item_name, p.id) for p, c in result.matched],
     )
     conn.executemany(
         "INSERT INTO partial_sale (listing_id, scan_id, units_sold) VALUES (?, ?, ?)",
@@ -674,6 +691,11 @@ def _insert_scan(conn: sqlite3.Connection, market_id: int, scan: Scan, config: C
         # Kept so a re-match can put the Listing's bucket back (_rewind).
         "INSERT INTO time_left_drop (listing_id, scan_id, time_left_before) VALUES (?, ?, ?)",
         [(p.id, scan_id, p.time_left) for p, c in result.matched if c.time_left < p.time_left],
+    )
+    conn.executemany(
+        # Kept so a re-match can take own back (_rewind).
+        "INSERT INTO turned_own (listing_id, scan_id) VALUES (?, ?)",
+        [(p.id, scan_id) for p, c in result.matched if c.own and not p.own],
     )
     conn.executemany(
         "INSERT INTO listing (market_id, item_key, unit_buyout, own, first_seen_scan_id,"

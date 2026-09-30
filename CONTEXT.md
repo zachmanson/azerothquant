@@ -73,7 +73,7 @@ A Listing that was in one Scan and missing from the next. It was sold, cancelled
 A drop in a Listing's quantity between two Scans. It is always a sale, since cancelling and expiring remove the whole Listing.
 
 **Repost**:
-A Disappearance that could not have expired, explained by a new Listing in the same Observation Window with the same Item Key, quantity and own flag, at the same or a lower unit buyout: most likely a seller cancelling to undercut or relist. Whenever such a pairing exists it is taken, so a Repost is never counted as a sale. The two Listings stay separate.
+A Disappearance that could not have expired, explained by a new Listing in the same Observation Window with the same Item Key and quantity, at the same or a lower unit buyout, own or not (a Pooled Scan shows nothing as own): most likely a seller cancelling to undercut or relist. Whenever such a pairing exists it is taken, so a Repost is never counted as a sale. The two Listings stay separate.
 _Avoid_: relist, undercut (those are why a Repost happens, not the event)
 
 **Coincidence Rate**:

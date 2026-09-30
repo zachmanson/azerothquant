@@ -309,7 +309,6 @@ def own_row(**kwargs):
     [
         pytest.param(row(item=SILK, unit=90), id="other Item Key"),
         pytest.param(row(quantity=2, unit=90), id="other quantity"),
-        pytest.param(own_row(unit=90), id="other own flag"),
         pytest.param(row(unit=101), id="priced higher"),
     ],
 )
@@ -319,6 +318,15 @@ def test_a_new_listing_that_does_not_match_is_not_a_repost(db, new_listing):
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert sales(evidence) == [(LINEN_KEY, 100, 1)]
+
+
+def test_a_repost_pairs_regardless_of_own(db):
+    # A Pooled Scan sees my auctions as someone else's, so own can't tell Reposts apart.
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, own_row(unit=90)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert sales(evidence) == []
 
 
 def test_a_repost_at_the_same_price_is_not_a_sale(db):
