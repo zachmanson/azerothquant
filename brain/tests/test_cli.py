@@ -1066,7 +1066,7 @@ def test_recommend_why_not_an_item_key_shows_every_check(tmp_path):
     assert lines[1:] == [
         ["Linen Cloth (2589): Flip margin"],
         ["Sale Events", "pass", "1/1 Sale Events"],
-        ["Room", "pass", "0 held, room for 336"],
+        ["Room", "pass", "room for 336 at 3s 99c, needs 0 held + 1"],
         ["Flip margin", "fail", "ask 2s 80c, clears at 2s 79c: 1c (0.4%)"],
         ["Budget", "-"],
         ["Row cap", "-"],

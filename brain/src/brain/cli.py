@@ -753,7 +753,7 @@ def _check(w: WhyNot, check: Check) -> tuple[str, str]:
         case Check.SALE_EVENTS:
             passed = w.sale_events >= w.min_sale_events
         case Check.ROOM:
-            passed = w.room > w.held
+            passed = w.room >= w.held + w.needs
         case _:
             passed = check is not w.failed
     return ("pass" if passed else "fail"), _numbers(w, check)
@@ -765,7 +765,7 @@ def _shortfall(w: WhyNot) -> float:
         case Check.SALE_EVENTS:
             return (w.min_sale_events - w.sale_events) / w.min_sale_events
         case Check.ROOM:
-            return (w.held + 1 - w.room) / (w.held + 1)
+            return (w.held + w.needs - w.room) / (w.held + w.needs)
         case Check.MARGIN:
             return math.inf if w.clear_at is None else (w.ask - w.clear_at) / w.ask
         case Check.BUDGET:
@@ -780,7 +780,8 @@ def _numbers(w: WhyNot, check: Check) -> str:
         case Check.SALE_EVENTS:
             return f"{w.sale_events}/{w.min_sale_events} Sale Events"
         case Check.ROOM:
-            return f"{w.held} held, room for {w.room}"
+            at = "" if w.post_at is None else f" at {_money(w.post_at)}"
+            return f"room for {w.room}{at}, needs {w.held} held + {w.needs}"
         case Check.MARGIN:
             if w.clear_at is None:
                 return f"ask {_money(w.ask)}, no way out"

@@ -143,17 +143,23 @@ class WhyNot:
 
     item_key: str
     failed: Check | None
-    # At or above the price the cheapest other player's Listing would post at once bought,
-    # as `_flips` posts its first run: under the next ask.
+    # Where the Checks are priced (`_Valuer.clearing_run`): the post price of the shortest
+    # run of the cheapest Listings that would clear the Flip margin if room were no limit,
+    # and the units that run `needs`. A run of many Listings at one price only clears once
+    # all of them are bought, posted above them. Without such a run, where the cheapest
+    # Listing alone posts once bought, needing 1. None without a price to post at.
+    post_at: float | None
+    needs: int
+    # At or above `post_at`.
     sale_events: int
     min_sale_events: int
-    # What sells within Days to Sell at that price (#109), and the unbound held units that
-    # take it first (#67).
+    # What sells within Days to Sell at `post_at` (#109), and the unbound held units that
+    # take it first (#67), ahead of the units it `needs`.
     room: int
     held: int
     # The cheapest other player's ask, and the most one unit of it could cost and clear
-    # the Flip margin: the Buy Under's way value once that Listing is bought (ADR-0019),
-    # less effort and the margin. None without a way out.
+    # the Flip margin: the Buy Under's way value once the run is bought (ADR-0019), less
+    # effort and the margin. None without a way out.
     ask: int
     clear_at: int | None
     # The cheapest run that clears, against what an option may spend (#86). None unless
@@ -663,13 +669,18 @@ def _why_not(
         if item_key in under:
             continue
         cheapest = min(valuer.others[item_key])
-        bought_cheapest = valuer.after({item_key: [cheapest]})
-        rate, post_at = valuer.rates.get(item_key), bought_cheapest.flip_post_at(item_key)
+        run = valuer.clearing_run(item_key)
+        if run is None:
+            bought, needs = valuer.after({item_key: [cheapest]}), 1
+            post_at = bought.flip_post_at(item_key)
+        else:
+            bought, needs, post_at = valuer.after({item_key: run.units}), run.quantity, run.post_at
+        rate = valuer.rates.get(item_key)
         demand = _demand_at(rate, post_at)
         sale_events = demand.sale_events if demand else 0
         room = _room_at(rate, post_at, 0, config, config.days_to_sell_or_horizon_seconds)
         held = valuer.held.get(item_key, 0)
-        out = _way_out(item_key, bought_cheapest, config)
+        out = _way_out(item_key, bought, config)
         clear_at = (
             None if out is None else _under_margin(out.value - valuer.effort(item_key), config)
         )
@@ -680,7 +691,7 @@ def _why_not(
             failed = Check.BUDGET
         elif sale_events < config.flip_min_sale_events:
             failed = Check.SALE_EVENTS
-        elif room <= held:
+        elif room < held + needs:
             failed = Check.ROOM
         else:
             failed = Check.MARGIN
@@ -688,6 +699,8 @@ def _why_not(
             WhyNot(
                 item_key,
                 failed,
+                post_at=post_at,
+                needs=needs,
                 sale_events=sale_events,
                 min_sale_events=config.flip_min_sale_events,
                 room=room,
@@ -1277,25 +1290,48 @@ class _Valuer:
         as bought: the Flips are Shopping List options (#86)."""
         buys = [
             buy
-            for item_key, offers in sorted(self.others.items())
+            for item_key in sorted(self.others)
             if item_key not in under
-            for buy in _flips(
-                item_key,
-                offers,
-                self.supply[item_key],
-                self.rates.get(item_key),
-                self.vendor.get(item_id_of(item_key)),
-                self.merchant.get(item_key),
-                unbound.get(item_key, 0),
-                self.sale_queue(item_key, flips=True),
-                self.effort(item_key),
-                self.stack(item_key),
-                self.cut,
-                self._config,
-                self.priced(item_key),
-            )
+            for buy in self._flips_of(item_key, unbound.get(item_key, 0), self.priced(item_key))
         ]
         return self.after({}, unbound), buys
+
+    def clearing_run(self, item_key: str) -> "_SellRun | None":
+        """The shortest run of an Item Key's cheapest offers that a Flip to Sell would
+        clear the margin on if room were no limit, posted as `_flips` posts it, behind
+        the held units, with the minimum of Sale Events at that price (#108). A wall only
+        clears once all of it is bought. A pricer lifts `_flips`' room limit, so this one
+        posts as `_flips` does without one."""
+        own = _cheapest(without(self.supply[item_key], self.others[item_key]))
+        merchant, config = self.merchant.get(item_key), self._config
+
+        def undercut(cheapest: int | None) -> float | None:
+            return _undercut(cheapest, own, config, merchant)
+
+        flips = self._flips_of(item_key, self.held.get(item_key, 0), undercut)
+        runs = [run for buy in flips if isinstance(buy, _FlipToSell) for run in buy.runs]
+        least = self._config.flip_min_sale_events
+        return next((run for run in runs if run.sale_events >= least), None)
+
+    def _flips_of(
+        self, item_key: str, held: int, pricer: Callable[[int | None], float | None] | None
+    ) -> list[_VendorBuy | _FlipToSell]:
+        """`_flips` of an Item Key in this Scan, behind `held` units, posted by `pricer`."""
+        return _flips(
+            item_key,
+            self.others[item_key],
+            self.supply[item_key],
+            self.rates.get(item_key),
+            self.vendor.get(item_id_of(item_key)),
+            self.merchant.get(item_key),
+            held,
+            self.sale_queue(item_key, flips=True),
+            self.effort(item_key),
+            self.stack(item_key),
+            self.cut,
+            self._config,
+            pricer,
+        )
 
     def stack(self, item_key: str) -> float:
         """The units of an Item Key a Flip posts per stack (#98): its usual Sale Event

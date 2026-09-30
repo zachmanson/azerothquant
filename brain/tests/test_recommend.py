@@ -3765,6 +3765,24 @@ def test_why_not_an_ask_just_over_the_clearing_price_says_by_how_much(db):
     assert (linen.failed, linen.ask, linen.clear_at) == (Check.MARGIN, 280, 279)
 
 
+@pytest.mark.parametrize("held", [0, 2])
+def test_why_not_a_wall_too_big_for_the_room_above_it_says_room_not_margin(db, held):
+    # A wall of 10 at 500 under the 1000s. The cheapest alone posts at 499 under the rest
+    # of the wall, short of the margin; the whole wall posts at 999 and clears it, but
+    # only 6 sell within the 3 h Sale Horizon there, the held units first (#108).
+    bags = [item(count=held)] if held else []
+    _, why = why_not(
+        db,
+        selling_two_linen_an_hour(*[row(quantity=2, unit=500)] * 5, unit=1000),
+        [character_read(*bags, money=GOLD)],
+    )
+
+    linen = why[LINEN_KEY]
+    assert linen.failed is Check.ROOM
+    assert (linen.room, linen.held, linen.needs, linen.post_at) == (6, held, 10, 999)
+    assert linen.clear_at > linen.ask
+
+
 def test_why_not_a_flip_the_budget_cant_buy_one_of_says_what_it_costs(db):
     # #86: the Ore clears as a Flip to Vendor at 20, but the Budget is 10.
     _, why = why_not(
