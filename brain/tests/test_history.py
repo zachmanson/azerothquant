@@ -356,14 +356,15 @@ def test_scans_in_a_file_are_imported_oldest_first(db):
     assert listings(db, MARKET) == [listing(T0, t1, quantity=15)]
 
 
-def test_scan_older_than_the_latest_imported_is_rejected(db):
+def test_without_an_archive_a_late_scan_waits_for_rebuild(db):
+    # A re-match reads the Market's Scans back from the Archive (tests/test_rematch.py).
     t1 = T0 + 20 * MINUTE
     run(db, scan(t1, row(quantity=15)))
 
     report = run(db, scan(T0, row(quantity=20)))
 
-    assert report.scans_out_of_order == 1
-    assert "older" in report.warnings[0]
+    assert report.scans_waiting_for_rebuild == 1
+    assert "brain rebuild" in report.warnings[0]
     assert listings(db, MARKET) == [listing(t1, t1, quantity=15)]
 
 
@@ -454,13 +455,13 @@ def test_scan_timings_are_imported_past_and_archived_verbatim(db, tmp_path):
     assert list(Archive(config.archive_dir).scans()) == [(Era.BETA, timed)]
 
 
-def test_a_scan_older_than_the_history_is_still_archived(db, tmp_path):
+def test_a_late_scan_is_archived_too(db, tmp_path):
     config = archived_config(tmp_path)
     import_scans(db, [scan(T0 + HOUR, row())], Era.BETA, config)
 
     report = import_scans(db, [scan(T0, row())], Era.BETA, config)
 
-    assert report.scans_out_of_order == 1
+    assert report.scans_rematched == 1
     assert len(list(Archive(config.archive_dir).scans())) == 2
 
 

@@ -37,6 +37,10 @@ DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 24 * 60)
 # (ADR-0004).
 DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
 
+# A Scan more than this much older than its Market's latest is archived and waits for
+# `brain rebuild` instead of re-matching the Market's tail (ADR-0026).
+DEFAULT_POOL_REMATCH_HOURS = 48
+
 
 # Fair Value averages the cheapest this share of a Market's units of an Item Key (#21).
 DEFAULT_FAIR_VALUE_SLICE_SHARE = 0.15
@@ -140,6 +144,8 @@ class Config:
     history_path: Path = Path(DEFAULT_HISTORY_FILE)
     # Only gaps between Scans up to this long count toward Sell Rate (ADR-0004).
     observation_window_max_seconds: int = DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES * 60
+    # A late Scan older than its Market's latest by more than this waits for `brain rebuild`.
+    pool_rematch_seconds: int = DEFAULT_POOL_REMATCH_HOURS * 3600
     # The Archive folder (ADR-0005). A loaded config always has one; None, for
     # tests and for rebuilding from the archive itself, means Scans aren't archived.
     archive_dir: Path | None = None
@@ -278,6 +284,12 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f"{path}: sell_rate_days must be a positive whole number of days, "
             f"got {sell_rate_days!r}"
+        )
+    rematch_hours = raw.get("pool_rematch_hours", DEFAULT_POOL_REMATCH_HOURS)
+    if isinstance(rematch_hours, bool) or not isinstance(rematch_hours, int) or rematch_hours < 1:
+        raise ConfigError(
+            f"{path}: pool_rematch_hours must be a positive whole number of hours, "
+            f"got {rematch_hours!r}"
         )
     history = raw.get("history_path", DEFAULT_HISTORY_FILE)
     if not isinstance(history, str) or not history:
@@ -474,6 +486,7 @@ def load_config(path: Path) -> Config:
         time_left_max_seconds=tuple(m * 60 for m in minutes),
         history_path=path.parent / history,
         observation_window_max_seconds=window_minutes * 60,
+        pool_rematch_seconds=rematch_hours * 3600,
         archive_dir=path.parent / archive,
         fair_value_slice_share=slice_share,
         fair_value_outlier_share=outlier_share,

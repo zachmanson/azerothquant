@@ -65,6 +65,16 @@ class Archive:
             entry = _read(path)
             yield Era(entry["era"]), entry["scan"]
 
+    def market_scans(self, era: Era, realm: str, faction: str, since: int) -> list[dict]:
+        """The Market's archived Scans requested at or after `since`, oldest first."""
+        folder = self.root / era.value / _safe(f"{realm}-{faction}")
+        found = []
+        for path in folder.glob(f"*{_SUFFIX}"):
+            requested_at = path.name.removesuffix(_SUFFIX)
+            if requested_at.isdigit() and int(requested_at) >= since:
+                found.append((int(requested_at), path))
+        return [_read(path)["scan"] for _, path in sorted(found)]
+
     def mailbox_reads(self) -> Iterator[tuple[Era, dict]]:
         """Every archived Mailbox Read with its Era, in no particular order."""
         for path in sorted(self.root.glob(f"*/{_MAILBOX}/*/*/*{_SUFFIX}")):

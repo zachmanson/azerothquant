@@ -256,14 +256,17 @@ def _log_results(results: list[FileResult]) -> None:
             log.error("Couldn't import %s: %s", r.path, r.error)
         else:
             log.info(
-                "Imported %s: %d new Scans, %d already imported, %d rejected;"
+                "Imported %s: %d new Scans (%d re-matched), %d already imported,"
+                " %d waiting for rebuild, %d rejected;"
                 " %d new Mailbox Reads, %d already imported, %d unreadable;"
                 " %d new Outcomes, %d new Purchases;"
                 " %d new Character Reads, %d already imported, %d unreadable",
                 r.path,
                 r.report.scans_imported,
+                r.report.scans_rematched,
                 r.report.scans_already_imported,
-                r.report.scans_out_of_order + r.report.scans_unreadable,
+                r.report.scans_waiting_for_rebuild,
+                r.report.scans_unreadable,
                 r.report.mailbox_reads_imported,
                 r.report.mailbox_reads_already_imported,
                 r.report.mailbox_reads_unreadable,
@@ -318,7 +321,7 @@ def _rebuild(config: Config) -> int:
         config.history_path,
         config.archive_dir,
         report.scans_imported,
-        report.scans_out_of_order + report.scans_unreadable,
+        report.scans_waiting_for_rebuild + report.scans_unreadable,
         report.mailbox_reads_imported,
         report.outcomes_found,
         report.purchases_found,

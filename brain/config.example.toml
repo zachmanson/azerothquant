@@ -16,6 +16,12 @@
 # Defaults to 60. Must come before the first [[installs]].
 # observation_window_max_minutes = 60
 
+# Optional: a Scan older than its Market's latest imported one is merged into its place in
+# time by re-matching the Market's Scans from it on. One more than pool_rematch_hours older
+# is archived and left for the next `brain rebuild` instead (see ADR-0026). Defaults to 48.
+# Must come before the first [[installs]].
+# pool_rematch_hours = 48
+
 # Optional: how Fair Value is found. It averages the cheapest fair_value_slice_share of
 # an Item Key's units in the latest Scan, leaving out units priced under
 # fair_value_outlier_share of that slice's median (those are Flips, not the price).

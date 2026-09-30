@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS listing (
     item_name TEXT                 -- own Listings only, and NULL in Scans from before #17
 );
 CREATE INDEX IF NOT EXISTS listing_by_last_seen ON listing (last_seen_scan_id);
+CREATE INDEX IF NOT EXISTS listing_by_first_seen ON listing (first_seen_scan_id);
 
 CREATE TABLE IF NOT EXISTS partial_sale (
     id INTEGER PRIMARY KEY,
@@ -79,6 +80,18 @@ CREATE TABLE IF NOT EXISTS partial_sale (
     units_sold INTEGER NOT NULL,
     UNIQUE (listing_id, scan_id)
 );
+
+-- Each drop in a Listing's time-left bucket, so a re-match can rewind it (#118).
+CREATE TABLE IF NOT EXISTS time_left_drop (
+    id INTEGER PRIMARY KEY,
+    listing_id INTEGER NOT NULL REFERENCES listing (id),
+    scan_id INTEGER NOT NULL REFERENCES scan (id),  -- the Scan where the drop was seen
+    time_left_before INTEGER NOT NULL,
+    UNIQUE (listing_id, scan_id)
+);
+-- A re-match deletes the drops seen in its Market's tail by Scan.
+CREATE INDEX IF NOT EXISTS partial_sale_by_scan ON partial_sale (scan_id);
+CREATE INDEX IF NOT EXISTS time_left_drop_by_scan ON time_left_drop (scan_id);
 
 -- One row per imported Mailbox Read; its mail is read back from the Archive.
 CREATE TABLE IF NOT EXISTS mailbox_read (
@@ -372,8 +385,12 @@ class Holding:
 class ImportReport:
     scans_imported: int = 0
     scans_already_imported: int = 0
-    # Older than the latest Scan already imported for its Market.
-    scans_out_of_order: int = 0
+    # Of scans_imported, how many were older than their Market's latest, so re-matched
+    # its tail.
+    scans_rematched: int = 0
+    # Older than their Market's latest by more than pool_rematch_hours (or with no Archive
+    # to re-match from): archived, and imported by the next `brain rebuild`.
+    scans_waiting_for_rebuild: int = 0
     # Missing a field the Brain needs.
     scans_unreadable: int = 0
     inexact_rows: int = 0
@@ -481,7 +498,9 @@ def import_scans(
 
     Importing a Scan that is already there does nothing, so the same file can be
     imported any number of times. A Scan older than the latest one already imported
-    for its Market is rejected, since history is never re-matched.
+    for its Market re-matches the Market's tail from the Archive, so history comes out
+    as if every Scan had arrived in time order (ADR-0026). One older than that by more
+    than pool_rematch_hours is archived and waits for `brain rebuild`.
 
     With an archive folder configured, each Scan is written to the Archive before
     it is imported (ADR-0005). If that write fails the error propagates and the Scan
@@ -501,7 +520,7 @@ def import_scans(
         if archive is not None:
             archive.write(era, raw)
         with conn:
-            _import_scan(conn, scan, era, config, report)
+            _import_scan(conn, scan, era, config, archive, report)
             source = f"Scan at {scan.requested_at}"
             _record_vendor_prices(conn, era, raw, scan.requested_at, source, report)
             _record_item_info(conn, era, raw, scan.requested_at, source, report)
@@ -509,16 +528,15 @@ def import_scans(
 
 
 def _import_scan(
-    conn: sqlite3.Connection, scan: Scan, era: Era, config: Config, report: ImportReport
+    conn: sqlite3.Connection,
+    scan: Scan,
+    era: Era,
+    config: Config,
+    archive: Archive | None,
+    report: ImportReport,
 ) -> None:
     market = Market(realm=scan.realm, faction=scan.faction, era=era)
     market_id = _market_id(conn, market)
-
-    latest = conn.execute(
-        "SELECT id, requested_at FROM scan WHERE market_id = ? ORDER BY requested_at DESC LIMIT 1",
-        (market_id,),
-    ).fetchone()
-    latest_id, latest_at = latest if latest else (None, None)
     exists = conn.execute(
         "SELECT 1 FROM scan WHERE market_id = ? AND requested_at = ?",
         (market_id, scan.requested_at),
@@ -526,26 +544,28 @@ def _import_scan(
     if exists:
         report.scans_already_imported += 1
         return
-    if latest_at is not None and scan.requested_at < latest_at:
-        report.scans_out_of_order += 1
-        report.warn(
-            f"Rejected the Scan at {scan.requested_at} for {market}: it is older than the "
-            f"latest imported one ({latest_at}), and history isn't re-matched."
-        )
-        return
 
-    scan_id = conn.execute(
-        "INSERT INTO scan (market_id, requested_at, character, dropped_rows, inexact_rows,"
-        " unreadable_rows) VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            market_id,
-            scan.requested_at,
-            scan.character,
-            scan.dropped_rows,
-            scan.inexact_rows,
-            scan.unreadable_rows,
-        ),
-    ).lastrowid
+    _, latest_at = _latest_scan(conn, market_id)
+    if latest_at is None or scan.requested_at > latest_at:
+        _insert_scan(conn, market_id, scan, config)
+    else:
+        # A late Scan re-matches the Market's tail (ADR-0026): every Scan from it on, the
+        # late one included, comes back from the Archive in time order.
+        tail = None
+        if archive is not None and latest_at - scan.requested_at <= config.pool_rematch_seconds:
+            tail = _archived_tail(archive, era, scan)
+        if tail is None:
+            report.scans_waiting_for_rebuild += 1
+            report.warn(
+                f"Left the Scan at {scan.requested_at} for {market} for `brain rebuild`: it is "
+                f"older than the latest imported one ({latest_at}), and its Market's Scans "
+                "from it on can't be re-matched."
+            )
+            return
+        _rewind(conn, market_id, scan.requested_at)
+        for tail_scan in tail:
+            _insert_scan(conn, market_id, tail_scan, config)
+        report.scans_rematched += 1
     report.scans_imported += 1
     report.inexact_rows += scan.inexact_rows
     report.unreadable_rows += scan.unreadable_rows
@@ -559,6 +579,78 @@ def _import_scan(
             f"Scan at {scan.requested_at} for {market}: left out {scan.unreadable_rows} rows "
             "the Brain can't read."
         )
+
+
+def _archived_tail(archive: Archive, era: Era, scan: Scan) -> list[Scan] | None:
+    """The Market's archived Scans from `scan` on, oldest first, or None if one can't be
+    read. Read before anything is rewound, so a bad file leaves the history as it was."""
+    try:
+        raws = archive.market_scans(era, scan.realm, scan.faction, since=scan.requested_at)
+        return [Scan.from_saved(raw) for raw in raws]
+    except (OSError, ValueError, KeyError, ScanFormatError) as e:
+        log.warning("Can't read the Archive from the Scan at %s: %s", scan.requested_at, e)
+        return None
+
+
+def _latest_scan(conn: sqlite3.Connection, market_id: int) -> tuple[int | None, int | None]:
+    """The ID and requestedAt of the Market's latest imported Scan, if it has one."""
+    latest = conn.execute(
+        "SELECT id, requested_at FROM scan WHERE market_id = ? ORDER BY requested_at DESC LIMIT 1",
+        (market_id,),
+    ).fetchone()
+    return latest if latest else (None, None)
+
+
+def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
+    """Put the Market's history back as it was before its Scans from `since` on were
+    imported. Those Scans go, with the Listings first seen in them and every drop seen in
+    them. A Listing seen both before and in them gets back its last Scan, quantity and
+    time-left as of the latest Scan before `since`."""
+    tail = "SELECT id FROM scan WHERE market_id = ? AND requested_at >= ?"
+    in_tail = (market_id, since)
+    born_in_tail = f"SELECT id FROM listing WHERE first_seen_scan_id IN ({tail})"
+    for table in ("partial_sale", "time_left_drop"):
+        conn.execute(f"DELETE FROM {table} WHERE listing_id IN ({born_in_tail})", in_tail)
+    conn.execute(f"DELETE FROM listing WHERE id IN ({born_in_tail})", in_tail)
+
+    before = conn.execute(
+        "SELECT id FROM scan WHERE market_id = ? AND requested_at < ?"
+        " ORDER BY requested_at DESC LIMIT 1",
+        in_tail,
+    ).fetchone()
+    if before is not None:
+        # The oldest time-left drop in the tail holds the bucket the Listing had before it.
+        conn.execute(
+            "UPDATE listing SET last_seen_scan_id = ?,"
+            " quantity = quantity + (SELECT COALESCE(SUM(p.units_sold), 0) FROM partial_sale p"
+            f"  WHERE p.listing_id = listing.id AND p.scan_id IN ({tail})),"
+            " time_left = COALESCE((SELECT d.time_left_before FROM time_left_drop d"
+            "  JOIN scan s ON s.id = d.scan_id"
+            f"  WHERE d.listing_id = listing.id AND d.scan_id IN ({tail})"
+            "  ORDER BY s.requested_at LIMIT 1), time_left)"
+            f" WHERE last_seen_scan_id IN ({tail})",
+            (before[0], *in_tail, *in_tail, *in_tail),
+        )
+    for table in ("partial_sale", "time_left_drop"):
+        conn.execute(f"DELETE FROM {table} WHERE scan_id IN ({tail})", in_tail)
+    conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
+
+
+def _insert_scan(conn: sqlite3.Connection, market_id: int, scan: Scan, config: Config) -> None:
+    """Add a Scan newer than every other in its Market, matched against the latest one."""
+    latest_id, latest_at = _latest_scan(conn, market_id)
+    scan_id = conn.execute(
+        "INSERT INTO scan (market_id, requested_at, character, dropped_rows, inexact_rows,"
+        " unreadable_rows) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            market_id,
+            scan.requested_at,
+            scan.character,
+            scan.dropped_rows,
+            scan.inexact_rows,
+            scan.unreadable_rows,
+        ),
+    ).lastrowid
 
     previous = _live_listings(conn, latest_id) if latest_id is not None else []
     gap = scan.requested_at - latest_at if latest_at is not None else 0
@@ -577,6 +669,11 @@ def _import_scan(
             for p, c in result.matched
             if c.quantity < p.quantity
         ],
+    )
+    conn.executemany(
+        # Kept so a re-match can put the Listing's bucket back (_rewind).
+        "INSERT INTO time_left_drop (listing_id, scan_id, time_left_before) VALUES (?, ?, ?)",
+        [(p.id, scan_id, p.time_left) for p, c in result.matched if c.time_left < p.time_left],
     )
     conn.executemany(
         "INSERT INTO listing (market_id, item_key, unit_buyout, own, first_seen_scan_id,"

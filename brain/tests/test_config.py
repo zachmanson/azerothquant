@@ -174,6 +174,26 @@ def test_rejects_bad_observation_window_cap(tmp_path, value):
         load_config(path)
 
 
+def test_rematch_cap_defaults_to_48_hours(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.pool_rematch_seconds == 48 * 3600
+
+
+def test_rematch_cap_can_be_set(tmp_path):
+    config = load_config(write_config(tmp_path, "pool_rematch_hours = 6" + INSTALL))
+
+    assert config.pool_rematch_seconds == 6 * 3600
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "true", '"48"'])
+def test_rejects_bad_rematch_cap(tmp_path, value):
+    path = write_config(tmp_path, f"pool_rematch_hours = {value}" + INSTALL)
+
+    with pytest.raises(ConfigError, match="pool_rematch_hours"):
+        load_config(path)
+
+
 def test_archive_defaults_to_a_folder_next_to_the_config(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
