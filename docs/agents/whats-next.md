@@ -1,3 +1,11 @@
+2026-09-29 (later 22): AT THE PC. Grilled #106: the spec comment is on the issue, it's relabelled `ready-for-agent` (still `later`), and ADR-0021 records the mirror decision.
+
+Next, in order:
+1. Build #106 per its spec comment. It's `later`, so it goes after anything `core`.
+2. Nov 4 at the PC: #91's list (see gotcha below).
+
+- Gotchas: unchanged from the entry below. For #106, new addon folders are only found at client start, so the first in-game check needs Brain run -> client restart.
+
 2026-09-29 (later 21): AT THE PC. Built #91's code change (faeaf84): `_hold_buys` in recommend.py stops at the first Listing at or above the Merchant Cost after the Market's cut. Review was clean on both axes. #91 stays open for the Nov 4 at-the-PC steps (read Mister Graphed's Item Keys, write the four Predictions).
 - Restart `brain watch` so it picks up the change.
 
