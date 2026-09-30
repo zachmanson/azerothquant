@@ -1,3 +1,12 @@
+2026-09-30 (later 57): Built #120 (83e8643). Every `time()` in Scanner.lua is now `GetServerTime()`: the Scan stamps (`requestedAt`, `firstUpdateAt`, `readAt`, `savedAt` via `Nudge.stampSaved`) and the cooldown and Nudge checks that compare against them, so they stay on one clock. No busted spec for Scanner.lua; checked by reading the diff, and the addon specs pass (264). Probe line added to #85 (Auction House section). The review filed #126 (needs-triage): Reads, Purchase marks and the rest of the Addon still use `time()`, and the Brain compares some of those with Scan `requestedAt`.
+
+Next, in order (grill first where not ready-for-agent):
+1. Scan Pool (#117): #121 (Worker, TypeScript, in `pool/`, with a new `pool` CI job) is next. #122 (Brain sync) needs #121. Then #123, then #124 (ready-for-human).
+2. #61 (needs-info: grill), #14, #19, #10, #82, #125, #126 (needs-triage). #81 is ready-for-human: do it at the PC.
+3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
+
+- Gotchas: same as later 56. `addon/AzerothQuant/Recommendations.lua` still has a big uncommitted edit that isn't from these sessions. Leave it out of commits and ask the user about it. #121 is the first TypeScript in the repo: check for node/npm and wrangler on this PC first.
+
 2026-09-30 (later 56): Built #119 (75badf9). Listings match by Item Key and unit buyout only (`matching._identity`). A matched Listing's own is OR'ed in `_insert_scan`, and a new `turned_own` table (one row per Listing, keyed by listing_id) records the Scan where it turned own. `_rewind` sets own back to 0 for Listings that turned own in the tail. `_SEEN_IN_A_SCAN` lists the per-(Listing, Scan) tables that a re-match deletes. Repost pairing (`observation._pair_reposts`) no longer groups by own. Tests: own -> not own -> own stays one own Listing, and the reverse turning (test_history). A Repost pairs regardless of own (test_observation). A re-match takes own back from a Listing it no longer matches to an own row, and the shuffled-order property has own rows, some hidden like a Pooled Scan (test_rematch). With the own restore disabled, 7 of 20 seeds fail. Docs: ADR-0002 amendment, ADR-0026 (re-match restores own), CONTEXT Repost.
 
 Next, in order (grill first where not ready-for-agent):
