@@ -1,3 +1,12 @@
+2026-09-30 (later 41): Built #110 slice 2 (1715615). `_row` writes `roomFromBeta = true` on a Prediction buy whose `BetaRoom.from_beta > 0` (not 0 or negative), and `RecommendationTable` `details()` adds "Room partly from Beta" to its tooltip. Both sides have tests: test_recommendations.py (real Lua read) and recommendation_table_spec.lua (the tooltip lines are built there, so the frame only shows them). The review found that a merged Prediction row can drop the flag when its tiers disagree on the sign of from_beta. Filed as #111 (needs-triage). #110 stays open until the Nov 18 look-back.
+
+Next, in order (grill first where not ready-for-agent):
+1. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82. Triage #111 before ~Nov 6, when the weight may go on.
+2. When at the PC: run the #85 checks (#97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Optionally glance at a "Room partly from Beta" tooltip once w > 0. Then grill #39 using the probe results.
+3. On dates: Nov 4, #91's list. ~Nov 6: run `brain recommend --beta-ratios` for #91's Item Keys, and set `beta_sell_rate_weight = 0.5` if they're close to 1. Nov 18: look back and close #110.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. This PC has no `lua` binary, so the Brain's `lua` fixture tests skip silently. To run them, point `LUA` at a shim: a .bat that runs a Python script, which runs `-e <script>` on `lupa.lua51` and prints with tabs. `python scripts/busted.py` runs the addon specs.
+
 2026-09-30 (later 40): Built #110 slice 1 (7c94159). New `brain/src/brain/beta_sell_rate.py`: `beta_ratios` (Beta/Live Fair Value per active Prediction Item Key, Live Markets only, within `beta_column_days` of the first Scan) and `beta_sell_rates` (all of Beta's history, only when `beta_sell_rate_weight` > 0). `_hold_buys` → `_demand_at`/`_room_at` take the `BetaSellRate` for a Prediction buy only. Beta's hours count even when none of its Sale Events are at the price, so a quiet Beta lowers the room. Prediction buy rows carry `beta_room` (`BetaRoom`: post_at, room, from_beta; from_beta can be negative). There's a CLI ratio line (when w > 0 or with `brain recommend --beta-ratios`), `--why-not ITEM_KEY` for a Prediction buy, and a replay ablation `Brain without Beta Sell Rate` that runs only while w > 0. Docs: ADR-0024, CONTEXT.md **Beta Sell Rate** and the Era exception, and an ADR-0015 note.
 
 Next, in order (grill first where not ready-for-agent):
