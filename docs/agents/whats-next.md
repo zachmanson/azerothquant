@@ -1,3 +1,9 @@
+2026-09-29 (later 27): #85's #50 check not done (away from the game for a while). The expected Holdings values are commented on #85: 5 paid rows now, with stars on 247754 (+190%) and 279962 (+451%), 279976 at +8% with no star, and 250933/20744 at -5% in red. Recheck against the latest import when you're back.
+
+Next, in order: unchanged from the entry below.
+
+- Gotchas: unchanged from the entry below. `addon/AzerothQuant/Recommendations.lua` shows as modified because an import wrote it. It's generated, so don't commit it as part of doc work.
+
 2026-09-29 (later 26): Researched #56 with /research: `docs/research/ah-data-sources.md`, and the verdict is commented on #56. Nothing replaces or is worth importing alongside our Scans today. Only crowdsourced sites cover Forever, and they have listing snapshots only, no sales. Things to watch after Live: a Blizzard API Forever namespace (hourly, auction IDs, the only outside route to a Sell Rate, but its terms allow keeping data for 30 days at most, which clashes with ADR-0005) and TSM adding Forever (region-wide `saleRate`/`soldPerDay` as an ADR-0015 prior). #56 left open pending a decision to close it.
 
 Next, in order: unchanged from the entry below.
