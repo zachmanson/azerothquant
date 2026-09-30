@@ -1,3 +1,12 @@
+2026-09-30 (later 38): Tried to start #39, but it has no spec (only the two-line body, labelled ready-for-human + later). Posted the #97 slice 1 check and a #39 throttle probe on #85 (comment 5912630536). Both wait on the PC.
+
+Next, in order (grill first where not ready-for-agent):
+1. #110 Beta Prior as an engine nudge: grill before Nov 4
+2. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82
+3. When at the PC: run the #85 checks (#97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Then grill #39 using the probe results.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. #39 isn't buildable until the throttle probe runs and it gets grilled. `python scripts/busted.py` runs the addon specs.
+
 2026-09-30 (later 37): Built #97 slice 1 (8976314): right-click toggles a buy-side row's Bought mark. New `BoughtMarks.lua` (toggle, forMarket clearing by `entry.asOf`, spent, goldLeft) has busted specs, and `RecommendationTable.build` takes `marks, gold`. Bought rows grey out, sort last, can't be selected and never fold away. Once something is marked, the Shopping List and Flips to Craft fold on the gold left, and header line 2 shows ", Bought X". ADR-0016/0017 were amended and CONTEXT.md has **Bought mark**. It hasn't been tried in game yet. #97 stays open for slice 2 (gated on the #85 buy-event probe).
 
 Next, in order (grill first where not ready-for-agent):
