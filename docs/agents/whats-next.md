@@ -1,3 +1,13 @@
+2026-09-30 (later 35): Fixed #108 (746a0d7), closed. `--why-not` now prices its Checks at the shortest run of the cheapest Listings that would clear the Flip margin if room were no limit and that has the minimum of Sale Events at its post price (`_Valuer.clearing_run`, which goes through the same `_flips` with an undercut pricer). `WhyNot` has new `post_at` and `needs` fields, and Room fails when room < held + needs. 5631 at forced Days to Sell now reads "Room fail: room for 112 at 4s 43c, needs 0 held + 177". Plain `recommend` is byte-identical, and made the list == Shopping List (22/22). #109 still only needs the user's OK to close.
+
+Next, in order (grill first where not ready-for-agent):
+1. #97 take a row off once bought (double-buy risk). It's needs-info, so /grilling first.
+2. #39 search the AH from a Shopping List row (needs in-game throttle probe)
+3. #110 Beta Prior as an engine nudge: grill before Nov 4
+4. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. To force Days to Sell on real data, monkeypatch `brain.recommend.market_days_to_sell` in a scratch script (it's read per Market, not from config.toml). `ruff` isn't on PATH here: use `python -m ruff`.
+
 2026-09-30 (later 34): QUEUE CHANGE. The user dropped the core/later split for ordering: work open tickets by need. Date-gated items are unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, #58's tooltip check, first `brain flips` grades).
 
 Update, same day: #109 and #108 turned out to be built already (fa56555, c0c7021). #109 was checked Brain-side on Scan 46 by forcing Days to Sell. Flips to Sell drop out whole instead of shrinking, because on Beta they're wall buyouts (see the #109 comment). It works as designed and only needs the user's OK to close. #108 has a finding: `--why-not` says "Flip margin fail" with a passing margin when Days to Sell cuts a wall buyout. Room is priced as if only the cheapest Listing were bought (see the #108 comment).
