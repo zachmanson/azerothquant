@@ -108,6 +108,7 @@ def test_a_real_lua_reads_a_markets_recommendations(tmp_path, lua):
                             profit=5139.0,
                             margin=149.0,
                             sale_events=41,
+                            sibling_sales=3,
                         )
                     ],
                     budget=100000,
@@ -124,12 +125,13 @@ def test_a_real_lua_reads_a_markets_recommendations(tmp_path, lua):
         'local m = r.recommendations["Quel\'Thalas"].Horde '
         "local h = m.holdings[1] "
         "print(m.asOf, m.gold, m.windowHours, m.budget, m.predictionCost, #m.holdings) "
-        "print(h.itemKey, h.action, h.quantity, h.price, h.profit, h.margin, h.saleEvents)",
+        "print(h.itemKey, h.action, h.quantity, h.price, h.profit, h.margin, h.saleEvents, "
+        "h.siblingSales)",
     )
 
     assert out.splitlines() == [
         "1790000000	123456	2.5	100000	0	1",
-        "4359	Sell	32	169	5139	149	41",
+        "4359	Sell	32	169	5139	149	41	3",
     ]
 
 

@@ -213,6 +213,18 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "Sales 3", "On Kash-Patel: 12 bags, 4 bank" }, view.sections[1].rows[1].tooltip)
   end)
 
+  it("counts a held suffix's sibling Sale Events on its Sales line, only when there are some", function()
+    local pooled = { itemKey = "9768:12743", action = "Sell", quantity = 1, price = 399, profit = 379, saleEvents = 0, siblingSales = 2 }
+    local none = { itemKey = "9768:12750", action = "Sell", quantity = 1, price = 499, profit = 474, saleEvents = 3, siblingSales = 0 }
+
+    local function tooltip(r)
+      return build(entry({ holdings = { r } }), AS_OF, names).sections[1].rows[1].tooltip
+    end
+
+    assert.are.same({ "Sales 0 (+2 other suffixes)" }, tooltip(pooled))
+    assert.are.same({ "Sales 3" }, tooltip(none))
+  end)
+
   it("tells a Flip to Craft's crafter what to mail it", function()
     local held = { ["2320"] = { { character = "Alt-One", bags = 1, bank = 0, bound = 0 } } }
 

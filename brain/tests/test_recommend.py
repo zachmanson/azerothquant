@@ -460,6 +460,137 @@ def test_the_market_says_which_characters_hold_each_item_key(db):
     }
 
 
+# --- Sibling suffixes (#58, ADR-0022) ---
+
+MONKEY = "item:9768::::::::20:1490::1:1:12743"
+MONKEY_KEY = "9768:12743"
+MONKEY_LINK = (
+    "|cff1eff00|Hitem:9768::::::::20:1490::1:1:12743::::::|h[Scouting Trousers of the Monkey]|h|r"
+)
+EAGLE = "item:9768::::::::20:1490::1:1:12750"
+EAGLE_KEY = "9768:12750"
+
+
+def test_a_held_suffix_sells_on_its_siblings_sale_events(db):
+    # The Monkey has never sold, but an Eagle sold at 500, at or above the Monkey's post
+    # price of 399. It counts at half a Sale Event: 0.5 units an hour, 1 in the 3 h horizon.
+    result = run(
+        db,
+        [
+            scan(T0, row(MONKEY, unit=400), row(EAGLE, unit=500)),
+            scan(T0 + HOUR, row(MONKEY, unit=400)),
+        ],
+        [character_read(item(MONKEY_LINK, count=3), vendor_prices={9768: 10})],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            MONKEY_KEY,
+            Action.SELL,
+            1,
+            price=399,
+            profit=pytest.approx(399 * 0.95),
+            margin=pytest.approx(399 * 0.95 - 10),
+            sale_events=0,
+            sibling_sales=1,
+        ),
+        Row(MONKEY_KEY, Action.VENDOR, 2, price=10, profit=20),
+    ]
+
+
+def test_sibling_sale_events_below_the_post_price_are_left_out(db):
+    # The Monkey sold once at 450 and posts at 399. The Eagle sold at 300, under that:
+    # buyers of a cheap Eagle say nothing about a Monkey at 399. 1 unit an hour, 3 in 3 h.
+    result = run(
+        db,
+        [
+            scan(T0, row(MONKEY, unit=400), row(MONKEY, unit=450), row(EAGLE, unit=300)),
+            scan(T0 + HOUR, row(MONKEY, unit=400)),
+        ],
+        [character_read(item(MONKEY_LINK, count=5), vendor_prices={9768: 10})],
+    )
+
+    [sell, vendor] = result[MARKET].holdings
+    assert (sell.action, sell.quantity, sell.price, sell.sibling_sales) == (
+        Action.SELL,
+        3,
+        399,
+        None,
+    )
+    assert (vendor.action, vendor.quantity) == (Action.VENDOR, 2)
+
+
+def test_held_units_are_never_sold_above_the_dearest_own_or_sibling_sale(db):
+    # #41's cap: the Monkey's own sale was at 100, but an Eagle sold at 500, so the Monkey
+    # posts at 399, under the 400, and not at 100.
+    result = run(
+        db,
+        [
+            scan(T0, row(MONKEY, unit=400), row(MONKEY, unit=100), row(EAGLE, unit=500)),
+            scan(T0 + HOUR, row(MONKEY, unit=400)),
+        ],
+        [character_read(item(MONKEY_LINK), vendor_prices={9768: 10})],
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.price, sell.sale_events, sell.sibling_sales) == (
+        Action.SELL,
+        399,
+        1,
+        1,
+    )
+
+
+def test_no_suffix_pool_weight_leaves_held_units_to_their_own_sale_events(db):
+    result = run(
+        db,
+        [
+            scan(T0, row(MONKEY, unit=400), row(EAGLE, unit=500)),
+            scan(T0 + HOUR, row(MONKEY, unit=400)),
+        ],
+        [character_read(item(MONKEY_LINK, count=3), vendor_prices={9768: 10})],
+        config=replace(CONFIG, suffix_pool_weight=0),
+    )
+
+    assert result[MARKET].holdings == [Row(MONKEY_KEY, None, 3, note="no data")]
+
+
+def test_a_held_suffix_borrows_no_price_or_fair_value_from_its_siblings(db):
+    # No Monkey is on sale to price against or take a Fair Value from, only Eagles, so
+    # the Eagle's sale doesn't make the Monkey sellable.
+    result = run(
+        db,
+        [
+            scan(T0, row(EAGLE, unit=500), row(EAGLE, unit=450)),
+            scan(T0 + HOUR, row(EAGLE, unit=450)),
+        ],
+        [character_read(item(MONKEY_LINK, count=3), vendor_prices={9768: 10})],
+    )
+
+    assert result[MARKET].holdings == [Row(MONKEY_KEY, None, 3, note="no data")]
+
+
+def test_flips_and_buy_under_keep_their_own_item_keys_sale_events(db):
+    # The held Monkeys Sell on the Eagle's sale, but a Monkey on sale at 50 isn't a Flip
+    # to Sell, nor worth a Sell Buy Under: the Monkey itself has never sold.
+    result = run(
+        db,
+        [
+            scan(T0, row(MONKEY, unit=400), row(MONKEY, unit=50), row(EAGLE, unit=500)),
+            scan(T0 + HOUR, row(MONKEY, unit=400), row(MONKEY, unit=50)),
+        ],
+        [character_read(item(MONKEY_LINK, count=3), vendor_prices={9768: 10}, money=GOLD)],
+    )
+
+    market = result[MARKET]
+    assert [(r.action, r.sibling_sales) for r in market.holdings] == [
+        (Action.SELL, 1),
+        (Action.VENDOR, None),
+    ]
+    assert market.shopping_list == []
+    assert [b for b in market.buy_under if b.way is Action.SELL] == []
+
+
 # --- Shopping List: Flips ---
 
 

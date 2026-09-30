@@ -275,7 +275,9 @@ local function details(r, nameOf, held, holdersOf)
     lines[#lines + 1] = "Margin " .. Money.format(r.margin)
   end
   if r.saleEvents then
-    lines[#lines + 1] = "Sales " .. r.saleEvents
+    -- A held suffix's Sell Rate also counts its siblings' Sale Events (#58).
+    local siblings = (r.siblingSales or 0) > 0 and " (+" .. r.siblingSales .. " other suffixes)" or ""
+    lines[#lines + 1] = "Sales " .. r.saleEvents .. siblings
   end
   local note = RecommendationTable.note(r, nameOf)
   if note then

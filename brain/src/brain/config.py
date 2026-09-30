@@ -110,6 +110,9 @@ DEFAULT_AH_DEPOSIT_SHARE = 0.60
 # How long the player posts for: a unit still unsold after it expires and loses its deposit.
 # Forever offers 2, 8 or 24 h (no 48 h, checked 2026-09-28).
 DEFAULT_POST_DURATION_HOURS = 24
+# Held units of a random suffix count their siblings' Sale Events, the other suffixes of
+# the same itemID, at this weight each (#58, ADR-0022): suffixes split a thin history.
+DEFAULT_SUFFIX_POOL_WEIGHT = 0.5
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -196,6 +199,8 @@ class Config:
     # without a Sold invoice to learn it from, and how long a posting lasts.
     ah_deposit_share: float = DEFAULT_AH_DEPOSIT_SHARE
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS
+    # What each sibling suffix's Sale Event counts for in a held unit's Sell Rate (#58).
+    suffix_pool_weight: float = DEFAULT_SUFFIX_POOL_WEIGHT
     # Features the replay switches off one at a time to see what each is worth (#80,
     # ADR-0015). Always on outside it: not read from config.toml.
     flips_to_craft: bool = True
@@ -413,6 +418,13 @@ def load_config(path: Path) -> Config:
         lambda x: x > 0,
         "of hours above 0",
     )
+    pool_weight = _parse_number(
+        path,
+        raw.get("suffix_pool_weight", DEFAULT_SUFFIX_POOL_WEIGHT),
+        "suffix_pool_weight",
+        lambda x: 0 <= x <= 1,
+        "from 0 to 1",
+    )
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
@@ -451,6 +463,7 @@ def load_config(path: Path) -> Config:
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,
         post_duration_hours=post_hours,
+        suffix_pool_weight=pool_weight,
     )
 
 

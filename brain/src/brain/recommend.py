@@ -8,7 +8,7 @@ and Sell Rate from the Observation Windows before it. All amounts are copper.
 
 import math
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -239,6 +239,8 @@ class Row:
     post_at: float | None = None
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
+    # A held unit's sibling suffixes' Sale Events its Sell Rate counts, unweighted (#58).
+    sibling_sales: int | None = None
     note: str = ""
     # The Shopping List's gold to spend on it, or for a Hold the gold it ties up: what its
     # units cost, by their Lots or else what letting them go would bring today (_hold).
@@ -1112,6 +1114,14 @@ def _valuer(
     return valuer.flips(under, unbound)
 
 
+def _by_item(rates: Mapping[str, SellRate]) -> dict[int, tuple[str, ...]]:
+    """The Item Keys with a Sell Rate, by itemID: each random suffix of an item (#58)."""
+    keys: dict[int, list[str]] = defaultdict(list)
+    for item_key in sorted(rates):
+        keys[item_id_of(item_key)].append(item_key)
+    return {item_id: tuple(k) for item_id, k in keys.items()}
+
+
 @cache
 def _disenchant_table() -> DisenchantTable:
     return load_table()
@@ -1161,7 +1171,8 @@ class _Valuer:
     """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
     on sale, `others` other players' Listings, and `flipped` the ones the Flips buy.
     `non_stacking` are the Item Keys that don't stack (#73). A `pricer` replaces the Sell
-    Rate in the Holdings rows, the Flips and the Flip to Craft outputs (#84)."""
+    Rate in the Holdings rows, the Flips and the Flip to Craft outputs (#84). Held units
+    also count their sibling suffixes' Sale Events (`held_rate`, #58); nothing else does."""
 
     def __init__(
         self,
@@ -1178,13 +1189,16 @@ class _Valuer:
         held: Mapping[str, int] = MappingProxyType({}),
         disenchanting: _Disenchanting | None = None,
         pricer: Pricer | None = None,
+        by_item: Mapping[int, tuple[str, ...]] | None = None,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
         self.disenchanting, self._pricer = disenchanting, pricer
+        self._by_item = _by_item(rates) if by_item is None else by_item
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
+        self._held_rates: dict[str, tuple[SellRate | None, int]] = {}
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
         """This Valuer with `bought` as the units taken off other players' Listings, and
@@ -1203,6 +1217,7 @@ class _Valuer:
             self.held if held is None else held,
             self.disenchanting,
             self._pricer,
+            self._by_item,
         )
 
     def deposit(self, item_key: str) -> float:
@@ -1216,13 +1231,16 @@ class _Valuer:
         return self._config.ah_deposit_share * self.vendor.get(item_id_of(item_key), 0)
 
     def queue(self, item_key: str, flips: bool) -> _Queue:
-        """The Item Key's sale queue, at its Sell Rate under the Flip or Holdings priors."""
+        """The Item Key's sale queue, at its Sell Rate under the Flip priors, or at its
+        held units' (`held_rate`) under the Holdings priors."""
         c = self._config
         if flips:
+            rate = self.rates.get(item_key)
             priors = (c.sell_rate_prior_hours_flips, c.sale_size_prior_events_flips)
         else:
+            rate, _ = self.held_rate(item_key)
             priors = (c.sell_rate_prior_hours_holdings, c.sale_size_prior_events_holdings)
-        per_day = _units_per_day(self.rates.get(item_key), *priors)
+        per_day = _units_per_day(rate, *priors)
         return _Queue(per_day / 24, self.deposit(item_key), c.post_duration_hours)
 
     def sale_queue(self, item_key: str, flips: bool) -> _Queue:
@@ -1288,9 +1306,46 @@ class _Valuer:
 
     def post_at(self, item_key: str) -> float | None:
         """The price to post one held unit at once `flipped` is bought (`_post_at`), never
-        above the dearest Sale Event (#41)."""
-        rate = self.rates.get(item_key)
-        return self._post_at_or_under(item_key, rate.max_sale_price if rate else None)
+        above the dearest Sale Event (#41), its own or a sibling suffix's (#58)."""
+        rates = [self.rates.get(item_key), *self._sibling_rates(item_key)]
+        dearest = [r.max_sale_price for r in rates if r is not None]
+        return self._post_at_or_under(
+            item_key, max((p for p in dearest if p is not None), default=None)
+        )
+
+    def held_rate(self, item_key: str) -> tuple[SellRate | None, int]:
+        """The Sell Rate a held unit of an Item Key counts on, and how many sibling Sale
+        Events are in it (#58, ADR-0022). Its own Sale Events, plus its siblings' (the
+        Market's other suffixes of its itemID) priced at or above its `post_at`, each of
+        those counting `suffix_pool_weight` of a Sale Event and of its units. Demand is
+        pooled, never price: without a price to post at, no sibling counts."""
+        if item_key not in self._held_rates:
+            own, post_at = self.rates.get(item_key), self.post_at(item_key)
+            kept = (
+                [r.at_or_above(post_at) for r in self._sibling_rates(item_key)]
+                if own is not None and post_at is not None
+                else []
+            )
+            events = sum(r.sale_events for r in kept)
+            if not events:
+                self._held_rates[item_key] = own, 0
+            else:
+                w = self._config.suffix_pool_weight
+                pooled = replace(
+                    own,
+                    units_per_day=own.units_per_day + w * sum(r.units_per_day for r in kept),
+                    sale_events=own.sale_events + w * events,
+                    sale_units=own.sale_units + w * sum(r.sale_units for r in kept),
+                )
+                self._held_rates[item_key] = pooled, events
+        return self._held_rates[item_key]
+
+    def _sibling_rates(self, item_key: str) -> list[SellRate]:
+        """The Sell Rates of an Item Key's sibling suffixes, none when they don't count."""
+        if not self._config.suffix_pool_weight:
+            return []
+        siblings = self._by_item.get(item_id_of(item_key), ())
+        return [self.rates[k] for k in siblings if k != item_key]
 
     def flip_post_at(self, item_key: str) -> float | None:
         """The price to post one unit bought to Sell at once `flipped` is bought. Only a
@@ -1310,7 +1365,8 @@ class _Valuer:
         )
 
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
-        rate = self.rates.get(item_key)
+        own = self.rates.get(item_key)
+        rate, sibling_sales = self.held_rate(item_key)
         has_data = self.has_data(item_key)
         post_at = self.post_at(item_key) if has_data else None
         c = self._config
@@ -1330,7 +1386,8 @@ class _Valuer:
             has_data,
             post_at,
             room,
-            rate.sale_events if rate else None,
+            own.sale_events if own else None,
+            sibling_sales if self._pricer is None else 0,  # a pricer ignores Sell Rate
             self.vendor.get(item_id_of(item_key)),
             self.sale_queue(item_key, flips=False),
             self.cut,
@@ -1341,7 +1398,7 @@ class _Valuer:
         a pricer, whether it has a price (#84)."""
         if self._pricer is not None:
             return self.post_at(item_key) is not None
-        rate = self.rates.get(item_key)
+        rate, _ = self.held_rate(item_key)
         value = fair_value(self.supply.get(item_key, []), self._config)
         return value is not None and rate is not None and bool(rate.sale_events)
 
@@ -1535,6 +1592,7 @@ def _holding_rows(
     post_at: float | None,
     room: float,
     sale_events: int | None,
+    sibling_sales: int,
     vendor_price: int | None,
     queue: _Queue,
     cut: float,
@@ -1568,6 +1626,7 @@ def _holding_rows(
                     profit=profit,
                     margin=None if vendor_price is None else profit / selling - vendor_price,
                     sale_events=sale_events,
+                    sibling_sales=sibling_sales or None,
                 )
             )
         vendoring += unbound - selling

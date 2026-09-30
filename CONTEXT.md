@@ -46,6 +46,10 @@ _Avoid_: Scan Archive (it holds more than Scans), backup, raw dump
 The identity used for pricing: itemID plus random suffix, so "of the Monkey" and "of the Eagle" versions are different Item Keys.
 _Avoid_: item (when you mean the priced identity), itemID
 
+**Sibling**:
+Another Item Key of the same itemID in the same Market: another random suffix of the same item. Suffixes split an item's thin history, so a held unit's Sell Rate also counts its Siblings' Sale Events at a reduced weight, but never their prices or Fair Values (ADR-0022).
+_Avoid_: variant, suffix group
+
 **Listing**:
 One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key, unit buyout and whether it is own, and identical Listings are interchangeable. Own means posted by the Character that did the Scan: the game hides every other seller, including the player's other Characters. Its quantity can only go down. Bids are ignored; buyout is the only price.
 _Avoid_: auction, post, order, stack (a Listing can hold more than one stack)
@@ -88,7 +92,7 @@ The price an Item Key can realistically be sold at in its Market, based on the c
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
-Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity. When deciding whether to buy something to Sell (a Flip to Sell, a Flip to Craft's output, a Hold buy's Max Loss, a Buy Under's Sell way), the Sell Rate is measured at the price it would post at: only the Sale Events priced at or above it count, toward both the units a day and the minimum number of Sale Events. Held units use the whole Sell Rate: their gold is already spent.
+Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity. When deciding whether to buy something to Sell (a Flip to Sell, a Flip to Craft's output, a Hold buy's Max Loss, a Buy Under's Sell way), the Sell Rate is measured at the price it would post at: only the Sale Events priced at or above it count, toward both the units a day and the minimum number of Sale Events. Held units use the whole Sell Rate: their gold is already spent. Theirs also counts their Siblings' Sale Events at or above the price they post at, each as half a Sale Event (`suffix_pool_weight`); a buy's never does (ADR-0022).
 _Avoid_: volume, velocity
 
 **Sell Rate Prior**:
@@ -138,7 +142,7 @@ One way out of a Candidate Item the player holds: Vendor, Sell, Craft, Disenchan
 _Avoid_: strategy, play
 
 **Sell**:
-The Action of posting an item on the Auction House for other players to buy. Held units are posted just under the cheapest other player's Listing (matching an own Listing that's cheaper), never above the highest price among its Sale Events or its Merchant Cost, with nothing on the Shopping List assumed bought, since its options are alternatives (ADR-0017). A Flip to Sell is posted the same way once its own run is bought, except that no Sale Event caps it: its Sell Rate counts only the Sale Events at or above its price instead (see Flip). With no Listing left there is no Sell price, and held units go to Vendor. Best Exit Value values Sell the same way, at a past Scan too. A held unit Sells only while its price after the cut, less the Deposits it's expected to lose waiting its turn, beats the Vendor Price, so a slow seller's tail goes to Vendor.
+The Action of posting an item on the Auction House for other players to buy. Held units are posted just under the cheapest other player's Listing (matching an own Listing that's cheaper), never above the highest price among its and its Siblings' Sale Events or its Merchant Cost, with nothing on the Shopping List assumed bought, since its options are alternatives (ADR-0017). A Flip to Sell is posted the same way once its own run is bought, except that no Sale Event caps it: its Sell Rate counts only the Sale Events at or above its price instead (see Flip). With no Listing left there is no Sell price, and held units go to Vendor. Best Exit Value values Sell the same way, at a past Scan too. A held unit Sells only while its price after the cut, less the Deposits it's expected to lose waiting its turn, beats the Vendor Price, so a slow seller's tail goes to Vendor.
 _Avoid_: post, list, flip (a Flip is a buy)
 
 **Craft**:

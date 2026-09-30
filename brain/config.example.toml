@@ -146,6 +146,13 @@
 # ah_deposit_share = 0.60
 # post_duration_hours = 24
 
+# Optional: Sibling suffixes (#58, ADR-0022). Random suffixes split an item's sales thin,
+# so a held unit's Sell Rate also counts the Sale Events of the item's other suffixes
+# priced at or above its post price, each as this share of a Sale Event. Only held units:
+# Flips and Buy Under never count them. 0 turns it off. From 0 to 1, defaults to 0.5.
+# Must come before the first [[installs]].
+# suffix_pool_weight = 0.5
+
 # Optional: where the Brain keeps its history database. A relative path is relative to
 # this file. Defaults to history.sqlite next to it. Must come before the first [[installs]].
 # history_path = 'history.sqlite'

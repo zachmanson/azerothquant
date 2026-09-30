@@ -17,13 +17,15 @@ from brain.observation import observation_windows_between, sell_rate_evidence, w
 class SellRate:
     units_per_day: float
     # The evidence behind it, so the Decision Engine can discount thin data (#25).
-    sale_events: int  # Observation Windows it was seen to sell in (ADR-0012)
+    # Observation Windows it was seen to sell in (ADR-0012). A held unit's Sell Rate counts
+    # its Siblings' at a weight (#58), so there it and `sale_units` can be fractional.
+    sale_events: float
     window_hours: float  # the Market's, shared by every Item Key in it
     reposts: int
     coincidences: int
     # For the Sale Size Prior (#24): the units in those Sale Events, and the typical size
     # of one to shrink their average size toward.
-    sale_units: int = 0
+    sale_units: float = 0
     typical_sale_size: float = 1.0
     # Each Sale Event's (dearest unit buyout, units), so a buy to Sell can count only the
     # demand at the price it would post at (#107).

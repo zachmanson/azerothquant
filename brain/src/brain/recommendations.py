@@ -189,6 +189,7 @@ _ROW_KEYS = {
     "post_at": "postAt",
     "margin": "margin",
     "sale_events": "saleEvents",
+    "sibling_sales": "siblingSales",
     "note": "note",
     "cost": "cost",
     "prediction": "prediction",
