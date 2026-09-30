@@ -1,4 +1,5 @@
-"""grades.toml: Grades and held-at-writing costs, frozen once computed (#66, ADR-0006).
+"""grades.toml: Grades and held-at-writing costs, frozen once computed (#66, ADR-0006),
+and the Flips to Sell each Scan named and their Flip Grades (#60, ADR-0023).
 
 They are worked out from history, so a later change to how Best Exit Value is priced
 would silently rewrite them. The history DB is rebuildable (ADR-0005), so they live in
@@ -46,11 +47,69 @@ class Grade:
 
 
 @dataclass(frozen=True)
+class Named:
+    """A Flip to Sell row as the Shopping List showed it at one Scan: what the Brain named
+    (#60)."""
+
+    item_key: str
+    units: int
+    dearest: int  # per unit, the dearest Listing its run bought
+    post_at: float
+    profit: float  # expected, for all `units`
+    days: float | None  # expected until its last unit sells
+    sale_horizon: int  # seconds, in force then
+
+
+@dataclass(frozen=True)
+class FlipGrade:
+    """A Flip's realized result a Sale Horizon after its first Purchase (#60): its units
+    Sold by then after the Auction House cut, plus its units still open at their Best Exit
+    Value then, against what they cost. Deposits are left out (ADR-0023)."""
+
+    graded_at: int
+    units: int
+    cost: int
+    sold_units: int
+    gross: float  # what the sold units brought before the cut
+    proceeds: float  # after it
+    open_value: float
+    sale_days: tuple[float, ...]  # from the first Purchase to each sale that closed units
+    # Seconds from the first Purchase to the first own Listing of its Item Key seen, None
+    # if none was by the grading moment: the post lag, which the grade includes.
+    listed_after: int | None
+    # The Item Key's Expired Outcomes within the horizon, which may not be this Flip's.
+    expired: int
+
+    @property
+    def open_units(self) -> int:
+        return self.units - self.sold_units
+
+    @property
+    def realized(self) -> float:
+        """Realized Profit."""
+        return self.proceeds + self.open_value - self.cost
+
+    @property
+    def paid_off(self) -> bool:
+        return self.realized > 0
+
+
+@dataclass(frozen=True)
 class Frozen:
-    """What grades.toml holds for one Market, by Prediction name."""
+    """What grades.toml holds for one Market: Prediction entries by its name, what each
+    Scan named by its time, and Flip Grades by `flip_name`."""
 
     held: dict[str, tuple[Held, ...]] = field(default_factory=dict)
     grades: dict[str, Grade] = field(default_factory=dict)
+    # By the requested_at of each Scan worked out again, its Flip to Sell rows by Item Key.
+    shown: dict[int, dict[str, Named]] = field(default_factory=dict)
+    # By `flip_name`.
+    flips: dict[str, FlipGrade] = field(default_factory=dict)
+
+
+def flip_name(item_key: str, scan_at: int) -> str:
+    """A Flip's name in grades.toml: its Item Key and the Scan whose row it matched."""
+    return f"{item_key}@{scan_at}"
 
 
 def load_frozen(path: Path | None, market: Market) -> Frozen:
@@ -80,9 +139,43 @@ def load_frozen(path: Path | None, market: Market) -> Frozen:
             )
             for name, entry in _entries(raw, "grades", market).items()
         }
-    except (KeyError, TypeError, AttributeError) as e:
+        shown = {
+            int(scan_at): {
+                r["item_key"]: _named(r, _typed(entry["sale_horizon"], int)) for r in entry["rows"]
+            }
+            for scan_at, entry in _entries(raw, "shown", market).items()
+        }
+        flips = {
+            name: FlipGrade(
+                _typed(entry["graded_at"], int),
+                _typed(entry["units"], int),
+                _typed(entry["cost"], int),
+                _typed(entry["sold_units"], int),
+                float(_typed(entry["gross"], int | float)),
+                float(_typed(entry["proceeds"], int | float)),
+                float(_typed(entry["open_value"], int | float)),
+                tuple(float(_typed(d, int | float)) for d in entry["sale_days"]),
+                None if "listed_after" not in entry else _typed(entry["listed_after"], int),
+                _typed(entry["expired"], int),
+            )
+            for name, entry in _entries(raw, "flips", market).items()
+        }
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
         raise GradesError(f"{path}: an entry is malformed ({e!r}); delete it to redo it") from None
-    return Frozen(held, grades)
+    return Frozen(held, grades, shown, flips)
+
+
+def _named(row: dict, sale_horizon: int) -> Named:
+    days = row.get("days")
+    return Named(
+        _typed(row["item_key"], str),
+        _typed(row["units"], int),
+        _typed(row["dearest"], int),
+        float(_typed(row["post_at"], int | float)),
+        float(_typed(row["profit"], int | float)),
+        None if days is None else float(_typed(days, int | float)),
+        sale_horizon,
+    )
 
 
 def freeze_held(path: Path, market: Market, prediction: str, held: Sequence[Held]) -> None:
@@ -107,6 +200,42 @@ def freeze_grade(path: Path, market: Market, grade: Grade) -> None:
     )
 
 
+def freeze_shown(
+    path: Path, market: Market, scan_at: int, sale_horizon: int, named: Sequence[Named]
+) -> None:
+    """Append the Flip to Sell rows a Scan named, which may be none."""
+    rows = ", ".join(
+        f"{{ item_key = {_string(n.item_key)}, units = {n.units}, dearest = {n.dearest}, "
+        f"post_at = {float(n.post_at)!r}, profit = {float(n.profit)!r}"
+        + ("" if n.days is None else f", days = {float(n.days)!r}")
+        + " }"
+        for n in named
+    )
+    body = f"sale_horizon = {sale_horizon}\nrows = [{rows}]\n"
+    _append(path, "shown", market, str(scan_at), body)
+
+
+def freeze_flip_grade(path: Path, market: Market, name: str, grade: FlipGrade) -> None:
+    """Append a Flip's Grade under its `flip_name`."""
+    days = ", ".join(repr(float(d)) for d in grade.sale_days)
+    _append(
+        path,
+        "flips",
+        market,
+        name,
+        f"graded_at = {grade.graded_at}\n"
+        f"units = {grade.units}\n"
+        f"cost = {grade.cost}\n"
+        f"sold_units = {grade.sold_units}\n"
+        f"gross = {float(grade.gross)!r}\n"
+        f"proceeds = {float(grade.proceeds)!r}\n"
+        f"open_value = {float(grade.open_value)!r}\n"
+        f"sale_days = [{days}]\n"
+        + ("" if grade.listed_after is None else f"listed_after = {grade.listed_after}\n")
+        + f"expired = {grade.expired}\n",
+    )
+
+
 def _load(path: Path | None) -> dict:
     if path is None:
         return {}
@@ -124,13 +253,13 @@ def _entries(raw: dict, kind: str, market: Market) -> dict:
     return raw.get(kind, {}).get(market.era, {}).get(market.realm, {}).get(market.faction, {})
 
 
-def _append(path: Path, kind: str, market: Market, prediction: str, body: str) -> None:
+def _append(path: Path, kind: str, market: Market, name: str, body: str) -> None:
     # Read again right before writing: another Brain process may have frozen it since the
     # caller loaded, and a second table of the same name would make the file unreadable.
-    if prediction in _entries(_load(path), kind, market):
+    if name in _entries(_load(path), kind, market):
         return
     header = ".".join(
-        _string(part) for part in (kind, market.era, market.realm, market.faction, prediction)
+        _string(part) for part in (kind, market.era, market.realm, market.faction, name)
     )
     new = not path.exists()
     with open(path, "a", encoding="utf-8", newline="\n") as f:

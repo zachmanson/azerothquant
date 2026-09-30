@@ -610,7 +610,7 @@ def recommend_market(
     bound = {k: _bound(h) for k, h in held.items()}
     lot_costs = _lot_costs(conn, config, market, active, seen)
     rows = _hold(rows, active, bound, vendor, caps, lot_costs)
-    rows = _with_roi(rows, _market_lots(conn, config, market, predictions, seen), cut, config)
+    rows = _with_roi(rows, market_lots(conn, config, market, predictions, seen), cut, config)
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
     prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
@@ -948,7 +948,7 @@ def grades(
     frozen = load_frozen(config.grades_path, market).grades
     if all(p.name in frozen for p in due):
         return [frozen[p.name] for p in due]
-    market_lots = _market_lots(conn, config, market, predictions)
+    every_lot = market_lots(conn, config, market, predictions)
     times = scan_times(conn, market)
     result = []
     for p in due:
@@ -956,7 +956,7 @@ def grades(
             result.append(frozen[p.name])
             continue
         graded_at = ended_at(p) + config.sale_horizon_seconds
-        settled = settle(p, market_lots, graded_at, auction_cut(market, config))
+        settled = settle(p, every_lot, graded_at, auction_cut(market, config))
         # Valued together, so open units that yield the same mats share them (#102).
         open_units = {k: Holding(bags=units) for k, units in settled.open_units.items() if units}
         open_value = sum(exit_values(conn, config, market, open_units, graded_at).values())
@@ -968,7 +968,7 @@ def grades(
     return result
 
 
-def _market_lots(
+def market_lots(
     conn: sqlite3.Connection,
     config: Config,
     market: Market,
@@ -991,11 +991,11 @@ def _lot_costs(
     seen: Sequence[Listing] | None = None,
 ) -> dict[tuple[str, str], list[tuple[float, int]]]:
     """The open units of each Prediction's Lots and what each of them cost, oldest Lot
-    first, by (Prediction, Item Key). `seen` as in `_market_lots`."""
+    first, by (Prediction, Item Key). `seen` as in `market_lots`."""
     if not predictions:
         return {}
     result: dict[tuple[str, str], list[tuple[float, int]]] = {}
-    for lot in _market_lots(conn, config, market, predictions, seen):
+    for lot in market_lots(conn, config, market, predictions, seen):
         if lot.prediction is not None and lot.open_units:
             result.setdefault((lot.prediction, lot.item_key), []).append(
                 (lot.cost / lot.units, lot.open_units)
@@ -1077,7 +1077,7 @@ def _valuer(
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
-    `_market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
+    `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
     the latest, or as of `skills_as_of` (#103). `pricer` as in `recommend_market`."""
     seen = listings(conn, market) if seen is None else seen
     scanned = at is not None

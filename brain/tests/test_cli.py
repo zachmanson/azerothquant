@@ -5,7 +5,7 @@ import re
 import shutil
 import sqlite3
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -14,6 +14,7 @@ from brain.archive import Archive
 from brain.cli import (
     RebuildError,
     run_disenchants,
+    run_flips,
     run_import,
     run_rebuild,
     run_recommend,
@@ -811,6 +812,130 @@ happened = 2026-09-22
     # Breaking even is not a profit.
     assert "Graded Predictions: 1 graded, 0 profitable, pooled return 0.0%, caps not halved" in text
     assert ["Linen spike", "2026-09-29", "0c", "2s 85c", "2s 85c", "0.0%"] in lines
+
+
+def _two_linen_flips(tmp_path) -> Config:
+    """#60: 2 Linen at 1000 sell each hour from T0. At T0 + 1 h the Brain names 5 more at
+    200 a Flip to Sell posted at 999, and they're bought and sold within the 3 hour Sale
+    Horizon. At T0 + 2 h it names 3 at 200, bought too but not yet graded."""
+    t0, hour = 1_790_000_000, 3600
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
+        grades_path=tmp_path / "grades.toml",
+        sale_horizon_seconds=3 * hour,
+        sell_rate_prior_hours_flips=0,
+        sale_size_prior_events_flips=0,
+        flip_min_sale_events=1,
+    )
+    link = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
+
+    def linen(quantity, unit):
+        return {
+            "itemString": "item:2589::::::::20:1490",
+            "quantity": quantity,
+            "buyout": quantity * unit,
+            "timeLeft": 4,
+        }
+
+    def scan(at, *rows):
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": list(rows),
+        }
+
+    def mail(at, subject, invoice, **item):
+        # Read 12 hours after it arrived.
+        return {
+            "readAt": at + 12 * hour,
+            "realm": MARKET.realm,
+            "character": "Kash-Patel",
+            "shownCount": 1,
+            "totalCount": 1,
+            "skippedMails": 0,
+            "mails": [
+                {
+                    "index": 1,
+                    "sender": "Alliance Auction House",
+                    "subject": f"{subject}: Linen Cloth",
+                    "daysLeft": 29.5,
+                    "invoice": invoice | {"itemName": "Linen Cloth"},
+                    **({"money": 0} | item),
+                }
+            ],
+        }
+
+    def won(at, count):
+        invoice = {"invoiceType": "buyer", "bid": count * 200, "count": count}
+        return mail(at, "Auction won", invoice, firstItemQuantity=count, firstItemLink=link)
+
+    read = {
+        "readAt": t0,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 10_000,
+        "vendorPrices": {2589: 10},
+        "bags": [],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(
+            conn,
+            [
+                scan(t0, linen(20, 1000)),
+                scan(t0 + hour, linen(18, 1000), linen(5, 200)),
+                scan(t0 + 2 * hour, linen(16, 1000), linen(3, 200)),
+                scan(t0 + 3 * hour, linen(14, 1000)),
+                scan(t0 + 4 * hour + 600, linen(12, 1000)),
+            ],
+            Era.BETA,
+            config,
+        )
+        import_mailbox_reads(
+            conn,
+            [
+                # In the order they were read.
+                won(t0 + hour + 600, 5),
+                mail(
+                    t0 + 2 * hour,
+                    "Auction successful",
+                    {"invoiceType": "seller", "bid": 5 * 999, "count": 5},
+                    money=round(5 * 999 * 0.95),
+                ),
+                won(t0 + 2 * hour + 600, 3),
+            ],
+            Era.BETA,
+            config,
+        )
+        import_character_reads(conn, [read], Era.BETA, config)
+    return config
+
+
+def test_recommend_shows_the_record_of_graded_flips(tmp_path):
+    text = run_recommend(_two_linen_flips(tmp_path))
+
+    # Sold at the Post at named, for the Profit it expected, 50 minutes after the Purchase.
+    assert (
+        "Graded Flips: 1 graded, 1 paid off, realized/expected Profit 100.0%, "
+        "price/Post at 100.0% (median), sold within horizon 100.0%, median days to sell 0.03"
+        in text
+    )
+
+
+def test_flips_prints_each_flip_with_its_grade_or_pending(tmp_path):
+    text = run_flips(_two_linen_flips(tmp_path))
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Classic Beta PvP Alliance (beta): provisional, Beta never decides" in text
+    # Bought 10 minutes after the Scans at T0 + 1 h and T0 + 2 h, local time.
+    first, second = (
+        datetime.fromtimestamp(1_790_000_000 + h * 3600 + 600).strftime("%Y-%m-%d %H:%M")
+        for h in (1, 2)
+    )
+    assert ["2589", first, "5", "9s 99c", "9s 99c", "0.03", "37s 45c"] in lines
+    assert ["2589", second, "3", "9s 99c", "pending"] in lines  # nothing sold yet
 
 
 def test_recommend_prints_a_flip_to_crafts_reagent_buys(tmp_path):

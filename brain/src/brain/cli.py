@@ -5,6 +5,7 @@
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
     brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
+    brain flips      grade the Flips to Sell made: did they sell at the Post at named
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
 
 All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
@@ -31,17 +32,20 @@ from brain.config import Config, ConfigError, Era, load_config
 from brain.disenchant import Group, load_table
 from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
 from brain.fair_value import FairValueCache
+from brain.flips import Flip, flip_record, flips
 from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
     ImportReport,
     Market,
+    character_markets,
     disenchant_results,
     import_character_reads,
     import_file,
     import_mailbox_reads,
     import_scans,
     open_history,
+    scan_times,
 )
 from brain.lots import start_of
 from brain.predictions import PredictionsError, load_predictions
@@ -346,10 +350,16 @@ def run_replay(config: Config, since: date | None, until: date | None) -> str:
     return "\n".join(_render_replay(m, hours) for m in markets)
 
 
+def _graded_title(market: Market) -> str:
+    """A Market's name over something graded on its history: Beta's is provisional."""
+    title = f"{market.realm} {market.faction} ({market.era.value})"
+    if market.era is Era.BETA:
+        title += ": provisional, Beta never decides"
+    return title
+
+
 def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
-    market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
-    if m.market.era is Era.BETA:
-        market += ": provisional, Beta never decides"
+    market = _graded_title(m.market)
     scans = "Scan" if m.scans == 1 else "Scans"
     table = _table(
         ["Policy", "Value added", "Brain over it"],
@@ -370,6 +380,25 @@ def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
         f"{table}\n"
         f"Realized profit over the range: {_money(m.realized_profit)}\n"
     )
+
+
+def _flips(config: Config) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        text = run_flips(config)
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
+        return 1
+    except PredictionsError as e:
+        log.error("Can't load the Predictions: %s", e)
+        return 1
+    except GradesError as e:
+        log.error("Can't load the Grades: %s", e)
+        return 1
+    print(text, end="")
+    return 0
 
 
 def _disenchants(config: Config) -> int:
@@ -460,19 +489,22 @@ def run_recommend(config: Config, chain: str | None = None, why_not: str | None 
     predictions = load_predictions(config.predictions_path)
     with closing(open_history(config.history_path)) as conn:
         markets = recommend(conn, config, predictions, why_not=why_not is not None)
-    if not markets:
-        return "No Character has a Market with a Scan yet.\n"
-    if chain is not None:
-        return "\n".join(_render_chains(m, chain) for m in markets)
-    if why_not == "":
-        return "\n".join(_render_near_misses(m) for m in markets)
-    if why_not is not None:
-        return _render_why_not(markets, why_not)
+        if not markets:
+            return "No Character has a Market with a Scan yet.\n"
+        if chain is not None:
+            return "\n".join(_render_chains(m, chain) for m in markets)
+        if why_not == "":
+            return "\n".join(_render_near_misses(m) for m in markets)
+        if why_not is not None:
+            return _render_why_not(markets, why_not)
+        # Now, not the Scan: a Purchase after the latest Scan is matched to it (#60).
+        now = int(time.time())
+        made = {m.market: flips(conn, config, m.market, predictions, now) for m in markets}
     range_days = config.sell_rate_range_seconds // 86400
-    return "\n".join(_render_market(m, range_days) for m in markets)
+    return "\n".join(_render_market(m, range_days, made[m.market]) for m in markets)
 
 
-def _render_market(m: MarketRecommendations, range_days: int) -> str:
+def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Flip]) -> str:
     as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
     held = held_units(m.holdings)
     holdings = _table(
@@ -585,7 +617,64 @@ def _render_market(m: MarketRecommendations, range_days: int) -> str:
         f"Buy Under\n{buy_under}\n"
         f"{record}\n"
         f"{graded}"
+        f"{_flip_record(made)}\n"
     )
+
+
+def _flip_record(made: Sequence[Flip]) -> str:
+    """The graded Flips' record line (#60)."""
+    r = flip_record(made)
+    if r is None:
+        return "Graded Flips: none yet"
+    days = "" if r.median_days is None else f"{r.median_days:.2f}"
+    return (
+        f"Graded Flips: {r.graded} graded, {r.paid_off} paid off, "
+        f"realized/expected Profit {_percent(r.realized_over_expected)}, "
+        f"price/Post at {_percent(r.price_over_post_at)} (median), "
+        f"sold within horizon {_percent(r.sold_within)}, median days to sell {days}"
+    )
+
+
+def run_flips(config: Config) -> str:
+    """Each Market's Flips to Sell made (#60), graded or pending, as text. Working out
+    what a past Scan named is slow, so each is worked out once and frozen in grades.toml."""
+    predictions = load_predictions(config.predictions_path)
+    with closing(open_history(config.history_path)) as conn:
+        made = {}
+        for market in character_markets(conn):
+            times = scan_times(conn, market)
+            if times:
+                made[market] = flips(conn, config, market, predictions, int(time.time()))
+    if not made:
+        return "No Character has a Market with a Scan yet.\n"
+    return "\n".join(_render_flips(market, f) for market, f in made.items())
+
+
+def _render_flips(market: Market, made: Sequence[Flip]) -> str:
+    title = _graded_title(market)
+    table = _table(
+        ["Item", "Bought", "Units", "Post at", "Sold at", "Days", "Grade"],
+        [
+            [
+                f.item_key,
+                datetime.fromtimestamp(f.bought_at).strftime("%Y-%m-%d %H:%M"),
+                str(f.units),
+                _money(f.named.post_at),
+                _money(f.realized_price),
+                _last_sale(f),
+                "pending" if f.grade is None else _money(f.grade.realized),
+            ]
+            for f in made
+        ],
+    )
+    return f"{title}\n{table}{_flip_record(made)}\n"
+
+
+def _last_sale(f: Flip) -> str:
+    """Days from the Purchase to the last sale within the horizon, if any."""
+    if f.grade is None or not f.grade.sale_days:
+        return ""
+    return f"{f.grade.sale_days[-1]:.2f}"
 
 
 def _market_title(m: MarketRecommendations) -> str:
@@ -916,6 +1005,9 @@ def main(argv: list[str] | None = None) -> int:
     replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
     replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
     commands.add_parser(
+        "flips", help="grade the Flips to Sell made: did they sell at the Post at named"
+    )
+    commands.add_parser(
         "disenchants", help="check the Disenchant tables against your Disenchant Results"
     )
     args = parser.parse_args(argv)
@@ -937,6 +1029,8 @@ def main(argv: list[str] | None = None) -> int:
         return _replay(config, args.since, args.until)
     if args.command == "disenchants":
         return _disenchants(config)
+    if args.command == "flips":
+        return _flips(config)
     return _watch(config)
 
 

@@ -34,7 +34,7 @@ The Brain reads `brain/config.toml`, which maps each WoW install folder to its E
 Copy-Item brain\config.example.toml brain\config.toml
 ```
 
-Predictions, your game-knowledge calls that some items will be worth much more after a raid or phase release, go in `brain/predictions.toml` next to it (see `brain/predictions.example.toml` and ADR-0006). It's optional, not committed, and can't be rebuilt from the Archive, so keep a copy of it. The Brain freezes each Prediction's Grade, and the cost of what you held when you wrote it, in `brain/grades.toml` beside it. That file can't be rebuilt either (a new pricing rule would grade differently), so keep a copy of it too, and delete an entry only to have it worked out again.
+Predictions, your game-knowledge calls that some items will be worth much more after a raid or phase release, go in `brain/predictions.toml` next to it (see `brain/predictions.example.toml` and ADR-0006). It's optional, not committed, and can't be rebuilt from the Archive, so keep a copy of it. The Brain freezes each Prediction's Grade, and the cost of what you held when you wrote it, in `brain/grades.toml` beside it, along with each Flip Grade and the Flips to Sell named by the Scans before your Purchases. That file can't be rebuilt either (a new pricing rule would grade differently), so keep a copy of it too, and delete an entry only to have it worked out again.
 
 ### Running the Brain
 
@@ -48,6 +48,7 @@ cd brain
 ..\.venv\Scripts\brain recommend  # print Vendor, Sell or Hold for Holdings, and the Shopping List
 ..\.venv\Scripts\brain replay --since 2026-09-20  # grade the Brain against Auctionator and emulated TSM (ADR-0015)
 ..\.venv\Scripts\brain disenchants  # check the Disenchant tables against your Disenchant Results (ADR-0018)
+..\.venv\Scripts\brain flips  # grade the Flips to Sell you made against what the Brain named (ADR-0023)
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.

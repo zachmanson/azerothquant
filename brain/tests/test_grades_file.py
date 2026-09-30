@@ -1,7 +1,18 @@
 import pytest
 
 from brain.config import Era
-from brain.grades_file import Grade, GradesError, freeze_grade, freeze_held, load_frozen
+from brain.grades_file import (
+    FlipGrade,
+    Grade,
+    GradesError,
+    Named,
+    flip_name,
+    freeze_flip_grade,
+    freeze_grade,
+    freeze_held,
+    freeze_shown,
+    load_frozen,
+)
 from brain.history import Market
 from brain.lots import Held
 
@@ -27,6 +38,28 @@ def test_frozen_entries_come_back_as_written(tmp_path):
     assert frozen.grades == {
         QUOTED: Grade(QUOTED, 1_790_000_000, 570.0, 564.3, 604),
         ACCENTED: Grade(ACCENTED, 1_790_000_001, 0.1 + 0.2, 0.0, 0),
+    }
+
+
+def test_frozen_flip_entries_come_back_as_written(tmp_path):
+    # #60: what two Scans named, one of them nothing, and two Flip Grades, one without a
+    # sale or an own Listing seen.
+    path = tmp_path / "grades.toml"
+    linen = Named("2589", 5, 200, 999.0, 3745.25, 0.1 + 0.2, 10_800)
+    ore = Named("2770", 3, 40, 80.5, 60.0, None, 10_800)
+    sold = FlipGrade(1_790_015_000, 5, 1000, 3, 2997.0, 2847.15, 20.0, (0.03, 0.5), 3000, 1)
+    unsold = FlipGrade(1_790_015_001, 3, 120, 0, 0.0, 0.0, 0.1 + 0.2, (), None, 0)
+    freeze_shown(path, MARKET, 1_790_003_600, 10_800, [linen, ore])
+    freeze_shown(path, MARKET, 1_790_007_200, 10_800, [])
+    freeze_flip_grade(path, MARKET, flip_name("2589", 1_790_003_600), sold)
+    freeze_flip_grade(path, MARKET, flip_name("2770", 1_790_003_600), unsold)
+
+    frozen = load_frozen(path, MARKET)
+
+    assert frozen.shown == {1_790_003_600: {"2589": linen, "2770": ore}, 1_790_007_200: {}}
+    assert frozen.flips == {
+        flip_name("2589", 1_790_003_600): sold,
+        flip_name("2770", 1_790_003_600): unsold,
     }
 
 

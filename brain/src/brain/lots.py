@@ -61,7 +61,7 @@ def lots(
     written = {p.name: start_of(p.written) for p in predictions}
     result = sorted(
         [
-            Lot(p.item_key, happened_at(p), p.count, p.price, (), _bought_under(p, predictions))
+            Lot(p.item_key, happened_at(p), p.count, p.price, (), bought_under(p, predictions))
             for p in purchases
         ]
         + [Lot(h.item_key, written[h.prediction], h.units, h.cost, (), h.prediction) for h in held],
@@ -83,7 +83,7 @@ def lots(
     return result
 
 
-def _bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str | None:
+def bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str | None:
     """The Prediction a Purchase's units belong to: the one of its Item Key that stood
     when it was bought, from the start of its written day until it ended."""
     bought_at = happened_at(purchase)
