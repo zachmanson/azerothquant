@@ -1,3 +1,9 @@
+2026-09-29 (later 28): Closed #56 as answered, with a "revisit after Live" note. Nothing to act on until Blizzard adds a Forever API namespace or TSM adds Forever. If either ships, file a fresh issue (Blizzard: first check the 30-day retention rule against ADR-0005). Details are in `docs/research/ah-data-sources.md`.
+
+Next, in order: unchanged from the (later 25) entry. Also, around #110's Nov 18 check, glance at whether Blizzard/TSM have shipped anything for Forever.
+
+- Gotchas: unchanged. `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it.
+
 2026-09-29 (later 27): #85's #50 check not done (away from the game for a while). The expected Holdings values are commented on #85: 5 paid rows now, with stars on 247754 (+190%) and 279962 (+451%), 279976 at +8% with no star, and 250933/20744 at -5% in red. Recheck against the latest import when you're back.
 
 Next, in order: unchanged from the entry below.
