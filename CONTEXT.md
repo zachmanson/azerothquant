@@ -148,6 +148,10 @@ _Avoid_: snapshot, inventory
 **Disenchant Result**:
 The materials the player actually got from disenchanting one specific item. The Addon records one for each Disenchant the player casts, with the item that left the bags between the cast starting and its loot. When it can't tell which item that was, it records only the item's Disenchant source group (if the items that left were alike) or just the mats. They travel on the Character Read of the session, and `brain disenchants` checks the static tables against them; they never change the tables themselves (ADR-0018).
 
+**Craft Result**:
+One craft the player made with a Known Recipe, and how many units of its output it made. The Addon records one for each craft of a recipe the Character's profession window was read with that session, counting the output from how many more of it the bags hold than when the cast started. When it can't tell (the output took longer than a few seconds, or the bags gained more than the recipe makes), it records no count, and the Brain counts the recipe's minimum. A recipe that makes no item is recorded with no output. They travel on the Character Read of the session as `crafts` (#44).
+_Avoid_: craft log, craft event
+
 ## Decisions
 
 **Candidate Item**:

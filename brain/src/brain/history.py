@@ -192,6 +192,17 @@ CREATE TABLE IF NOT EXISTS disenchant_result_mat (
     quantity INTEGER NOT NULL
 );
 
+-- Each craft the player made with a Known Recipe (#44), carried on the Character Read of
+-- its session as crafts.
+CREATE TABLE IF NOT EXISTS craft (
+    id INTEGER PRIMARY KEY,
+    character_read_id INTEGER NOT NULL REFERENCES character_read (id),
+    at INTEGER NOT NULL,
+    recipe_id INTEGER NOT NULL,
+    quantity INTEGER           -- output units made; NULL when the Addon couldn't read it
+);
+CREATE INDEX IF NOT EXISTS craft_by_read ON craft (character_read_id);
+
 -- One row per profession window read carried on a Character Read (its professions map).
 CREATE TABLE IF NOT EXISTS known_profession (
     id INTEGER PRIMARY KEY,
@@ -319,6 +330,16 @@ class Purchase:
     price: int  # copper for the stack
     arrived_at: int | None
     first_seen: int
+
+
+@dataclass(frozen=True)
+class CraftResult:
+    """One craft the player made with a Known Recipe (CONTEXT.md: Craft Result)."""
+
+    at: int
+    character: str
+    recipe_id: int
+    quantity: int | None = None  # output units; None when the Addon couldn't read it
 
 
 @dataclass(frozen=True)
@@ -825,6 +846,7 @@ def _import_character_read(
         [(read_id, item_id, cost) for item_id, cost in costs.items()],
     )
     _import_disenchant_results(conn, read_id, raw, report)
+    _import_crafts(conn, read_id, raw, report)
 
 
 def _import_disenchant_results(
@@ -872,6 +894,26 @@ def _disenchant_result(entry: dict) -> tuple[tuple, dict[int, int]] | None:
     if not all(f is None or _whole(f) for f in fields):
         return None
     return (at, *fields), quantities
+
+
+def _import_crafts(conn: sqlite3.Connection, read_id: int, raw: dict, report: ImportReport) -> None:
+    entries = _entries(raw.get("crafts"))
+    rows = []
+    for entry in entries:
+        at, recipe_id, quantity = (entry.get(k) for k in ("at", "recipeID", "quantity"))
+        readable_quantity = quantity is None or (_whole(quantity) and quantity >= 1)
+        if _whole(at) and _whole(recipe_id) and readable_quantity:
+            rows.append((read_id, at, recipe_id, quantity))
+    conn.executemany(
+        "INSERT INTO craft (character_read_id, at, recipe_id, quantity) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    unreadable = len(entries) - len(rows)
+    if unreadable:
+        report.warn(
+            f"Character Read at {raw['readAt']} for {raw['character']}: skipped"
+            f" {unreadable} Craft Results the Brain can't read."
+        )
 
 
 def _merchant_costs(raw: dict) -> tuple[dict[int, float], int]:
@@ -1379,6 +1421,18 @@ def disenchant_results(conn: sqlite3.Connection, era: Era) -> list[DisenchantRes
         DisenchantResult(at, character, mats.get(result_id, {}), *fields)
         for result_id, at, character, *fields in rows
     ]
+
+
+def crafts(conn: sqlite3.Connection, market: Market) -> list[CraftResult]:
+    """Every Craft Result recorded in the Market, by the faction of the Character Read that
+    carried it, oldest first."""
+    rows = conn.execute(
+        "SELECT c.at, r.character, c.recipe_id, c.quantity"
+        " FROM craft c JOIN character_read r ON c.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.faction = ? AND r.era = ? ORDER BY c.at, c.id",
+        _market_params(market),
+    )
+    return [CraftResult(*row) for row in rows]
 
 
 def _market_characters(

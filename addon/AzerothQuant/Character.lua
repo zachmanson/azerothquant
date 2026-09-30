@@ -2,7 +2,8 @@
 -- both), records the Character's gold, bags and, if the bank was opened this session,
 -- the bank to AzerothQuantDB.characterReads, along with the Known Recipes and profession
 -- list Professions.lua has kept, the Merchant Costs Merchant.lua has and this session's
--- Disenchant Results (DisenchantCapture.lua, fed here since it needs the bags). All shaping
+-- Disenchant Results (DisenchantCapture.lua) and Craft Results (CraftCapture.lua, #44),
+-- both fed here since they need the bags. All shaping
 -- happens in CharacterRead.lua; this file only talks to the WoW API. On load it also deletes the Reads the Brain has
 -- imported (Prune.lua).
 --
@@ -26,6 +27,7 @@ local Chat = ns.Chat
 local Professions = ns.Professions
 local Merchant = ns.Merchant
 local DisenchantCapture = ns.DisenchantCapture
+local CraftCapture = ns.CraftCapture
 local LootAlert = ns.LootAlert
 
 local DISENCHANT_SPELL = 13262
@@ -67,6 +69,8 @@ local carried -- { money, slots }: the latest read of gold and bags while in the
 local timer
 local carriedTimer
 local disenchants = DisenchantCapture.new()
+-- Professions.latest() is the live table Professions.lua fills as windows are read.
+local crafts = CraftCapture.new(Professions.latest())
 
 local function readContainers(bags, into)
   for _, bag in ipairs(bags) do
@@ -117,6 +121,8 @@ local function readCarried()
   carried = { money = GetMoney(), slots = readContainers(bagIds(), {}) }
   -- The Disenchanted item may leave the bags only after its loot window opens.
   disenchants:bagsRead(carried.slots, time())
+  -- So may a craft's output.
+  crafts:bagsRead(carried.slots, time())
 end
 
 -- The loot window's item slots, { link, quantity } each. Money has no link.
@@ -204,11 +210,19 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
       cancel()
       timer = C_Timer.NewTimer(QUIET_SECONDS, readBank)
     end
-  elseif event == "UNIT_SPELLCAST_START" and arg3 == DISENCHANT_SPELL then
+  elseif event == "UNIT_SPELLCAST_START" then
     -- The item is still in the bags while the cast runs (unit, castGUID, spellID).
-    disenchants:castStarted(readContainers(bagIds(), {}))
-  elseif event == "UNIT_SPELLCAST_SUCCEEDED" and arg3 == DISENCHANT_SPELL then
-    disenchants:castSucceeded()
+    if arg3 == DISENCHANT_SPELL then
+      disenchants:castStarted(readContainers(bagIds(), {}))
+    elseif crafts:knownRecipe(arg3) then
+      crafts:castStarted(arg3, readContainers(bagIds(), {}), time())
+    end
+  elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+    if arg3 == DISENCHANT_SPELL then
+      disenchants:castSucceeded()
+    elseif crafts:knownRecipe(arg3) then
+      crafts:castSucceeded(arg3, readContainers(bagIds(), {}), time())
+    end
   elseif event == "LOOT_READY" then
     disenchants:lootReady(lootSlots(), readContainers(bagIds(), {}), time())
   elseif event == "LOOT_CLOSED" then
@@ -231,6 +245,7 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
       return
     end
     disenchants:flush()
+    crafts:flush()
     local realm, faction = GetRealmName(), UnitFactionGroup("player")
     local market = faction and RecommendationTable.marketKey(realm, faction)
     local read = CharacterRead.build({
@@ -241,7 +256,9 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
       money = carried.money,
       budget = market and db.budgets and db.budgets[market],
       daysToSell = market and db.daysToSell and db.daysToSell[market],
-    }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs(), disenchants.results)
+    }, carried.slots, bank, Professions.latest(), Professions.list(), Merchant.costs(), disenchants.results,
+      crafts.results
+    )
     table.insert(db.characterReads, read)
     -- Kept apart from characterReads (pruned) so the next load can tell whether a copy of
     -- Recommendations.lua has caught up with this logout (Freshness.lua, #106).

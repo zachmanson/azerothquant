@@ -8,10 +8,12 @@ from brain.archive import Archive
 from brain.config import Config, Era, Install
 from brain.disenchant import DisenchantResult
 from brain.history import (
+    CraftResult,
     Holding,
     KnownRecipe,
     Market,
     Reagent,
+    crafts,
     disenchant_results,
     holdings,
     import_character_reads,
@@ -683,3 +685,43 @@ def test_a_disenchant_result_the_brain_cant_read_is_skipped_with_a_warning(db):
     assert disenchant_results(db, Era.BETA) == []
     assert len(report.warnings) == 1
     assert "2 Disenchant Results" in report.warnings[0]
+
+
+# --- Craft Results (#44) ---
+
+
+def test_craft_results_are_imported_by_market_oldest_first(db):
+    read = character_read(character="Bob-Patel")
+    read["crafts"] = [
+        {"recipeID": 2963, "at": T0 - 50, "quantity": 1},
+        # The Addon couldn't read the output count, or the recipe makes no item.
+        {"recipeID": 7418, "at": T0 - 60},
+    ]
+    horde = character_read(character="Orc-Patel", faction="Horde")
+    horde["crafts"] = [{"recipeID": 2963, "at": T0 - 40, "quantity": 1}]
+
+    run(db, read, horde)
+
+    assert crafts(db, ALLIANCE) == [
+        CraftResult(at=T0 - 60, character="Bob-Patel", recipe_id=7418),
+        CraftResult(at=T0 - 50, character="Bob-Patel", recipe_id=2963, quantity=1),
+    ]
+    assert crafts(db, Market(REALM, "Alliance", Era.LIVE)) == []
+
+
+def test_a_craft_result_the_brain_cant_read_is_skipped_with_a_warning(db):
+    read = character_read()
+    read["crafts"] = [
+        {"recipeID": "bolt", "at": T0},
+        {"recipeID": 2963},
+        {"recipeID": 2963, "at": T0, "quantity": 0},
+        {"recipeID": 2963, "at": T0 - 1, "quantity": 1},
+    ]
+
+    report = run(db, read)
+
+    assert crafts(db, ALLIANCE) == [
+        CraftResult(at=T0 - 1, character="Kash-Patel", recipe_id=2963, quantity=1)
+    ]
+    assert len(report.warnings) == 1
+    assert "3 Craft Results" in report.warnings[0]

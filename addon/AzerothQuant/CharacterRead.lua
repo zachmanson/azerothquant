@@ -84,7 +84,18 @@ end
 -- the Read when there are none.
 -- disenchantResults: the DisenchantCapture Results of this session (#76). Left out of the
 -- Read when there are none.
-function CharacterRead.build(who, bagSlots, bank, professions, professionList, merchantCosts, disenchantResults)
+-- craftResults: the CraftCapture Results of this session (#44), stored as crafts. Left out
+-- of the Read when there are none.
+function CharacterRead.build(
+  who,
+  bagSlots,
+  bank,
+  professions,
+  professionList,
+  merchantCosts,
+  disenchantResults,
+  craftResults
+)
   local slotLists = { bagSlots, bank and bank.slots or {} }
   local prices, missing = vendorPrices(slotLists)
   return {
@@ -105,6 +116,7 @@ function CharacterRead.build(who, bagSlots, bank, professions, professionList, m
     professionList = professionList,
     merchantCosts = merchantCosts and next(merchantCosts) and merchantCosts or nil,
     disenchantResults = disenchantResults and next(disenchantResults) and disenchantResults or nil,
+    crafts = craftResults and next(craftResults) and craftResults or nil,
   }
 end
 

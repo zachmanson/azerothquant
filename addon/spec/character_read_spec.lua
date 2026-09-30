@@ -160,4 +160,11 @@ describe("CharacterRead.build", function()
     assert.are.same(results, CharacterRead.build(WHO, {}, nil, {}, {}, {}, results).disenchantResults)
     assert.is_nil(CharacterRead.build(WHO, {}, nil, {}, {}, {}, {}).disenchantResults)
   end)
+
+  it("includes the Craft Results of this session as crafts, and leaves them out when there are none", function()
+    local crafts = { { recipeID = 2963, at = 1, quantity = 1 }, { recipeID = 7418, at = 2 } }
+
+    assert.are.same(crafts, CharacterRead.build(WHO, {}, nil, {}, {}, {}, {}, crafts).crafts)
+    assert.is_nil(CharacterRead.build(WHO, {}, nil, {}, {}, {}, {}, {}).crafts)
+  end)
 end)
