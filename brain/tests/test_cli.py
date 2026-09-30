@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pytest
+from fake_pool import FakePool
 
 from brain.archive import Archive
 from brain.cli import (
@@ -54,7 +55,6 @@ from brain.recommend import grades
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 from brain.watch import Watcher
-from tests.fake_pool import FakePool
 
 FIXTURE = Path(__file__).parent / "fixtures" / "AzerothQuant.lua"
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)

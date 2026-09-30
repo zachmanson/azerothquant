@@ -5,12 +5,12 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+from fake_pool import FakePool
 
 from brain.config import Config, Era, Install
 from brain.history import Market, import_scans, listings, open_history, scan_times
 from brain.pool import strip_scan
 from brain.pool_sync import pull, push
-from tests.fake_pool import FakePool
 
 T0 = 1_790_000_000
 MINUTE = 60
