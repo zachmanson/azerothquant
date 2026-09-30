@@ -1,3 +1,17 @@
+2026-09-29 (later 29): QUEUE CHANGE. The user wants `later` work done while `core` waits on the PC. Every open `core` item is blocked (in game, or a date), so work down this list when away from the game.
+
+Next, in order:
+1. At the PC or on a date: the (later 25) list still applies (#85's checks, the Oct 3 #83 replay, Nov 4 #91, Nov 18 #110). Those come first whenever they're possible.
+2. Away from the game, `later` work:
+   1. /grilling #58: pool Sell Rate and Fair Value across random suffixes, or not. It matters before Live on Nov 4, because suffixes split an already thin history.
+   2. /grilling #60: grade Flips (was a Flip made, and did it sell at Post at within the Sale Horizon).
+   3. #14: design how Outcomes match back to Listings (Cancelled and Expired mail has no price), then build.
+   4. #10: compact Listing encoding and parser fast paths (the Lua side needs a #85-style in-game check afterwards).
+   5. Grills, in any order: #97, #89, #61, #55, #54, #44, #19.
+   - Needs the game, so skip for now: #81, #39, #76, #108, #109, #82 (browser).
+
+- Gotchas: unchanged. `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it.
+
 2026-09-29 (later 28): Closed #56 as answered, with a "revisit after Live" note. Nothing to act on until Blizzard adds a Forever API namespace or TSM adds Forever. If either ships, file a fresh issue (Blizzard: first check the 30-day retention rule against ADR-0005). Details are in `docs/research/ah-data-sources.md`.
 
 Next, in order: unchanged from the (later 25) entry. Also, around #110's Nov 18 check, glance at whether Blizzard/TSM have shipped anything for Forever.
