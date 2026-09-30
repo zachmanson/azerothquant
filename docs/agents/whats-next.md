@@ -1,3 +1,15 @@
+2026-09-29 (later 25): Sorted #85's leftovers against the current data. Nothing was checked (not at the game).
+- Checkable now: #50. The Holdings have 5 paid rows: 247754 (+190%, the only roiHint), 250933 (-5%), 20744 (-5%), plus 2 more. Check the ROI cell color, the green star on 247754, and `Paid ... each, nets ...` in the row and item tooltips.
+- Not checkable: #33 (no `via` row), #75 (no `blocked` row), #83 replay (needs 7 days, ~Oct 3). Booty Bay Broker is optional browser work.
+
+Next, in order:
+1. In game: #85's #50 check (above). Then #33/#75 whenever a chained or blocked Craft row shows up.
+2. ~Oct 3: `brain replay` for #83.
+3. Nov 4 at the PC: #91's list.
+4. ~Nov 18: answer #110's triage question.
+
+- Gotchas: unchanged from the entry below.
+
 2026-09-29 (later 24): Triaged #110 (Beta Prior as an engine nudge): `enhancement`, `later`, `needs-info`. The triage comment asks for a check around Nov 18: how close the Beta column was to Live prices, and which Item Keys were blocked by thin Live history. Close means spec + ADR; far off means wontfix + `.out-of-scope/`.
 
 Next, in order:
