@@ -1,3 +1,12 @@
+2026-09-29 (later 24): Triaged #110 (Beta Prior as an engine nudge): `enhancement`, `later`, `needs-info`. The triage comment asks for a check around Nov 18: how close the Beta column was to Live prices, and which Item Keys were blocked by thin Live history. Close means spec + ADR; far off means wontfix + `.out-of-scope/`.
+
+Next, in order:
+1. At the PC: #85's parked in-game checks (core).
+2. Nov 4 at the PC: #91's list (see gotcha below).
+3. ~Nov 18: answer #110's triage question from two weeks of Live.
+
+- Gotchas: unchanged from the entry below. Recommendations.lua in the working tree is Brain output; don't commit it with other work.
+
 2026-09-29 (later 23): AT THE PC. Built #106 (77a2994) with /tdd, then /code-review. The Brain mirrors Recommendations.lua into a Brain-created `AzerothQuant_Data` (LoadOnDemand). The Addon's new `Freshness.lua` (busted) decides stale or fresh, and `covers` decides newer. `DataAddon.lua` (glue) runs Load, and the Reload button relabels to Load. RELOAD_READY_AFTER is now 70 s. #106 stays open for the in-game check, which is a comment on the issue.
 - Review fixes applied: the Brain writes the Addon's copy before the Data copy; `db.lastSavedRead` is cleared on a logout with no Character Read; Scanner recounts saved Scans after Load instead of subtracting the pruned ones.
 
