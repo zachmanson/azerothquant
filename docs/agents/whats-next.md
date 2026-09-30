@@ -1,3 +1,11 @@
+2026-09-30 (later 32): Grilled #60. The spec is posted on the issue, and it's now ready-for-agent (still `later`). It grades Flips to Sell only, and reports without feeding back into decisions. A Purchase is matched automatically to a Flip to Sell row on the Shopping List as of the last Scan before it, at or under the row's dearest Listing, and one Flip is the matched Purchases of the same Scan's row. At first sight the Brain recomputes that row and freezes Post at, expected Profit, units and the Sale Horizon in `grades.toml` `[[flips]]`. Once a Sale Horizon has passed since the Purchase, the grade is: Sold Outcomes within it (oldest-first Lots) after the cut, plus open units at Best Exit Value, less cost. Deposits are left out. The output is a summary line plus a `brain flips` command. Beta is included (provisional), and existing history is backfilled.
+
+Next, in order:
+1. At the PC or on a date: unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, Nov 18 #110), plus #58's in-game tooltip check. Close #58 after it.
+2. Away from the game: #14, then #10, then the grills (the (later 29) list). #60 can be built with /tdd whenever it fits.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. For #60's freeze step, recomputing one past Scan's Shopping List reuses the replay machinery (`replay._brain`). It's slow per Scan, so run it only for new matched Flips.
+
 2026-09-30 (later 31): Built #58 (473c4bc). `_Valuer.held_rate` pools Sibling Sale Events into held units only: rows, has_data, the Holdings queue, and so worth / Best Exit Value, Crafts and Disenchant choices. Flips, Buy Under, Max Loss and Flip to Craft outputs still read `rates`. There's a `suffix_pool_weight` config (0 to 1, default 0.5), `siblingSales` on Holdings rows, the tooltip `Sales N (+M other suffixes)`, a CONTEXT.md **Sibling** entry, and ADR-0022. The issue stays open until the in-game tooltip glance is done.
 
 Next, in order:
