@@ -6,8 +6,7 @@ Next, in order (grill first where not ready-for-agent):
 3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
 
 - Gotchas: same as later 56, minus the node one, plus these, which the #121 review flagged for #122:
-  - Node 24 is now installed (winget) at `C:\Program Files
-odejs`. A shell started before the install doesn't have it on PATH, so prepend it. npm 11.17 blocks install scripts: `pool/package.json` `allowScripts` approves esbuild and workerd by exact version, so re-approve with `npm approve-scripts` after bumping them. workerd's newest compat date lags; `compatibility_date` is 2026-08-15.
+  - Node 24 is now installed (winget) at `C:\Program Files\nodejs`. A shell started before the install doesn't have it on PATH, so prepend it. npm 11.17 blocks install scripts: `pool/package.json` `allowScripts` approves esbuild and workerd by exact version, so re-approve with `npm approve-scripts` after bumping them. workerd's newest compat date lags; `compatibility_date` is 2026-08-15.
   - The rate limit is wall clock (spec-literal: one upload per key per Market per 10 min), so an offline backlog drains one Scan per Market per 10 minutes. The Brain must treat 429 as "retry next cycle", not as an error.
   - A duplicate upload (same Market + requestedAt) returns another member's pool ID. If that member is revoked, the ID shows up in `rolledBack`. A rollback must never delete an own (`source=own`) Scan; just clear its `pool_id` so it re-pushes.
   - There's no date filter on `GET /scans`. The 30-day backfill pages from cursor 0 (omit `since`) and filters on `requestedAt` in the Brain. Index rows are small; add `since=<time>` to the Worker later if it ever matters.
