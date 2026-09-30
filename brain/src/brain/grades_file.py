@@ -1,5 +1,6 @@
 """grades.toml: Grades and held-at-writing costs, frozen once computed (#66, ADR-0006),
-and the Flips to Sell each Scan named and their Flip Grades (#60, ADR-0023).
+the Flips to Sell each Scan named and their Flip Grades (#60, ADR-0023), and what each
+Scan named to buy (#55, ADR-0025).
 
 They are worked out from history, so a later change to how Best Exit Value is priced
 would silently rewrite them. The history DB is rebuildable (ADR-0005), so they live in
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from brain.history import Market
-from brain.lots import Held
+from brain.lots import Held, NamedSet
 
 _HEADER = (
     "# Written by the Brain: Grades and held-at-writing costs, frozen once worked out.\n"
@@ -105,6 +106,8 @@ class Frozen:
     shown: dict[int, dict[str, Named]] = field(default_factory=dict)
     # By `flip_name`.
     flips: dict[str, FlipGrade] = field(default_factory=dict)
+    # By the requested_at of each Scan worked out again, what it named to buy.
+    named: dict[int, NamedSet] = field(default_factory=dict)
 
 
 def flip_name(item_key: str, scan_at: int) -> str:
@@ -160,9 +163,27 @@ def load_frozen(path: Path | None, market: Market) -> Frozen:
             )
             for name, entry in _entries(raw, "flips", market).items()
         }
+        named = {
+            int(scan_at): NamedSet(
+                {
+                    _typed(i["item_key"], str): float(_typed(i["price"], int | float))
+                    for i in entry["items"]
+                },
+                {
+                    (
+                        _typed(g["quality"], int),
+                        _typed(g["kind"], str),
+                        _typed(g["min_level"], int),
+                        _typed(g["max_level"], int),
+                    ): float(_typed(g["price"], int | float))
+                    for g in entry["groups"]
+                },
+            )
+            for scan_at, entry in _entries(raw, "named", market).items()
+        }
     except (KeyError, TypeError, AttributeError, ValueError) as e:
         raise GradesError(f"{path}: an entry is malformed ({e!r}); delete it to redo it") from None
-    return Frozen(held, grades, shown, flips)
+    return Frozen(held, grades, shown, flips, named)
 
 
 def _named(row: dict, sale_horizon: int) -> Named:
@@ -213,6 +234,19 @@ def freeze_shown(
     )
     body = f"sale_horizon = {sale_horizon}\nrows = [{rows}]\n"
     _append(path, "shown", market, str(scan_at), body)
+
+
+def freeze_named(path: Path, market: Market, scan_at: int, named: NamedSet) -> None:
+    """Append what a Scan named to buy, which may be nothing."""
+    items = ", ".join(
+        f"{{ item_key = {_string(k)}, price = {float(p)!r} }}" for k, p in named.items.items()
+    )
+    groups = ", ".join(
+        f"{{ quality = {q}, kind = {_string(kind)}, min_level = {lo}, max_level = {hi}, "
+        f"price = {float(p)!r} }}"
+        for (q, kind, lo, hi), p in named.groups.items()
+    )
+    _append(path, "named", market, str(scan_at), f"items = [{items}]\ngroups = [{groups}]\n")
 
 
 def freeze_flip_grade(path: Path, market: Market, name: str, grade: FlipGrade) -> None:

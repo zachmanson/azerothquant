@@ -63,6 +63,11 @@ class Group:
     mats: tuple[Mat, ...]
 
     @property
+    def key(self) -> tuple[int, str, int, int]:
+        """What names the group, without its mats (lots.GroupKey)."""
+        return (self.quality, self.kind, self.min_level, self.max_level)
+
+    @property
     def expected(self) -> dict[int, float]:
         """Expected quantity per Disenchant, by mat itemID."""
         expected: dict[int, float] = {}

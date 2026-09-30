@@ -16,17 +16,27 @@ from enum import StrEnum
 from functools import cache, cached_property
 from itertools import groupby
 from types import MappingProxyType
+from typing import NamedTuple
 
 from brain.beta_sell_rate import BetaSellRate, beta_ratios, beta_sell_rates
 from brain.config import Config
 from brain.disenchant import DisenchantTable, Group, ItemInfo, load_table
 from brain.fair_value import FairValueCache, Supply, fair_value
-from brain.grades_file import Grade, freeze_grade, freeze_held, load_frozen
+from brain.grades_file import (
+    Grade,
+    Named,
+    freeze_grade,
+    freeze_held,
+    freeze_named,
+    freeze_shown,
+    load_frozen,
+)
 from brain.history import (
     Holding,
     KnownRecipe,
     Listing,
     Market,
+    Purchase,
     character_markets,
     cheapest_seen,
     enchanting_skills,
@@ -45,13 +55,19 @@ from brain.history import (
     vendor_prices,
 )
 from brain.lots import (
+    GroupKey,
     Held,
     Lot,
+    NamedSet,
+    bought_under,
     deposits,
     ended_at,
+    happened_at,
+    is_for_use,
     item_names,
     link_sales,
     lots,
+    scan_before,
     settle,
     start_of,
 )
@@ -531,6 +547,7 @@ def recommend_market(
     fair_value_cache: FairValueCache | None = None,
     pricer: Pricer | None = None,
     why_not: bool = False,
+    paid: bool = True,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
@@ -538,7 +555,8 @@ def recommend_market(
     Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
     `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
     the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click.
-    `why_not` as in `recommend`."""
+    `why_not` as in `recommend`. Without `paid`, the Holdings rows get no Paid or ROI:
+    working out a past Scan, whose Lots may rest on what it named (#55), or a replay."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -639,7 +657,8 @@ def recommend_market(
     bound = {k: _bound(h) for k, h in held.items()}
     lot_costs = _lot_costs(conn, config, market, active, seen)
     rows = _hold(rows, active, bound, vendor, caps, lot_costs)
-    rows = _with_roi(rows, market_lots(conn, config, market, predictions, seen), cut, config)
+    if paid:
+        rows = _with_roi(rows, market_lots(conn, config, market, predictions, seen), cut, config)
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
     prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
@@ -664,6 +683,30 @@ def recommend_market(
         why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
         beta_ratios=ratios,
     )
+
+
+def named_set(m: MarketRecommendations) -> NamedSet:
+    """What a Scan's Recommendations named to buy (#55, ADR-0025): its Shopping List's
+    Flips to Sell and Vendor, at their dearest Listing, and Flips to Craft's Auction House
+    reagents, and its Buy Unders, each Item Key at the most any of them named."""
+    items: dict[str, float] = {}
+    groups: dict[GroupKey, float] = {}
+
+    def name(at_most: dict, key: object, price: float) -> None:
+        at_most[key] = max(price, at_most.get(key, price))
+
+    for r in m.shopping_list:
+        if r.action in (Action.SELL, Action.VENDOR) and r.price is not None:
+            name(items, r.item_key, r.price)
+        for buy in r.buys:
+            if not buy.merchant:
+                name(items, buy.item_key, buy.max_unit_price)
+    for b in m.buy_under:
+        if b.group is not None:
+            name(groups, b.group.key, b.price)
+        elif b.item_key is not None:
+            name(items, b.item_key, b.price)
+    return NamedSet(items, groups)
 
 
 def _why_not(
@@ -985,7 +1028,7 @@ def grades(
     frozen = load_frozen(config.grades_path, market).grades
     if all(p.name in frozen for p in due):
         return [frozen[p.name] for p in due]
-    every_lot = market_lots(conn, config, market, predictions)
+    every_lot = prediction_lots(conn, config, market, predictions)
     times = scan_times(conn, market)
     result = []
     for p in due:
@@ -1012,12 +1055,131 @@ def market_lots(
     predictions: Sequence[Prediction],
     seen: Sequence[Listing] | None = None,
 ) -> list[Lot]:
-    """`seen` is the Market's `listings`, when the caller has them already (#105)."""
+    """The Market's Lots, For Use Purchases starting none (ADR-0025). `seen` is the
+    Market's `listings`, when the caller has them already (#105)."""
     seen = listings(conn, market) if seen is None else seen
     market_purchases = purchases(conn, market)
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
     held = held_at_writing(conn, config, market, predictions)
-    return lots(market_purchases, linked, predictions, held)
+    kept = split_purchases(conn, config, market, predictions, market_purchases).kept
+    return lots(kept, linked, predictions, held)
+
+
+def prediction_lots(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    seen: Sequence[Listing] | None = None,
+) -> list[Lot]:
+    """The Market's Prediction Lots, without working out what any Scan named: other Lots
+    never close a Prediction's units, as those before it was written are folded into its
+    held Lot and those after it ended are younger. `seen` as in `market_lots`."""
+    if not predictions:
+        return []
+    seen = listings(conn, market) if seen is None else seen
+    market_purchases = purchases(conn, market)
+    linked = link_sales(outcomes(conn, market), seen, market_purchases)
+    held = held_at_writing(conn, config, market, predictions)
+    under = [p for p in market_purchases if bought_under(p, predictions) is not None]
+    return lots(under, linked, predictions, held)
+
+
+class Split(NamedTuple):
+    """Purchases split by whether they start a Lot (ADR-0025)."""
+
+    kept: list[Purchase]  # named by the Brain, or under a Prediction
+    for_use: list[Purchase]
+
+
+def split_purchases(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    bought: Sequence[Purchase],
+) -> Split:
+    """`bought` split into the Purchases that start Lots and the For Use ones (ADR-0025),
+    working out what each Scan before one named the first time it's needed (`rework`).
+    A Flip to Sell row frozen for a Scan names its Item Key too, so a Flip matched to a
+    row frozen before its Scan's named set (ADR-0023) always has its Lots."""
+    times = scan_times(conn, market)
+    frozen = load_frozen(config.grades_path, market)
+    named = dict(frozen.named)
+    for p in bought:
+        scan_at = scan_before(times, happened_at(p))
+        if scan_at is None or scan_at in named or bought_under(p, predictions) is not None:
+            continue
+        named[scan_at] = rework(conn, config, market, predictions, scan_at).named
+    for scan_at, rows in frozen.shown.items():
+        if scan_at in named:
+            items = dict(named[scan_at].items)
+            for r in rows.values():
+                items[r.item_key] = max(r.dearest, items.get(r.item_key, r.dearest))
+            named[scan_at] = replace(named[scan_at], items=items)
+    table = _disenchant_table()
+    info = item_info(conn, market.era)
+
+    def group_of(item_key: str) -> GroupKey | None:
+        item_id = item_id_of(item_key)
+        g = table.group(item_id, info[item_id]) if item_id in info else None
+        return None if g is None else g.key
+
+    result = Split([], [])
+    for p in bought:
+        use = is_for_use(p, predictions, times, named, group_of)
+        (result.for_use if use else result.kept).append(p)
+    return result
+
+
+class Reworked(NamedTuple):
+    """What a past Scan showed, worked out again."""
+
+    shown: dict[str, Named]  # its Flip to Sell rows by Item Key (#60)
+    named: NamedSet  # what it named to buy (#55)
+
+
+def rework(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    scan_at: int,
+) -> Reworked:
+    """What the Scan requested at `scan_at` showed, worked out again the way the replay
+    does (#80): its Flip to Sell rows by Item Key (#60), and what it named to buy (#55).
+    Worked out once for both, and frozen in grades.toml when there is one, where the
+    caller reads them from later."""
+    m = recommend_market(
+        # Working out a past Scan never freezes a Prediction's Grade.
+        conn,
+        replace(config, grades_path=None),
+        market,
+        predictions,
+        scan_at,
+        as_of=scan_at,
+        paid=False,
+    )
+    shown = {
+        r.item_key: Named(
+            r.item_key,
+            r.quantity,
+            int(r.price),
+            r.post_at,
+            r.profit,
+            r.days,
+            config.sale_horizon_seconds,
+        )
+        for r in m.shopping_list
+        if r.action is Action.SELL
+    }
+    named = named_set(m)
+    if config.grades_path is not None:
+        freeze_shown(
+            config.grades_path, market, scan_at, config.sale_horizon_seconds, list(shown.values())
+        )
+        freeze_named(config.grades_path, market, scan_at, named)
+    return Reworked(shown, named)
 
 
 def _lot_costs(
@@ -1032,8 +1194,8 @@ def _lot_costs(
     if not predictions:
         return {}
     result: dict[tuple[str, str], list[tuple[float, int]]] = {}
-    for lot in market_lots(conn, config, market, predictions, seen):
-        if lot.prediction is not None and lot.open_units:
+    for lot in prediction_lots(conn, config, market, predictions, seen):
+        if lot.open_units:
             result.setdefault((lot.prediction, lot.item_key), []).append(
                 (lot.cost / lot.units, lot.open_units)
             )

@@ -4,7 +4,17 @@ from datetime import date, datetime
 import pytest
 
 from brain.history import Listing, Outcome, Purchase
-from brain.lots import Held, Lot, LotSale, Settlement, link_sales, lots, settle
+from brain.lots import (
+    Held,
+    Lot,
+    LotSale,
+    NamedSet,
+    Settlement,
+    is_for_use,
+    link_sales,
+    lots,
+    settle,
+)
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
 
@@ -230,3 +240,46 @@ def test_a_prediction_settles_its_held_lot_and_purchases_under_it_and_nothing_el
     )
     settled = settle(_prediction(lapse=date(2026, 10, 10)), result, graded_at=OCT_11, cut=0.05)
     assert (settled.cost, settled.open_units) == (600 + 400, {LINEN: 14})
+
+
+# --- For Use (#55, ADR-0025) ---
+
+SCAN = OCT_1
+
+
+def _named_linen(price=50):
+    return {SCAN: NamedSet(items={LINEN: price})}
+
+
+@pytest.mark.parametrize(("price", "for_use"), [(500, False), (501, True)])
+def test_a_purchase_the_last_scan_before_it_named_at_or_under_its_price_is_no_for_use(
+    price, for_use
+):
+    bought = _purchase(LINEN, 10, price, arrived_at=SCAN + HOUR)
+    assert is_for_use(bought, [], [SCAN], _named_linen()) is for_use
+
+
+def test_a_purchase_with_no_scan_before_it_or_of_an_item_key_it_didnt_name_is_for_use():
+    assert is_for_use(_purchase(LINEN, 1, 10, arrived_at=SCAN - 1), [], [SCAN], {})
+    assert is_for_use(_purchase(WOOL, 1, 10, arrived_at=SCAN + HOUR), [], [SCAN], _named_linen())
+
+
+def test_a_purchase_is_named_by_the_last_scan_before_it_not_an_earlier_one():
+    named = {SCAN: NamedSet(items={LINEN: 50}), SCAN + 2 * HOUR: NamedSet()}
+    bought = _purchase(LINEN, 1, 10, arrived_at=SCAN + 3 * HOUR)
+    assert is_for_use(bought, [], [SCAN, SCAN + 2 * HOUR], named)
+
+
+def test_a_purchase_under_a_prediction_is_the_predictions_named_or_not():
+    bought = _purchase(LINEN, 1, 10, arrived_at=SCAN + HOUR)
+    assert not is_for_use(bought, [_prediction()], [SCAN], {SCAN: NamedSet()})
+
+
+GREENS = (2, "armor", 21, 25)
+
+
+@pytest.mark.parametrize(("group", "for_use"), [(GREENS, False), (None, True)])
+def test_a_disenchant_source_groups_buy_under_names_every_item_in_it(group, for_use):
+    named = {SCAN: NamedSet(groups={GREENS: 300})}
+    bought = _purchase("15215:0", 1, 300, arrived_at=SCAN + HOUR)
+    assert is_for_use(bought, [], [SCAN], named, lambda _: group) is for_use

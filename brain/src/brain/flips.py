@@ -8,21 +8,13 @@ row bought. All of an Item Key's Purchases matched to the same Scan's row are on
 All amounts are copper.
 """
 
-import bisect
 import sqlite3
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from brain.config import Config
-from brain.grades_file import (
-    FlipGrade,
-    Named,
-    flip_name,
-    freeze_flip_grade,
-    freeze_shown,
-    load_frozen,
-)
+from brain.grades_file import FlipGrade, Named, flip_name, freeze_flip_grade, load_frozen
 from brain.history import (
     Holding,
     Listing,
@@ -36,10 +28,10 @@ from brain.history import (
     purchases,
     scan_times,
 )
-from brain.lots import Lot, bought_under, happened_at
+from brain.lots import Lot, bought_under, happened_at, scan_before
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
-from brain.recommend import Action, auction_cut, exit_values, market_lots, recommend_market
+from brain.recommend import auction_cut, exit_values, market_lots, rework
 
 
 @dataclass(frozen=True)
@@ -117,22 +109,12 @@ def flips(
         bought_at = happened_at(p)
         if bought_at > now or bought_under(p, predictions) is not None:
             continue
-        i = bisect.bisect_right(times, bought_at)
-        if not i:
+        scan_at = scan_before(times, bought_at)
+        if scan_at is None:
             continue
-        scan_at = times[i - 1]
         if scan_at not in shown:
             # The slow step: each Scan is worked out once, then read from grades.toml.
-            named = _shown_rows(conn, config, market, predictions, scan_at)
-            if config.grades_path is not None:
-                freeze_shown(
-                    config.grades_path,
-                    market,
-                    scan_at,
-                    config.sale_horizon_seconds,
-                    list(named.values()),
-                )
-            shown[scan_at] = named
+            shown[scan_at] = rework(conn, config, market, predictions, scan_at).shown
         named = shown[scan_at].get(p.item_key)
         if named is None or p.price > named.dearest * p.count:
             continue
@@ -258,37 +240,3 @@ def _grade(
             for o in record.outcomes
         ),
     )
-
-
-def _shown_rows(
-    conn: sqlite3.Connection,
-    config: Config,
-    market: Market,
-    predictions: Sequence[Prediction],
-    scan_at: int,
-) -> dict[str, Named]:
-    """The Flip to Sell rows on the Shopping List as of the Scan requested at `scan_at`,
-    worked out again the way the replay does (#80), by Item Key."""
-    m = recommend_market(
-        # Working out a past Scan never freezes a Prediction's Grade.
-        conn,
-        replace(config, grades_path=None),
-        market,
-        predictions,
-        scan_at,
-        as_of=scan_at,
-        buy_under=False,
-    )
-    return {
-        r.item_key: Named(
-            r.item_key,
-            r.quantity,
-            int(r.price),
-            r.post_at,
-            r.profit,
-            r.days,
-            config.sale_horizon_seconds,
-        )
-        for r in m.shopping_list
-        if r.action is Action.SELL
-    }

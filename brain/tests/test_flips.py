@@ -6,7 +6,7 @@ import pytest
 
 from brain.config import Config, Era, Install
 from brain.flips import Flip, flip_record, flips
-from brain.grades_file import FlipGrade, Named
+from brain.grades_file import FlipGrade, Named, freeze_named, freeze_shown
 from brain.history import (
     Market,
     import_character_reads,
@@ -14,6 +14,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.lots import NamedSet
 from brain.predictions import Prediction
 
 T0 = 1_790_000_000
@@ -262,8 +263,9 @@ def test_units_sold_after_the_sale_horizon_count_open_at_their_best_exit_value_t
     assert grade.open_value == pytest.approx(2 * 999 * 0.95)
 
 
-def test_sales_close_older_lots_of_the_item_key_first(db):
-    # 3 Linen bought at T0, when nothing was a Flip, sell ahead of the Flip's.
+def test_a_purchase_the_brain_didnt_name_takes_none_of_a_flips_sales(db):
+    # 3 Linen bought at T0, when nothing was a Flip or a Buy Under: For Use (#55), so the
+    # sales close the Flip's units, not theirs.
     load(
         db,
         linen_market(*later_linen(T0 + 3 * HOUR, GRADED)),
@@ -276,7 +278,7 @@ def test_sales_close_older_lots_of_the_item_key_first(db):
 
     [flip] = flips(db, CONFIG, MARKET, [], now=GRADED)
 
-    assert flip.grade.sold_units == 1
+    assert flip.grade.sold_units == 4
 
 
 @pytest.mark.parametrize("now", [GRADED - 1, GRADED])
@@ -398,3 +400,22 @@ def test_the_record_of_graded_flips_takes_them_together():
 
 def test_there_is_no_record_with_nothing_graded():
     assert flip_record([replace(graded_flip(1, 1, 1.0, 1, 0, 0.0, 0.0, ()), grade=None)]) is None
+
+
+def test_a_flip_matched_to_a_row_frozen_before_named_sets_keeps_its_lot(db, tmp_path):
+    # #55: the Scan's Flip to Sell row was frozen before `named` existed, and its named
+    # set, worked out later, lacks it. The row still names the Purchase, so its sales
+    # close the Flip's units.
+    config = freezing(tmp_path)
+    linen = Named(LINEN_KEY, 5, 200, 999.0, 3745.0, None, 3 * HOUR)
+    freeze_shown(config.grades_path, MARKET, T0 + HOUR, 3 * HOUR, [linen])
+    freeze_named(config.grades_path, MARKET, T0 + HOUR, NamedSet())
+    load(
+        db,
+        linen_market(*later_linen(T0 + 3 * HOUR, GRADED)),
+        [won(BOUGHT, count=5, unit=200), sold(T0 + 2 * HOUR, count=3, unit=999)],
+    )
+
+    [flip] = flips(db, config, MARKET, [], now=GRADED)
+
+    assert flip.grade.sold_units == 3

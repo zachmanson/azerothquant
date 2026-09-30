@@ -38,6 +38,7 @@ from brain.history import (
     ImportFileError,
     ImportReport,
     Market,
+    Purchase,
     character_markets,
     disenchant_results,
     import_character_reads,
@@ -45,9 +46,10 @@ from brain.history import (
     import_mailbox_reads,
     import_scans,
     open_history,
+    purchases,
     scan_times,
 )
-from brain.lots import start_of
+from brain.lots import happened_at, start_of
 from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import (
     Action,
@@ -63,6 +65,7 @@ from brain.recommend import (
     per_day,
     recommend,
     return_on_cost,
+    split_purchases,
 )
 from brain.recommendations import write_recommendations
 from brain.replay import MarketReplay, Policy, replay
@@ -381,7 +384,16 @@ def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
         " after it\n"
         f"{table}\n"
         f"Realized profit over the range: {_money(m.realized_profit)}\n"
+        f"{_for_use_line(m.for_use)}"
     )
+
+
+def _for_use_line(for_use: Sequence[Purchase]) -> str:
+    """How many Purchases were For Use, and what they cost (#55): out of realized profit,
+    as ADR-0007 counts the Unlinked Outcomes."""
+    noun = "Purchase" if len(for_use) == 1 else "Purchases"
+    cost = _money(sum(p.price for p in for_use))
+    return f"{len(for_use)} {noun} ({cost}) not named by the Brain, counted as For Use\n"
 
 
 def _flips(config: Config) -> int:
@@ -662,18 +674,22 @@ def run_flips(config: Config) -> str:
     """Each Market's Flips to Sell made (#60), graded or pending, as text. Working out
     what a past Scan named is slow, so each is worked out once and frozen in grades.toml."""
     predictions = load_predictions(config.predictions_path)
+    now = int(time.time())
     with closing(open_history(config.history_path)) as conn:
         made = {}
+        for_use = {}
         for market in character_markets(conn):
             times = scan_times(conn, market)
             if times:
-                made[market] = flips(conn, config, market, predictions, int(time.time()))
+                made[market] = flips(conn, config, market, predictions, now)
+                bought = [p for p in purchases(conn, market) if happened_at(p) <= now]
+                for_use[market] = split_purchases(conn, config, market, predictions, bought).for_use
     if not made:
         return "No Character has a Market with a Scan yet.\n"
-    return "\n".join(_render_flips(market, f) for market, f in made.items())
+    return "\n".join(_render_flips(market, f, for_use[market]) for market, f in made.items())
 
 
-def _render_flips(market: Market, made: Sequence[Flip]) -> str:
+def _render_flips(market: Market, made: Sequence[Flip], for_use: Sequence[Purchase]) -> str:
     title = _graded_title(market)
     table = _table(
         ["Item", "Bought", "Units", "Post at", "Sold at", "Days", "Grade"],
@@ -690,7 +706,7 @@ def _render_flips(market: Market, made: Sequence[Flip]) -> str:
             for f in made
         ],
     )
-    return f"{title}\n{table}{_flip_record(made)}\n"
+    return f"{title}\n{table}{_flip_record(made)}\n{_for_use_line(for_use)}"
 
 
 def _last_sale(f: Flip) -> str:

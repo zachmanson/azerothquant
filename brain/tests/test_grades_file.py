@@ -10,11 +10,12 @@ from brain.grades_file import (
     freeze_flip_grade,
     freeze_grade,
     freeze_held,
+    freeze_named,
     freeze_shown,
     load_frozen,
 )
 from brain.history import Market
-from brain.lots import Held
+from brain.lots import Held, NamedSet
 
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
 # A name that needs escaping in TOML, and one outside ASCII.
@@ -61,6 +62,18 @@ def test_frozen_flip_entries_come_back_as_written(tmp_path):
         flip_name("2589", 1_790_003_600): sold,
         flip_name("2770", 1_790_003_600): unsold,
     }
+
+
+def test_what_scans_named_to_buy_comes_back_as_written(tmp_path):
+    # #55: an Item Key and a Disenchant source group, and a Scan that named nothing.
+    path = tmp_path / "grades.toml"
+    named = NamedSet({ACCENTED: 45.5, "2589": 0.1 + 0.2}, {(2, "armor", 21, 25): 300.0})
+    freeze_named(path, MARKET, 1_790_003_600, named)
+    freeze_named(path, MARKET, 1_790_007_200, NamedSet())
+
+    frozen = load_frozen(path, MARKET)
+
+    assert frozen.named == {1_790_003_600: named, 1_790_007_200: NamedSet()}
 
 
 def test_each_market_has_its_own_entries(tmp_path):

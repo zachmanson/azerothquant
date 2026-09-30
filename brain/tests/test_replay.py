@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
+from brain.grades_file import freeze_named
 from brain.history import (
     Market,
     import_character_reads,
@@ -12,6 +13,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.lots import NamedSet
 from brain.predictions import Prediction
 from brain.recommend import Action, CraftOutput, recommend_market
 from brain.replay import Policy, db_market, db_min_buyout, replay
@@ -617,15 +619,15 @@ def auction_mail(subject, name, bid, count, days_left, link=None):
     return mail
 
 
-def test_realized_profit_is_the_range_s_sales_after_the_cut_less_their_lots_cost(db):
-    # Read at T0 + 14 h: 2 Linen bought for 100 in all, then 1 sold for 500 at T0 + 2 h,
-    # in range, and 1 for 700 at T0 + 13 h, after it.
+def realized_read():
+    """A Mailbox Read at T0 + 14 h: 2 Linen bought for 100 in all at T0 + 1 h, then 1 sold
+    for 500 at T0 + 2 h, and 1 for 700 at T0 + 13 h."""
     mails = [
-        auction_mail("Auction won", "Linen Cloth", 100, 2, 29, link=LINEN_LINK),
+        auction_mail("Auction won", "Linen Cloth", 100, 2, 30 - 13 / 24, link=LINEN_LINK),
         auction_mail("Auction successful", "Linen Cloth", 500, 1, 29.5),
         auction_mail("Auction successful", "Linen Cloth", 700, 1, 30 - 1 / 24),
     ]
-    read = {
+    return {
         "readAt": T0 + 14 * HOUR,
         "realm": REALM,
         "character": "Kash-Patel",
@@ -634,16 +636,33 @@ def test_realized_profit_is_the_range_s_sales_after_the_cut_less_their_lots_cost
         "skippedMails": 0,
         "mails": mails,
     }
+
+
+def named_at(tmp_path, scan_at, *item_keys):
+    """CONFIG with a grades.toml in which the Scan at `scan_at` named `item_keys` to buy
+    at any price (#55)."""
+    path = tmp_path / "grades.toml"
+    freeze_named(path, MARKET, scan_at, NamedSet({k: 1_000_000 for k in item_keys}))
+    return replace(CONFIG, grades_path=path)
+
+
+@pytest.mark.parametrize(("named", "cost"), [(("2589",), 50), ((), 0)], ids=["named", "for use"])
+def test_realized_profit_is_the_range_s_sales_after_the_cut_less_their_lots_cost(
+    db, tmp_path, named, cost
+):
+    # The sale at T0 + 2 h is in range, the one at T0 + 13 h after it. Bought For Use (#55),
+    # the Linen starts no Lot, so the sale is of a looted unit, say, and costs nothing.
     result = run(
         db,
         linen_selling_then_crashing(),
         [character_read()],
-        mailbox_reads=[read],
+        mailbox_reads=[realized_read()],
         since=T0,
         until=T0 + 4 * HOUR,
+        config=named_at(tmp_path, T0 + HOUR, *named),
     )
 
-    assert result[MARKET].realized_profit == pytest.approx(500 * 0.95 - 50)
+    assert result[MARKET].realized_profit == pytest.approx(500 * 0.95 - cost)
 
 
 def test_units_with_no_vendor_price_to_vendor_at_bring_nothing(db):

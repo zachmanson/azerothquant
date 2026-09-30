@@ -25,6 +25,7 @@ from brain.history import (
     Holding,
     KnownRecipe,
     Market,
+    Purchase,
     character_markets,
     known_recipes,
     listings,
@@ -54,6 +55,7 @@ from brain.recommend import (
     market_bound,
     market_holdings,
     recommend_market,
+    split_purchases,
     without,
 )
 
@@ -94,6 +96,8 @@ class MarketReplay:
     # The confirmation: what the player's own Sold Outcomes in the range brought after
     # the cut, less what the Lot units they closed cost.
     realized_profit: float = 0.0
+    # The Purchases in the range the Brain didn't name, which start no Lot (#55).
+    for_use: tuple[Purchase, ...] = ()
 
     def over(self, baseline: Policy) -> float | None:
         """How much more value the Brain added than `baseline`, as a share of the
@@ -196,6 +200,8 @@ def replay(
 ) -> list[MarketReplay]:
     """Each Market's policies graded at its Scans requested in [since, until] that have a
     whole Sale Horizon of Scans after them."""
+    # What each Scan named is read from grades.toml and frozen there as usual (#55).
+    freezing = config
     config = replace(config, grades_path=None)  # a replay never freezes a Grade
     horizon = config.sale_horizon_seconds
     result = []
@@ -234,6 +240,7 @@ def replay(
                         as_of=t,
                         buy_under=False,
                         pricer=pricers.get(policy),
+                        paid=False,
                     ),
                     vendor,
                     config.shopping_list_rows,
@@ -256,19 +263,27 @@ def replay(
             for policy, m in moves.items():
                 value = _grade(conn, config, market, m, later, deposit, cut, t)
                 graded[policy] += value - untouched
-        realized = _realized(conn, market, since, until, cut)
-        result.append(MarketReplay(market, len(replayed), dict(graded), realized))
+        realized, for_use = _realized(conn, freezing, market, predictions, since, until, cut)
+        result.append(MarketReplay(market, len(replayed), dict(graded), realized, for_use))
     return result
 
 
 def _realized(
-    conn: sqlite3.Connection, market: Market, since: int, until: int, cut: float
-) -> float:
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    since: int,
+    until: int,
+    cut: float,
+) -> tuple[float, tuple[Purchase, ...]]:
     """Realized profit from the Sold Outcomes in [since, until]: each one's price after
-    the cut, less the cost of the Lot units it closed. Units without a Lot (looted,
-    crafted) cost nothing, and an Unlinked Outcome closes none (ADR-0007)."""
-    bought = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), listings(conn, market), bought)
+    the cut, less the cost of the Lot units it closed, and the For Use Purchases in the
+    range. Units without a Lot (looted, crafted, bought For Use) cost nothing, and an
+    Unlinked Outcome closes none (ADR-0007, ADR-0025)."""
+    every = purchases(conn, market)
+    bought, for_use = split_purchases(conn, config, market, predictions, every)
+    linked = link_sales(outcomes(conn, market), listings(conn, market), every)
     proceeds = sum(
         o.price * (1 - cut)
         for o in linked
@@ -280,7 +295,7 @@ def _realized(
         for sale in lot.sales
         if since <= sale.sold_at <= until
     )
-    return proceeds - cost
+    return proceeds - cost, tuple(p for p in for_use if since <= happened_at(p) <= until)
 
 
 def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) -> _Moves:

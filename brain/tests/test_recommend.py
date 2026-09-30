@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
+from brain.disenchant import Group
+from brain.grades_file import freeze_named, load_frozen
 from brain.history import (
     Market,
     import_character_reads,
@@ -13,7 +15,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
-from brain.lots import Held, start_of
+from brain.lots import Held, NamedSet, start_of
 from brain.predictions import Prediction
 from brain.recommend import (
     Action,
@@ -25,6 +27,7 @@ from brain.recommend import (
     CharacterHolding,
     Check,
     Grade,
+    MarketRecommendations,
     NodeKind,
     ReagentBuy,
     ReagentUse,
@@ -35,6 +38,7 @@ from brain.recommend import (
     _spend_on_predictions,
     grades,
     held_at_writing,
+    named_set,
     per_day,
     recommend,
     recommend_market,
@@ -3594,13 +3598,26 @@ def won(read_at, count, price, link=LINEN_LINK, name="Linen Cloth"):
     return mailbox_read(read_at, mail)
 
 
-def test_held_units_bought_on_the_auction_house_show_roi_after_the_cut(db):
+# Read 12 hours after it arrived, 10 minutes after the Scan at T0.
+BOUGHT = T0 + 12 * HOUR + 10 * MINUTE
+
+
+def named_at_t0(tmp_path, *item_keys, config=CONFIG):
+    """`config` with a grades.toml in which the Scan at T0 named `item_keys` to buy at any
+    price (#55), so Purchases after it start Lots."""
+    path = tmp_path / "grades.toml"
+    freeze_named(path, MARKET, T0, NamedSet({k: 1_000_000 for k in item_keys}))
+    return replace(config, grades_path=path)
+
+
+def test_held_units_bought_on_the_auction_house_show_roi_after_the_cut(db, tmp_path):
     # 10 Linen bought for 50c each. 6 Sell at 99 (94.05 after the cut), 4 Vendor at 10.
     result = run(
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
-        mailbox_reads=[won(T0, count=10, price=500)],
+        config=named_at_t0(tmp_path, LINEN_KEY),
+        mailbox_reads=[won(BOUGHT, count=10, price=500)],
     )
 
     sell, vendor = result[MARKET].holdings
@@ -3610,52 +3627,55 @@ def test_held_units_bought_on_the_auction_house_show_roi_after_the_cut(db):
     assert vendor.roi == pytest.approx(-0.8)
 
 
-def test_held_units_are_costed_by_the_newest_lots_first(db):
+def test_held_units_are_costed_by_the_newest_lots_first(db, tmp_path):
     # 8 bought at 20c, then 5 at 80c, and 10 held: the 5 at 80c and 5 of the 20c ones. The
     # other 3 are taken to be gone without a Sold Outcome.
     result = run(
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=named_at_t0(tmp_path, LINEN_KEY),
         mailbox_reads=[
-            won(T0 - DAY, count=8, price=160),
-            won(T0, count=5, price=400),
+            won(BOUGHT, count=8, price=160),
+            won(BOUGHT + MINUTE, count=5, price=400),
         ],
     )
 
     assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 10)}
 
 
-def test_held_units_without_a_lot_are_left_out_of_paid(db):
+def test_held_units_without_a_lot_are_left_out_of_paid(db, tmp_path):
     # Only 4 of the 10 were bought; the rest were looted, say.
     result = run(
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
-        mailbox_reads=[won(T0, count=4, price=200)],
+        config=named_at_t0(tmp_path, LINEN_KEY),
+        mailbox_reads=[won(BOUGHT, count=4, price=200)],
     )
 
     assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 4)}
 
 
-def test_units_bought_under_a_prediction_are_left_out_of_paid(db):
+def test_units_bought_under_a_prediction_are_left_out_of_paid(db, tmp_path):
     # 4 bought at 10s under a Prediction that has since ended, then 3 at 50c.
     written = TODAY - timedelta(days=10)
     result = run(
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=named_at_t0(tmp_path, LINEN_KEY),
         predictions=[prediction(LINEN_KEY, written=written, happened=TODAY - timedelta(days=5))],
         mailbox_reads=[
             won(start_of(written) + 18 * HOUR, count=4, price=4000),
-            won(T0, count=3, price=150),
+            won(BOUGHT, count=3, price=150),
         ],
     )
 
     assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(50, 3)}
 
 
-def test_craft_rows_get_no_roi(db):
+def test_craft_rows_get_no_roi(db, tmp_path):
     # A Bolt bought for 5s: the Bolt Sell row has its Paid, the Craft row none.
     result = run(
         db,
@@ -3665,7 +3685,8 @@ def test_craft_rows_get_no_roi(db):
                 item(count=2), item(BOLT_LINK), vendor_prices={2589: 10}, recipes=[recipe()]
             )
         ],
-        mailbox_reads=[won(T0, count=1, price=500, link=BOLT_LINK, name="Bolt of Linen Cloth")],
+        config=named_at_t0(tmp_path, BOLT_KEY),
+        mailbox_reads=[won(BOUGHT, count=1, price=500, link=BOLT_LINK, name="Bolt of Linen Cloth")],
     )
 
     assert [(r.action, r.paid, r.paid_units) for r in result[MARKET].holdings] == [
@@ -3675,20 +3696,48 @@ def test_craft_rows_get_no_roi(db):
 
 
 @pytest.mark.parametrize(("roi_hint", "hinted"), [(0.88, True), (0.89, False)])
-def test_a_sell_whose_roi_reaches_the_threshold_is_hinted_at(db, roi_hint, hinted):
+def test_a_sell_whose_roi_reaches_the_threshold_is_hinted_at(db, tmp_path, roi_hint, hinted):
     # As above: the Sell nets +88.1%, the Vendor -80%, which is never hinted at.
     result = run(
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
-        config=replace(CONFIG, roi_hint=roi_hint),
-        mailbox_reads=[won(T0, count=10, price=500)],
+        config=named_at_t0(tmp_path, LINEN_KEY, config=replace(CONFIG, roi_hint=roi_hint)),
+        mailbox_reads=[won(BOUGHT, count=10, price=500)],
     )
 
     assert [(r.action, r.roi_hint) for r in result[MARKET].holdings] == [
         (Action.SELL, hinted),
         (Action.VENDOR, False),
     ]
+
+
+def test_units_bought_for_use_are_left_out_of_paid(db, tmp_path):
+    # #55: the Scan before the 10 bought named Wool, not Linen, so they were For Use.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=named_at_t0(tmp_path, "2592"),
+        mailbox_reads=[won(BOUGHT, count=10, price=500)],
+    )
+
+    assert {(r.paid, r.paid_units) for r in result[MARKET].holdings} == {(None, None)}
+
+
+def test_what_the_scan_before_a_purchase_named_is_worked_out_once_and_frozen(db, tmp_path):
+    # Nothing is on sale but the Linen that set its Sell Rate, so the Scan at T0 names
+    # nothing, and the Purchase after it was For Use.
+    config = replace(CONFIG, grades_path=tmp_path / "grades.toml")
+    run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=config,
+        mailbox_reads=[won(BOUGHT, count=10, price=500)],
+    )
+
+    assert load_frozen(config.grades_path, MARKET).named == {T0: NamedSet()}
 
 
 def test_hold_rows_get_no_roi(db):
@@ -4074,3 +4123,37 @@ def test_a_merged_prediction_buy_keeps_the_room_beta_added_to_over_a_bigger_one(
 
     assert row.quantity == 10
     assert row.beta_room == BetaRoom(950.0, room=8, from_beta=3)
+
+
+# --- What a Scan named (#55) ---
+
+
+def test_a_scan_names_its_flips_their_auction_house_reagents_and_its_buy_unders():
+    greens = Group(2, "armor", 21, 25, ())
+    m = MarketRecommendations(
+        MARKET,
+        T0,
+        GOLD,
+        shopping_list=[
+            Row("2589", Action.SELL, 10, price=40),
+            Row("2592", Action.VENDOR, 5, price=30),
+            Row(
+                "2996",
+                Action.CRAFT,
+                1,
+                buys=(
+                    ReagentBuy("2589", 2, max_unit_price=45),
+                    ReagentBuy("2320", 1, max_unit_price=10, merchant=True),
+                ),
+            ),
+        ],
+        buy_under=[
+            BuyUnder("2592", 35, Action.SELL, None, 3, 7),
+            BuyUnder("2589", 20, Action.SELL, None, 3, 7),
+            BuyUnder(None, 300, Action.DISENCHANT, None, 3, 7, group=greens),
+        ],
+    )
+
+    assert named_set(m) == NamedSet(
+        items={"2589": 45, "2592": 35}, groups={(2, "armor", 21, 25): 300}
+    )

@@ -1,7 +1,8 @@
 """Lots: derived from Purchases and Sold Outcomes, never stored (ADR-0007)."""
 
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+import bisect
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 from brain.history import Listing, Outcome, Purchase
@@ -81,6 +82,50 @@ def lots(
         else:
             _close(result, event, at)
     return result
+
+
+# A Disenchant source group by what names it: quality, kind, and lowest and highest item
+# level (disenchant.Group).
+GroupKey = tuple[int, str, int, int]
+
+
+@dataclass(frozen=True)
+class NamedSet:
+    """What one Scan named to buy (#55, ADR-0025), per unit the most it named for each Item
+    Key: a Flip to Sell or Vendor row's dearest Listing, a Flip to Craft's Auction House
+    reagent's most to pay, or a Buy Under. A Disenchant source group's Buy Under names
+    every item in the group."""
+
+    items: Mapping[str, float] = field(default_factory=dict)
+    groups: Mapping[GroupKey, float] = field(default_factory=dict)
+
+
+def is_for_use(
+    purchase: Purchase,
+    predictions: Sequence[Prediction],
+    scan_times: Sequence[int],
+    named: Mapping[int, NamedSet],
+    group_of: Callable[[str], GroupKey | None] = lambda _: None,
+) -> bool:
+    """Whether a Purchase was For Use (ADR-0025), so it starts no Lot: it wasn't under a
+    Prediction, and the Market's last Scan before it didn't name its Item Key at or over
+    its unit price. `scan_times` are the Market's, oldest first, and `named` has what
+    each of them before a Purchase named."""
+    if bought_under(purchase, predictions) is not None:
+        return False
+    scan_at = scan_before(scan_times, happened_at(purchase))
+    if scan_at is None:
+        return True
+    at_most = named[scan_at]
+    group = group_of(purchase.item_key)
+    prices = [at_most.items.get(purchase.item_key), at_most.groups.get(group) if group else None]
+    return not any(p is not None and purchase.price <= p * purchase.count for p in prices)
+
+
+def scan_before(scan_times: Sequence[int], at: int) -> int | None:
+    """The last of `scan_times` (oldest first) at or before `at`, None if there's none."""
+    i = bisect.bisect_right(scan_times, at)
+    return scan_times[i - 1] if i else None
 
 
 def bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str | None:

@@ -24,6 +24,7 @@ from brain.cli import (
 )
 from brain.config import Config, Era, Install
 from brain.fair_value import FairValueCache
+from brain.grades_file import freeze_named
 from brain.history import (
     Holding,
     KnownRecipe,
@@ -41,6 +42,7 @@ from brain.history import (
     pooled_gold,
     vendor_prices,
 )
+from brain.lots import NamedSet
 from brain.predictions import Prediction
 from brain.recommend import grades
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
@@ -586,8 +588,9 @@ def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_
         "firstItemLink": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
         "invoice": {"invoiceType": "buyer", "itemName": "Linen Cloth", "bid": 1000, "count": 2},
     }
+    # Arrived 10 minutes after the Scan at T0, which named Linen to buy (#55).
     mailbox_read = {
-        "readAt": 1_790_000_000,
+        "readAt": 1_790_000_000 + 12 * 3600 + 600,
         "realm": MARKET.realm,
         "character": "Kash-Patel",
         "shownCount": 1,
@@ -595,7 +598,10 @@ def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_
         "skippedMails": 0,
         "mails": [won],
     }
-    text = run_recommend(_three_linen_held(tmp_path, [mailbox_read]))
+    grades_path = tmp_path / "grades.toml"
+    freeze_named(grades_path, MARKET, 1_790_000_000, NamedSet({"2589": 1_000_000}))
+    config = _three_linen_held(tmp_path, [mailbox_read])
+    text = run_recommend(dataclasses.replace(config, grades_path=grades_path))
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"] in lines
@@ -936,6 +942,50 @@ def test_flips_prints_each_flip_with_its_grade_or_pending(tmp_path):
     )
     assert ["2589", first, "5", "9s 99c", "9s 99c", "0.03", "37s 45c"] in lines
     assert ["2589", second, "3", "9s 99c", "pending"] in lines  # nothing sold yet
+
+
+def _bought_for_use(config: Config) -> None:
+    """2 Linen bought for 20s each 10 minutes after the Scan at T0, which named nothing,
+    read 20 hours after that Scan."""
+    won = {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": "Auction won: Linen Cloth",
+        "money": 0,
+        "daysLeft": 30 - (20 * 3600 - 600) / 86400,
+        "firstItemQuantity": 2,
+        "firstItemLink": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+        "invoice": {"invoiceType": "buyer", "itemName": "Linen Cloth", "bid": 4000, "count": 2},
+    }
+    read = {
+        "readAt": 1_790_000_000 + 20 * 3600,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "shownCount": 1,
+        "totalCount": 1,
+        "skippedMails": 0,
+        "mails": [won],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_mailbox_reads(conn, [read], Era.BETA, config)
+
+
+def test_flips_counts_the_purchases_the_brain_didnt_name(tmp_path):
+    config = _two_linen_flips(tmp_path)
+    _bought_for_use(config)
+
+    text = run_flips(config)
+
+    assert "1 Purchase (40s 00c) not named by the Brain, counted as For Use" in text
+
+
+def test_replay_counts_the_purchases_in_its_range_the_brain_didnt_name(tmp_path):
+    config = _two_linen_flips(tmp_path)
+    _bought_for_use(config)
+
+    text = run_replay(config, since=None, until=None)
+
+    assert "1 Purchase (40s 00c) not named by the Brain, counted as For Use" in text
 
 
 def test_recommend_prints_a_flip_to_crafts_reagent_buys(tmp_path):
