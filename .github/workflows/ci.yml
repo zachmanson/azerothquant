@@ -41,3 +41,20 @@ jobs:
       - uses: leafo/gh-actions-luarocks@v6
       - run: luarocks install busted
       - run: busted --directory=addon
+
+  pool:
+    name: Scan Pool Worker (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pool
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: pool/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

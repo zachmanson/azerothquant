@@ -25,3 +25,8 @@ brain/grades.toml
 
 # Per-machine Claude Code settings
 .claude/settings.local.json
+
+# Scan Pool Worker (pool/)
+pool/node_modules/
+pool/.wrangler/
+pool/.dev.vars
