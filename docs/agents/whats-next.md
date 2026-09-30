@@ -1,3 +1,11 @@
+2026-09-30 (later 31): Built #58 (473c4bc). `_Valuer.held_rate` pools Sibling Sale Events into held units only: rows, has_data, the Holdings queue, and so worth / Best Exit Value, Crafts and Disenchant choices. Flips, Buy Under, Max Loss and Flip to Craft outputs still read `rates`. There's a `suffix_pool_weight` config (0 to 1, default 0.5), `siblingSales` on Holdings rows, the tooltip `Sales N (+M other suffixes)`, a CONTEXT.md **Sibling** entry, and ADR-0022. The issue stays open until the in-game tooltip glance is done.
+
+Next, in order:
+1. At the PC or on a date: unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, Nov 18 #110), plus #58's in-game check: find a held suffixed item whose row now says Sell and check its tooltip. Close #58 after that.
+2. Away from the game: /grilling #60, then #14, #10, then the grills (the (later 29) list).
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. The Lua round-trip tests in test_recommendations.py skip on this PC (no `lua`), so CI is what checks `siblingSales` reaches Lua (`python scripts/busted.py` covers the addon specs). A pooled `SellRate` has fractional `sale_events`/`sale_units`, now typed `float`.
+
 2026-09-30 (later 30): Grilled #58. The spec is posted on the issue; it's ready-for-agent. Pool demand (not price, not Fair Value) across an itemID's suffixes, for held units only: sibling Sale Events at or above the post price count at `suffix_pool_weight` (0.5), the #41 cap uses own + sibling Sale Events, and the tooltip shows `(+M other suffixes)`. Flips and Buy Under are untouched.
 
 Next, in order:
