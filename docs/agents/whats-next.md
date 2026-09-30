@@ -1,3 +1,9 @@
+2026-09-29 (later 26): Researched #56 with /research: `docs/research/ah-data-sources.md`, and the verdict is commented on #56. Nothing replaces or is worth importing alongside our Scans today. Only crowdsourced sites cover Forever, and they have listing snapshots only, no sales. Things to watch after Live: a Blizzard API Forever namespace (hourly, auction IDs, the only outside route to a Sell Rate, but its terms allow keeping data for 30 days at most, which clashes with ADR-0005) and TSM adding Forever (region-wide `saleRate`/`soldPerDay` as an ADR-0015 prior). #56 left open pending a decision to close it.
+
+Next, in order: unchanged from the entry below.
+
+- Gotchas: unchanged from the entry below.
+
 2026-09-29 (later 25): Sorted #85's leftovers against the current data. Nothing was checked (not at the game).
 - Checkable now: #50. The Holdings have 5 paid rows: 247754 (+190%, the only roiHint), 250933 (-5%), 20744 (-5%), plus 2 more. Check the ROI cell color, the green star on 247754, and `Paid ... each, nets ...` in the row and item tooltips.
 - Not checkable: #33 (no `via` row), #75 (no `blocked` row), #83 replay (needs 7 days, ~Oct 3). Booty Bay Broker is optional browser work.
