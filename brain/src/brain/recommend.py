@@ -6,6 +6,7 @@ posted just under the Listings left in that Scan once its Flips are bought (#62,
 and Sell Rate from the Observation Windows before it. All amounts are copper.
 """
 
+import bisect
 import math
 import sqlite3
 from collections import Counter, defaultdict
@@ -38,7 +39,9 @@ from brain.history import (
     Market,
     Purchase,
     character_markets,
+    character_read_times,
     cheapest_seen,
+    crafts,
     enchanting_skills,
     holdings,
     item_info,
@@ -58,6 +61,7 @@ from brain.lots import (
     GroupKey,
     Held,
     Lot,
+    LotCraftResult,
     NamedSet,
     bought_under,
     deposits,
@@ -323,7 +327,8 @@ class Row:
     merchant_gold: float = field(default=0.0, compare=False)
     made: CraftOutput | None = field(default=None, compare=False)
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
-    # Purchase Lots cover cost, and how many units that is. Split rows share it.
+    # Lots (a Purchase's or a craft's output, #44) cover cost, and how many units that is.
+    # Split rows share it.
     paid: float | None = None
     paid_units: int | None = None
     # (exit per unit after the cut - Paid) / Paid, and whether it's a Sell good enough to
@@ -1255,7 +1260,38 @@ def market_lots(
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
     held = held_at_writing(conn, config, market, predictions)
     kept = split_purchases(conn, config, market, predictions, market_purchases).kept
-    return lots(kept, linked, predictions, held)
+    return lots(kept, linked, predictions, held, lot_craft_results(conn, market))
+
+
+def lot_craft_results(conn: sqlite3.Connection, market: Market) -> list[LotCraftResult]:
+    """The Market's Craft Results as Lots see them (#44): the recipe's reagents used up,
+    and its output units, the recipe's fewest when the Addon couldn't count them. Merchant
+    Costs are as of the Character Read that carried the craft: the Addon records a
+    session's Merchant Costs at logout, on that same Read, so a reagent first bought from
+    a merchant that session has one."""
+    read_times = character_read_times(conn, market)
+    costs: dict[int, dict[int, float]] = {}
+    result = []
+    for craft in crafts(conn, market):
+        times = read_times[craft.character]
+        # Its session's Read, or the latest if a clock ran off.
+        carried_at = times[min(bisect.bisect_left(times, craft.at), len(times) - 1)]
+        if carried_at not in costs:
+            costs[carried_at] = merchant_costs(conn, market, carried_at)
+        merchant = costs[carried_at]
+        used: Counter[str] = Counter()
+        for reagent in craft.reagents:
+            used[str(reagent.item_id)] += reagent.quantity
+        result.append(
+            LotCraftResult(
+                craft.at,
+                used,
+                None if craft.output_item_id is None else str(craft.output_item_id),
+                craft.quantity or craft.quantity_min or 0,
+                {k: merchant[int(k)] for k in used if int(k) in merchant},
+            )
+        )
+    return result
 
 
 def prediction_lots(
@@ -3107,7 +3143,7 @@ def held_units(rows: Sequence[Row]) -> Counter[str]:
 
 def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Config) -> list[Row]:
     """`rows` with each Sell and Vendor row's Paid and ROI (#50). An Item Key's held units
-    are costed by its newest open Purchase Lots not tied to a Prediction (ADR-0007): open
+    are costed by its newest open Lots not tied to a Prediction (ADR-0007): open
     units beyond the held ones are taken to be the oldest, gone without a Sold Outcome."""
     held = held_units(rows)
     # By Item Key, what the held units the Lots cover cost in all, and how many they are.

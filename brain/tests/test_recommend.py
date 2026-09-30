@@ -3698,6 +3698,38 @@ def test_craft_rows_get_no_roi(db, tmp_path):
     ]
 
 
+def test_a_crafted_output_is_paid_what_its_reagents_cost_as_of_its_session(db, tmp_path):
+    # #44: 4 Linen bought at 50c, then a Bolt crafted from 2 of them and a Coarse Thread
+    # the merchant sold for 10c that session. The session's Read, which carries the craft,
+    # records that Merchant Cost at logout; by the next session it charged 10s.
+    crafted_at = BOUGHT + 30 * MINUTE
+    session = character_read(
+        at=BOUGHT + HOUR,
+        recipes=[recipe(reagents=LINEN_AND_THREAD)],
+        merchant_costs={2320: 10},
+    )
+    session["crafts"] = [{"recipeID": 2963, "at": crafted_at}]
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            session,
+            character_read(
+                item(BOLT_LINK),
+                at=BOUGHT + 2 * HOUR,
+                vendor_prices={2589: 10},
+                recipes=[recipe(reagents=LINEN_AND_THREAD)],
+                merchant_costs={2320: 1000},
+            ),
+        ],
+        config=named_at_t0(tmp_path, LINEN_KEY),
+        mailbox_reads=[won(BOUGHT, count=4, price=200)],
+    )
+
+    [bolt] = [r for r in result[MARKET].holdings if r.item_key == BOLT_KEY]
+    assert (bolt.action, bolt.paid, bolt.paid_units) == (Action.SELL, 110, 1)
+
+
 @pytest.mark.parametrize(("roi_hint", "hinted"), [(0.88, True), (0.89, False)])
 def test_a_sell_whose_roi_reaches_the_threshold_is_hinted_at(db, tmp_path, roi_hint, hinted):
     # As above: the Sell nets +88.1%, the Vendor -80%, which is never hinted at.

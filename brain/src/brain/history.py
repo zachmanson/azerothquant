@@ -193,15 +193,26 @@ CREATE TABLE IF NOT EXISTS disenchant_result_mat (
 );
 
 -- Each craft the player made with a Known Recipe (#44), carried on the Character Read of
--- its session as crafts.
+-- its session as crafts. What its recipe makes and uses is as that Read's profession
+-- window read had it: NULL and no reagents when the Read didn't have the recipe.
 CREATE TABLE IF NOT EXISTS craft (
     id INTEGER PRIMARY KEY,
     character_read_id INTEGER NOT NULL REFERENCES character_read (id),
     at INTEGER NOT NULL,
     recipe_id INTEGER NOT NULL,
-    quantity INTEGER           -- output units made; NULL when the Addon couldn't read it
+    quantity INTEGER,          -- output units made; NULL when the Addon couldn't read it
+    output_item_id INTEGER,    -- NULL when the recipe makes no item
+    quantity_min INTEGER       -- the recipe's fewest output units
 );
 CREATE INDEX IF NOT EXISTS craft_by_read ON craft (character_read_id);
+
+-- The Basic reagent slots of one craft's recipe.
+CREATE TABLE IF NOT EXISTS craft_reagent (
+    craft_id INTEGER NOT NULL REFERENCES craft (id),
+    item_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS craft_reagent_by_craft ON craft_reagent (craft_id);
 
 -- One row per profession window read carried on a Character Read (its professions map).
 CREATE TABLE IF NOT EXISTS known_profession (
@@ -340,6 +351,11 @@ class CraftResult:
     character: str
     recipe_id: int
     quantity: int | None = None  # output units; None when the Addon couldn't read it
+    # What its recipe makes and uses, as the profession window read on the Character Read
+    # that carried it had it (None and none when that Read didn't have the recipe).
+    output_item_id: int | None = None  # None when the recipe makes no item
+    quantity_min: int | None = None
+    reagents: tuple[Reagent, ...] = ()  # Basic slots only, for one craft
 
 
 @dataclass(frozen=True)
@@ -404,6 +420,8 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     _add_column(conn, "character_read", "days_to_sell", "REAL")  # #109
     _add_column(conn, "known_profession", "skill_level", "INTEGER")  # #76
     _add_column(conn, "known_profession", "max_skill_level", "INTEGER")  # #76
+    _add_column(conn, "craft", "output_item_id", "INTEGER")  # #44
+    _add_column(conn, "craft", "quantity_min", "INTEGER")  # #44
     return conn
 
 
@@ -898,22 +916,52 @@ def _disenchant_result(entry: dict) -> tuple[tuple, dict[int, int]] | None:
 
 def _import_crafts(conn: sqlite3.Connection, read_id: int, raw: dict, report: ImportReport) -> None:
     entries = _entries(raw.get("crafts"))
-    rows = []
+    recipes = _read_recipes(raw)
+    imported = 0
     for entry in entries:
         at, recipe_id, quantity = (entry.get(k) for k in ("at", "recipeID", "quantity"))
         readable_quantity = quantity is None or (_whole(quantity) and quantity >= 1)
-        if _whole(at) and _whole(recipe_id) and readable_quantity:
-            rows.append((read_id, at, recipe_id, quantity))
-    conn.executemany(
-        "INSERT INTO craft (character_read_id, at, recipe_id, quantity) VALUES (?, ?, ?, ?)",
-        rows,
-    )
-    unreadable = len(entries) - len(rows)
+        if not (_whole(at) and _whole(recipe_id) and readable_quantity):
+            continue
+        output, quantity_min, reagents = recipes.get(recipe_id, (None, None, []))
+        cursor = conn.execute(
+            "INSERT INTO craft (character_read_id, at, recipe_id, quantity, output_item_id,"
+            " quantity_min) VALUES (?, ?, ?, ?, ?, ?)",
+            (read_id, at, recipe_id, quantity, output, quantity_min),
+        )
+        conn.executemany(
+            "INSERT INTO craft_reagent (craft_id, item_id, quantity) VALUES (?, ?, ?)",
+            [(cursor.lastrowid, item_id, units) for item_id, units in reagents],
+        )
+        imported += 1
+    unreadable = len(entries) - imported
     if unreadable:
         report.warn(
             f"Character Read at {raw['readAt']} for {raw['character']}: skipped"
             f" {unreadable} Craft Results the Brain can't read."
         )
+
+
+def _read_recipes(raw: dict) -> dict[int, tuple[int | None, int | None, list[tuple[int, int]]]]:
+    """By recipeID, (output itemID, fewest output units, Basic reagents) of each recipe in
+    the Read's profession windows the Brain can read, with None and None for one that
+    makes no item. The Known Recipes import warns about the rest."""
+    result = {}
+    for entry in _entries(raw.get("professions")):
+        recipes = entry.get("recipes")
+        for recipe in recipes if isinstance(recipes, list) else []:
+            if not isinstance(recipe, dict) or not _whole(recipe.get("recipeID")):
+                continue
+            output, quantity_min = recipe.get("outputItemID"), recipe.get("quantityMin")
+            try:
+                reagents = _basic_reagents(recipe)
+            except ValueError:
+                continue
+            if output is None:
+                result[recipe["recipeID"]] = (None, None, reagents)
+            elif _whole(output) and _whole(quantity_min):
+                result[recipe["recipeID"]] = (output, quantity_min, reagents)
+    return result
 
 
 def _merchant_costs(raw: dict) -> tuple[dict[int, float], int]:
@@ -995,17 +1043,21 @@ def _known_recipe(recipe: object) -> tuple[tuple, list[tuple[int, int]]] | None:
         # Makes no item (most enchants), so it can't be a Craft.
         return None
     fields = [recipe.get(k) for k in ("recipeID", "outputItemID", "quantityMin", "quantityMax")]
-    bind_type, cooldown, reagents = (
-        recipe.get("bindType"),
-        recipe.get("cooldown"),
-        recipe.get("reagents"),
-    )
+    bind_type, cooldown = recipe.get("bindType"), recipe.get("cooldown")
     if (
         not all(_whole(f) for f in fields)
         or not (bind_type is None or _whole(bind_type))
         or not (cooldown is None or _number(cooldown))
-        or not isinstance(reagents, list)
     ):
+        raise ValueError(f"skipped a recipe the Brain can't read: {recipe!r:.200}")
+    return (*fields, bind_type, cooldown), _basic_reagents(recipe)
+
+
+def _basic_reagents(recipe: dict) -> list[tuple[int, int]]:
+    """(itemID, quantity) of a recipe's Basic reagents, or ValueError if they can't be
+    read."""
+    reagents = recipe.get("reagents")
+    if not isinstance(reagents, list):
         raise ValueError(f"skipped a recipe the Brain can't read: {recipe!r:.200}")
     basic = []
     for reagent in reagents:
@@ -1017,7 +1069,7 @@ def _known_recipe(recipe: object) -> tuple[tuple, list[tuple[int, int]]] | None:
         if not _whole(item_id) or not _whole(quantity):
             raise ValueError(f"skipped a recipe with a reagent it can't read: {recipe!r:.200}")
         basic.append((item_id, quantity))
-    return (*fields, bind_type, cooldown), basic
+    return basic
 
 
 def _whole(value: object) -> bool:
@@ -1427,12 +1479,35 @@ def crafts(conn: sqlite3.Connection, market: Market) -> list[CraftResult]:
     """Every Craft Result recorded in the Market, by the faction of the Character Read that
     carried it, oldest first."""
     rows = conn.execute(
-        "SELECT c.at, r.character, c.recipe_id, c.quantity"
-        " FROM craft c JOIN character_read r ON c.character_read_id = r.id"
+        "SELECT c.id, c.at, r.character, c.recipe_id, c.quantity, c.output_item_id,"
+        " c.quantity_min FROM craft c JOIN character_read r ON c.character_read_id = r.id"
         " WHERE r.realm = ? AND r.faction = ? AND r.era = ? ORDER BY c.at, c.id",
         _market_params(market),
-    )
-    return [CraftResult(*row) for row in rows]
+    ).fetchall()
+    reagents: dict[int, list[Reagent]] = {}
+    for craft_id, item_id, quantity in conn.execute(
+        "SELECT g.craft_id, g.item_id, g.quantity FROM craft_reagent g"
+        " JOIN craft c ON g.craft_id = c.id JOIN character_read r ON c.character_read_id = r.id"
+        " WHERE r.realm = ? AND r.faction = ? AND r.era = ? ORDER BY g.rowid",
+        _market_params(market),
+    ):
+        reagents.setdefault(craft_id, []).append(Reagent(item_id, quantity))
+    return [
+        CraftResult(*fields, reagents=tuple(reagents.get(craft_id, ())))
+        for craft_id, *fields in rows
+    ]
+
+
+def character_read_times(conn: sqlite3.Connection, market: Market) -> dict[str, list[int]]:
+    """When each Character on the Market's realm was read, oldest first."""
+    result: dict[str, list[int]] = {}
+    for character, read_at in conn.execute(
+        "SELECT character, read_at FROM character_read WHERE realm = ? AND era = ?"
+        " ORDER BY read_at",
+        (market.realm, market.era.value),
+    ):
+        result.setdefault(character, []).append(read_at)
+    return result
 
 
 def _market_characters(
@@ -1450,16 +1525,19 @@ def _market_characters(
     return {character for (character,) in rows}
 
 
-def merchant_costs(conn: sqlite3.Connection, market: Market) -> dict[int, float]:
+def merchant_costs(
+    conn: sqlite3.Connection, market: Market, as_of: int | None = None
+) -> dict[int, float]:
     """Copper per unit by itemID: each Character in the Market's latest-seen Merchant Cost
-    for it, then the lowest of those, since any of them could buy it."""
-    characters = _market_characters(conn, market)
+    for it, then the lowest of those, since any of them could buy it. With `as_of`, only
+    Reads taken up to that moment count."""
+    characters = _market_characters(conn, market, as_of)
     latest: dict[tuple[str, int], tuple[int, float]] = {}
     for character, item_id, read_at, cost in conn.execute(
         "SELECT r.character, m.item_id, r.read_at, m.cost"
         " FROM merchant_cost m JOIN character_read r ON m.character_read_id = r.id"
-        " WHERE r.realm = ? AND r.era = ?",
-        (market.realm, market.era.value),
+        " WHERE r.realm = ? AND r.era = ? AND (? IS NULL OR r.read_at <= ?)",
+        (market.realm, market.era.value, as_of, as_of),
     ):
         key = (character, item_id)
         if character in characters and (key not in latest or read_at > latest[key][0]):

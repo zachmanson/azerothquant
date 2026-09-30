@@ -725,3 +725,34 @@ def test_a_craft_result_the_brain_cant_read_is_skipped_with_a_warning(db):
     ]
     assert len(report.warnings) == 1
     assert "3 Craft Results" in report.warnings[0]
+
+
+ENCHANTING = 333
+
+
+def test_a_craft_result_keeps_its_recipes_output_and_reagents_from_its_read(db):
+    # The Addon records only crafts of recipes read this session, which ride on the same
+    # Read. A recipe that makes no item isn't a Known Recipe but still used its reagents.
+    read = character_read(
+        professions=[
+            profession([recipe(2963, reagents=((2589, 2), (4, 1, OPTIONAL)), quantityMin=2)]),
+            profession(
+                [recipe(7418, output=None, reagents=((10940, 1),))], profession_id=ENCHANTING
+            ),
+        ],
+        profession_list=[TAILORING, ENCHANTING],
+    )
+    read["crafts"] = [
+        {"recipeID": 2963, "at": T0 - 20},
+        {"recipeID": 7418, "at": T0 - 10},
+        {"recipeID": 9999, "at": T0 - 5},  # not in the Read: nothing to go on
+    ]
+
+    run(db, read)
+
+    assert crafts(db, ALLIANCE) == [
+        CraftResult(T0 - 20, "Kash-Patel", 2963, None, 2996, 2, (Reagent(2589, 2),)),
+        CraftResult(T0 - 10, "Kash-Patel", 7418, None, None, None, (Reagent(10940, 1),)),
+        CraftResult(T0 - 5, "Kash-Patel", 9999),
+    ]
+    assert [r.recipe_id for r in known_recipes(db, ALLIANCE)] == [2963]

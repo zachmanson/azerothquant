@@ -1,4 +1,4 @@
-"""Lots: derived from Purchases and Sold Outcomes, never stored (ADR-0007)."""
+"""Lots: derived from Purchases, Sold Outcomes and Craft Results, never stored (ADR-0007)."""
 
 import bisect
 from collections.abc import Callable, Mapping, Sequence
@@ -32,13 +32,28 @@ class Lot:
     # When a Prediction of its Item Key was written, which folded its open units into
     # that Prediction's held Lot so they aren't counted twice.
     folded_at: int | None = None
+    used: int = 0  # units crafts used up as reagents (#44)
+    crafted: bool = False  # opened by a craft, as its output
 
     @property
     def open_units(self) -> int:
-        """Units no Sold Outcome has closed yet, and none once folded."""
+        """Units no Sold Outcome or craft has closed yet, and none once folded."""
         if self.folded_at is not None:
             return 0
-        return self.units - sum(sale.units for sale in self.sales)
+        return self.units - sum(sale.units for sale in self.sales) - self.used
+
+
+@dataclass(frozen=True)
+class LotCraftResult:
+    """One Craft Result as Lots see it (CONTEXT.md: Craft Result)."""
+
+    at: int
+    reagents: Mapping[str, int]  # units used up, by Item Key
+    output: str | None  # the Item Key it made, None when it makes no item
+    units: int  # output units made
+    # Per unit, the lowest latest-seen Merchant Cost as of the craft of each reagent that
+    # has one.
+    merchant: Mapping[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -57,6 +72,7 @@ def lots(
     outcomes: list[Outcome],
     predictions: Sequence[Prediction] = (),
     held: Sequence[Held] = (),
+    craft_results: Sequence[LotCraftResult] = (),
 ) -> list[Lot]:
     """One realm and faction's Lots, oldest first."""
     written = {p.name: start_of(p.written) for p in predictions}
@@ -72,13 +88,17 @@ def lots(
     sales = [o for o in outcomes if o.kind is MailKind.SOLD and o.item_key is not None]
     # In the order they happened; a Prediction's held units are as of the start of its
     # written day, so a sale at that same moment comes after it.
-    events: list[tuple[int, int, Prediction | Outcome]] = sorted(
-        [(written[p.name], 0, p) for p in predictions] + [(happened_at(o), 1, o) for o in sales],
+    events: list[tuple[int, int, Prediction | Outcome | LotCraftResult]] = sorted(
+        [(written[p.name], 0, p) for p in predictions]
+        + [(happened_at(o), 1, o) for o in sales]
+        + [(c.at, 1, c) for c in craft_results],
         key=lambda event: event[:2],
     )
     for at, _, event in events:
         if isinstance(event, Prediction):
             _fold(result, event, at)
+        elif isinstance(event, LotCraftResult):
+            _use_up(result, event, predictions)
         else:
             _close(result, event, at)
     return result
@@ -131,9 +151,14 @@ def scan_before(scan_times: Sequence[int], at: int) -> int | None:
 def bought_under(purchase: Purchase, predictions: Sequence[Prediction]) -> str | None:
     """The Prediction a Purchase's units belong to: the one of its Item Key that stood
     when it was bought, from the start of its written day until it ended."""
-    bought_at = happened_at(purchase)
+    return _under(purchase.item_key, happened_at(purchase), predictions)
+
+
+def _under(item_key: str, at: int, predictions: Sequence[Prediction]) -> str | None:
+    """The Prediction of `item_key` standing at `at`: from the start of its written day
+    until it ended."""
     for p in predictions:
-        if purchase.item_key in p.item_keys and start_of(p.written) <= bought_at < ended_at(p):
+        if item_key in p.item_keys and start_of(p.written) <= at < ended_at(p):
             return p.name
     return None
 
@@ -156,6 +181,33 @@ def _fold(result: list[Lot], prediction: Prediction, written_at: int) -> None:
             and lot.open_units > 0
         ):
             result[i] = replace(lot, folded_at=written_at)
+
+
+def _use_up(result: list[Lot], craft: LotCraftResult, predictions: Sequence[Prediction]) -> None:
+    """Use up the craft's reagent units, oldest open Lot of each first, and open a Lot of
+    its output at what they cost, only when every one of them is costed. A Prediction's
+    units are its own (ADR-0009): no craft uses them up, nor opens a Lot of an Item Key
+    under a Prediction standing then."""
+    cost = 0.0
+    costed = True
+    for item_key, units in craft.reagents.items():
+        for i, lot in enumerate(result):
+            if units == 0 or lot.acquired_at > craft.at:
+                break
+            if lot.item_key != item_key or lot.prediction is not None or not lot.open_units:
+                continue
+            taken = min(units, lot.open_units)
+            result[i] = replace(lot, used=lot.used + taken)
+            cost += taken * lot.cost / lot.units
+            units -= taken
+        if units and item_key in craft.merchant:
+            cost += units * craft.merchant[item_key]
+        elif units:
+            costed = False  # some were looted, or bought For Use
+    if not costed or craft.output is None or _under(craft.output, craft.at, predictions):
+        return
+    output = Lot(craft.output, craft.at, craft.units, round(cost), (), crafted=True)
+    bisect.insort(result, output, key=lambda lot: lot.acquired_at)
 
 
 def _close(result: list[Lot], outcome: Outcome, sold_at: int) -> None:

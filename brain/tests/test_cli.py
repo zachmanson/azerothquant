@@ -979,6 +979,38 @@ def test_flips_counts_the_purchases_the_brain_didnt_name(tmp_path):
     assert "1 Purchase (40s 00c) not named by the Brain, counted as For Use" in text
 
 
+def test_flips_counts_the_crafts_recorded_and_those_with_a_costed_output(tmp_path):
+    # #44: the 3 Linen still open make one Bolt from 2, then another from the last 1 and
+    # 1 looted, which leaves that Bolt only partly costed.
+    config = _two_linen_flips(tmp_path)
+    t0, hour = 1_790_000_000, 3600
+    bolt = {
+        "recipeID": 2963,
+        "outputItemID": 2996,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
+    }
+    read = {
+        "readAt": t0 + 4 * hour,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 10_000,
+        "bags": [],
+        "professions": {197: {"readAt": t0 + 3 * hour, "professionID": 197, "recipes": [bolt]}},
+        "crafts": [
+            {"recipeID": 2963, "at": t0 + 3 * hour + 60, "quantity": 1},
+            {"recipeID": 2963, "at": t0 + 3 * hour + 120},
+        ],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    assert "Crafts recorded: 2 (1 with a costed output)" in run_flips(config)
+
+
 def test_replay_counts_the_purchases_in_its_range_the_brain_didnt_name(tmp_path):
     config = _two_linen_flips(tmp_path)
     _bought_for_use(config)

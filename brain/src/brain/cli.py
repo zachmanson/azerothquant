@@ -40,6 +40,7 @@ from brain.history import (
     Market,
     Purchase,
     character_markets,
+    crafts,
     disenchant_results,
     import_character_reads,
     import_file,
@@ -61,6 +62,7 @@ from brain.recommend import (
     Row,
     WhyNot,
     held_units,
+    market_lots,
     per_click,
     per_day,
     recommend,
@@ -678,18 +680,34 @@ def run_flips(config: Config) -> str:
     with closing(open_history(config.history_path)) as conn:
         made = {}
         for_use = {}
+        crafted = {}
         for market in character_markets(conn):
             times = scan_times(conn, market)
             if times:
                 made[market] = flips(conn, config, market, predictions, now)
                 bought = [p for p in purchases(conn, market) if happened_at(p) <= now]
                 for_use[market] = split_purchases(conn, config, market, predictions, bought).for_use
+                costed = sum(lot.crafted for lot in market_lots(conn, config, market, predictions))
+                crafted[market] = (len(crafts(conn, market)), costed)
     if not made:
         return "No Character has a Market with a Scan yet.\n"
-    return "\n".join(_render_flips(market, f, for_use[market]) for market, f in made.items())
+    return "\n".join(
+        _render_flips(market, f, for_use[market], crafted[market]) for market, f in made.items()
+    )
 
 
-def _render_flips(market: Market, made: Sequence[Flip], for_use: Sequence[Purchase]) -> str:
+def _crafts_line(recorded: int, costed: int) -> str:
+    """How many Craft Results the Addon recorded, and how many opened an output Lot (#44),
+    so gaps in what it records show."""
+    return f"Crafts recorded: {recorded} ({costed} with a costed output)\n"
+
+
+def _render_flips(
+    market: Market,
+    made: Sequence[Flip],
+    for_use: Sequence[Purchase],
+    crafted: tuple[int, int],
+) -> str:
     title = _graded_title(market)
     table = _table(
         ["Item", "Bought", "Units", "Post at", "Sold at", "Days", "Grade"],
@@ -706,7 +724,7 @@ def _render_flips(market: Market, made: Sequence[Flip], for_use: Sequence[Purcha
             for f in made
         ],
     )
-    return f"{title}\n{table}{_flip_record(made)}\n{_for_use_line(for_use)}"
+    return f"{title}\n{table}{_flip_record(made)}\n{_for_use_line(for_use)}{_crafts_line(*crafted)}"
 
 
 def _last_sale(f: Flip) -> str:

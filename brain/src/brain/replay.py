@@ -52,6 +52,7 @@ from brain.recommend import (
     deposit_of,
     exit_values,
     item_id_of,
+    lot_craft_results,
     market_bound,
     market_holdings,
     recommend_market,
@@ -280,8 +281,9 @@ def _realized(
 ) -> tuple[float, tuple[Purchase, ...]]:
     """Realized profit from the Sold Outcomes in [since, until]: each one's price after
     the cut, less the cost of the Lot units it closed, and the For Use Purchases in the
-    range. Units without a Lot (looted, crafted, bought For Use) cost nothing, and an
-    Unlinked Outcome closes none (ADR-0007, ADR-0025)."""
+    range. Units without a Lot (looted, bought For Use, crafted from uncosted reagents)
+    cost nothing, and an Unlinked Outcome closes none (ADR-0007, ADR-0025). A crafted
+    output's Lot costs what its reagents did (#44)."""
     every = purchases(conn, market)
     bought, for_use = split_purchases(conn, config, market, predictions, every)
     linked = link_sales(outcomes(conn, market), listings(conn, market), every)
@@ -292,7 +294,7 @@ def _realized(
     )
     cost = sum(
         sale.units * lot.cost / lot.units
-        for lot in lots(bought, linked)
+        for lot in lots(bought, linked, craft_results=lot_craft_results(conn, market))
         for sale in lot.sales
         if since <= sale.sold_at <= until
     )

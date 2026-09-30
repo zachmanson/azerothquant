@@ -7,6 +7,7 @@ from brain.history import Listing, Outcome, Purchase
 from brain.lots import (
     Held,
     Lot,
+    LotCraftResult,
     LotSale,
     NamedSet,
     Settlement,
@@ -283,3 +284,91 @@ def test_a_disenchant_source_groups_buy_under_names_every_item_in_it(group, for_
     named = {SCAN: NamedSet(groups={GREENS: 300})}
     bought = _purchase("15215:0", 1, 300, arrived_at=SCAN + HOUR)
     assert is_for_use(bought, [], [SCAN], named, lambda _: group) is for_use
+
+
+BOLT = "2996"  # Bolt of Linen Cloth: 2 Linen Cloth each
+THREAD = "2320"  # Coarse Thread, a merchant reagent
+
+
+def _craft(at, reagents, output=BOLT, units=1, merchant=None):
+    return LotCraftResult(at, reagents, output, units, merchant or {})
+
+
+def test_a_craft_uses_up_reagent_units_oldest_lot_first_and_opens_an_output_lot_at_their_cost():
+    older, newer, bolt = lots(
+        [_purchase(LINEN, 10, 1000, arrived_at=200), _purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        craft_results=[_craft(300, {LINEN: 6}, units=3)],
+    )
+    assert (older.acquired_at, older.open_units) == (100, 0)
+    assert (newer.acquired_at, newer.open_units) == (200, 8)
+    # 4 at 50 and 2 at 100.
+    assert bolt == Lot(BOLT, acquired_at=300, units=3, cost=400, sales=(), crafted=True)
+
+
+def test_a_craft_with_a_reagent_unit_beyond_its_open_lots_opens_no_output_lot_but_still_uses_them():
+    # 6 Linen used, only 4 bought: the other 2 were looted, so the Bolts are only partly
+    # costed.
+    [linen] = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        craft_results=[_craft(300, {LINEN: 6}, units=3)],
+    )
+    assert linen.open_units == 0
+
+
+def test_a_merchant_reagents_units_beyond_its_open_lots_cost_its_merchant_cost():
+    thread, _, bolt = lots(
+        [_purchase(THREAD, 1, 30, arrived_at=100), _purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        craft_results=[_craft(300, {LINEN: 4, THREAD: 3}, units=2, merchant={THREAD: 10.5})],
+    )
+    assert thread.open_units == 0
+    # 4 Linen at 50, 1 Thread from its Lot at 30, 2 at the Merchant Cost.
+    assert bolt.cost == 251
+
+
+def test_a_craft_uses_up_no_prediction_lot():
+    # The Prediction's Linen stays its own; the craft's Linen was looted.
+    [held, bought] = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=OCT_1 + HOUR)],
+        [],
+        [_prediction()],
+        [Held("Tailoring", LINEN, units=20, cost=1200)],
+        craft_results=[_craft(OCT_1 + 2 * HOUR, {LINEN: 6}, units=3)],
+    )
+    assert (held.open_units, bought.open_units) == (20, 4)
+
+
+def test_a_crafts_output_of_an_item_key_under_a_live_prediction_starts_no_lot():
+    during, after = OCT_1 + HOUR, int(datetime(2026, 11, 27).timestamp())
+    result = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        [_prediction(item_keys=(BOLT,))],
+        craft_results=[_craft(during, {LINEN: 2}), _craft(after, {LINEN: 2})],
+    )
+    assert [lot.acquired_at for lot in result if lot.item_key == BOLT] == [after]
+
+
+def test_a_craft_that_makes_no_item_uses_up_its_reagents_and_opens_nothing():
+    [linen] = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        craft_results=[_craft(300, {LINEN: 3}, None)],
+    )
+    assert linen.open_units == 1
+
+
+def test_a_sub_crafts_output_lot_is_used_up_by_the_next_craft_and_the_last_output_sells():
+    shirt = "2577"
+    _, bolt, shirt_lot = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=100)],
+        [_sold(shirt, 1, 1000, arrived_at=500)],
+        craft_results=[
+            _craft(300, {LINEN: 4}, BOLT, units=2),
+            _craft(400, {BOLT: 2}, shirt),
+        ],
+    )
+    assert bolt.open_units == 0
+    assert (shirt_lot.cost, shirt_lot.sales) == (200, (LotSale(1, 1000, 500),))
