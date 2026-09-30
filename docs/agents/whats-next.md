@@ -1,12 +1,14 @@
 2026-09-29 (later 23): AT THE PC. Built #106 (77a2994) with /tdd, then /code-review. The Brain mirrors Recommendations.lua into a Brain-created `AzerothQuant_Data` (LoadOnDemand). The Addon's new `Freshness.lua` (busted) decides stale or fresh, and `covers` decides newer. `DataAddon.lua` (glue) runs Load, and the Reload button relabels to Load. RELOAD_READY_AFTER is now 70 s. #106 stays open for the in-game check, which is a comment on the issue.
 - Review fixes applied: the Brain writes the Addon's copy before the Data copy; `db.lastSavedRead` is cleared on a logout with no Character Read; Scanner recounts saved Scans after Load instead of subtracting the pruned ones.
 
+- Checked in game and closed: Load works, one reload per Scan. Not run: the early-Load case and `/aq load` with nothing new.
+- `brain watch` restarted. A stale watcher from 7:56 PM had a window title that play.bat's taskkill filter doesn't match, so check `Get-CimInstance Win32_Process -Filter "Name='brain.exe'"` for duplicates.
+
 Next, in order:
-1. At the PC: #106's in-game checklist (the latest comment on the issue). Restart brain watch, let it write once, then restart the client.
-2. Nov 4 at the PC: #91's list (see gotcha below).
+1. Nov 4 at the PC: #91's list (see gotcha below).
+2. Anything `core` in needs-triage / ready-for-agent.
 
 - Gotchas:
-  - `C_AddOns.GetAddOnInfo` returning reason "MISSING" for an unknown addon is unverified (step 6 of the checklist).
   - The Bash tool mangles `\n` inside Python heredocs (they became real newlines). Use Edit for string literals with escapes.
   - The rest are unchanged from the entries below.
 
