@@ -1,3 +1,18 @@
+2026-09-30 (later 34): QUEUE CHANGE. The user dropped the core/later split for ordering: work open tickets by need. Date-gated items are unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, #58's tooltip check, first `brain flips` grades).
+
+Next, in order (grill first where not ready-for-agent):
+1. #109 player-set stock horizon (Qty 170-205 rows tie up gold)
+2. #97 take a row off once bought (double-buy risk)
+3. #39 search the AH from a Shopping List row (needs in-game throttle probe)
+4. #110 Beta Prior as an engine nudge: grill before Nov 4, since without it #91's Predictions buy nothing at launch
+5. #76 Disenchant as an exit
+6. #108 why near-miss items didn't make the list
+7. #55 loot and for-use buys
+8. #81 Post / Cancel from a row (in-game probe first)
+9. Then: #89, #54, #44, #61, #14, #19, #10, #82
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it.
+
 2026-09-30 (later 33): Built #60 (189cf7f), closed. `brain/src/brain/flips.py` matches Purchases to the last Scan's Flip to Sell rows and grades them. It's shown in `brain flips` and in a `Graded Flips:` line in `brain recommend`, and it's not in the import path. Two changes to the spec, both agreed: the freeze is per Scan (`grades.toml` `[shown...]`, empty ones included, so an unmatched Purchase never costs another recompute), and the grade is a second append `[flips...."<item_key>@<scan>"]`. The grade is worked out once a Scan at or after the grading moment is in, and frozen once a Mailbox Read at or after it is in too. ADR-0023, CONTEXT.md **Flip Grade**. On the real Beta history it found 7 Flips (all pending). The first backfill took about 5 min (one recommend_market per Scan), and later runs are instant.
 
 Next, in order:
