@@ -96,11 +96,32 @@ end
 function DisenchantCapture:lootReady(loot, bags, at)
   -- Only a Disenchant's own loot; LOOT_READY also fires for mobs, chests and fishing.
   if not self.succeeded then
+    -- A new window once the Disenchant's has closed; LOOT_READY can fire twice for one.
+    if self.window and self.window.closedAt then
+      self.window = nil
+    end
     return
   end
   self.succeeded = false
+  self.window = {} -- the Disenchant's loot window, open until lootClosed
   self.pending = { before = self.before, mats = mats(loot), at = at }
   self:bagsRead(bags, at)
+end
+
+-- LOOT_CLOSED, at the time it closed.
+function DisenchantCapture:lootClosed(at)
+  if self.window and not self.window.closedAt then
+    self.window.closedAt = at
+  end
+end
+
+-- Whether loot the player receives at `at` is a Disenchant's mats: its loot window is
+-- open (without autoloot, the player takes them when they like), or closed within the
+-- wait, since a loot line can come after the window closes. A Loot Alert (#54) skips
+-- those, since they were chosen, not dropped.
+function DisenchantCapture:isDisenchantLoot(at)
+  local w = self.window
+  return w ~= nil and (w.closedAt == nil or at - w.closedAt <= WAIT_SECONDS)
 end
 
 -- Every bag read while a Result waits for its item, at the time it was read.

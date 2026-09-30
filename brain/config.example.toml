@@ -131,6 +131,13 @@
 # Must come before the first [[installs]].
 # beta_sell_rate_weight = 0
 
+# Optional: a Loot Alert (#54) flags a drop in game when one unit's Best Exit Value is at
+# least the greater of loot_alert_share of the Market's pooled gold (0 to 1, defaults to
+# 0.10) and loot_alert_floor gold (at least 0, defaults to 10). Display only. Must come
+# before the first [[installs]].
+# loot_alert_share = 0.10
+# loot_alert_floor = 10
+
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
 # it nets after the cut over what its units cost on the Auction House, is at least this
 # share. Only a hint; the Action stands either way. Defaults to 0.20. Must come before the

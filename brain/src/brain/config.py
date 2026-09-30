@@ -100,6 +100,11 @@ DEFAULT_BETA_COLUMN_DAYS = 14
 # What each Beta Sale Event counts for in a Prediction buy's Max Loss room over those same
 # days (#110, ADR-0024); off by default.
 DEFAULT_BETA_SELL_RATE_WEIGHT = 0.0
+# A Loot Alert (#54) fires on a drop whose one unit is worth at least this share of the
+# Market's pooled gold, and never under this many gold.
+DEFAULT_LOOT_ALERT_SHARE = 0.10
+DEFAULT_LOOT_ALERT_FLOOR_GOLD = 10
+COPPER_PER_GOLD = 10000
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
@@ -199,6 +204,10 @@ class Config:
     # What each Beta Sale Event and Observation Window hour counts for in the room a
     # Prediction buy's Max Loss counts on, over beta_column_days (#110); 0 never.
     beta_sell_rate_weight: float = DEFAULT_BETA_SELL_RATE_WEIGHT
+    # A Loot Alert's threshold: the greater of this share of pooled gold and this floor,
+    # set in gold in config.toml (#54).
+    loot_alert_share: float = DEFAULT_LOOT_ALERT_SHARE
+    loot_alert_floor_copper: int = DEFAULT_LOOT_ALERT_FLOOR_GOLD * COPPER_PER_GOLD
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
@@ -446,6 +455,20 @@ def load_config(path: Path) -> Config:
         lambda x: 0 <= x <= 1,
         "from 0 to 1",
     )
+    loot_share = _parse_number(
+        path,
+        raw.get("loot_alert_share", DEFAULT_LOOT_ALERT_SHARE),
+        "loot_alert_share",
+        lambda x: 0 <= x <= 1,
+        "from 0 to 1",
+    )
+    loot_floor = _parse_number(
+        path,
+        raw.get("loot_alert_floor", DEFAULT_LOOT_ALERT_FLOOR_GOLD),
+        "loot_alert_floor",
+        lambda x: x >= 0,
+        "of gold of at least 0",
+    )
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
@@ -482,6 +505,8 @@ def load_config(path: Path) -> Config:
         buy_under_window_days=window_days,
         beta_column_days=beta_days,
         beta_sell_rate_weight=beta_weight,
+        loot_alert_share=loot_share,
+        loot_alert_floor_copper=round(loot_floor * COPPER_PER_GOLD),
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,

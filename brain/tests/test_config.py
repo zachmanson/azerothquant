@@ -282,6 +282,8 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.buy_under_window_days == 7
     assert config.beta_column_days == 14
     assert config.beta_sell_rate_weight == 0
+    assert config.loot_alert_share == 0.1
+    assert config.loot_alert_floor_copper == 10 * 10000
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -312,6 +314,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "buy_under_window_days = 14\n"
         "beta_column_days = 0\n"
         "beta_sell_rate_weight = 0.5\n"
+        "loot_alert_share = 0.25\n"
+        "loot_alert_floor = 2.5\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -340,6 +344,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert (config.buy_under_min_sightings, config.buy_under_window_days) == (3, 14)
     assert config.beta_column_days == 0
     assert config.beta_sell_rate_weight == 0.5
+    assert config.loot_alert_share == 0.25
+    assert config.loot_alert_floor_copper == 25000  # set in gold
 
 
 @pytest.mark.parametrize(
@@ -380,6 +386,11 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("beta_sell_rate_weight", "-0.1"),
         ("beta_sell_rate_weight", "1.5"),
         ("beta_sell_rate_weight", "true"),
+        ("loot_alert_share", "-0.1"),
+        ("loot_alert_share", "1.5"),
+        ("loot_alert_share", "true"),
+        ("loot_alert_floor", "-1"),
+        ("loot_alert_floor", '"10"'),
         ("disenchant_check_min_results", "1"),  # an interval needs 2
         ("disenchant_check_min_results", "2.5"),
         ("disenchant_check_min_results", "true"),

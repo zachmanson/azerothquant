@@ -217,6 +217,10 @@ _Avoid_: DE flip, disenchant snipe
 The most one unit of an Item Key is worth paying on the Auction House, worked out ahead of the Scan from its best way out (Vendor, Sell, a Craft it's a reagent of, or Disenchant), less the Flip margin and effort cost. It exists so the player can buy short-lived Listings live, since Scans every 15 minutes miss them. Its Sell way counts only the Sale Events at or above the price it would post at, like a Flip's. It shows only if past Scans saw a Listing at or under it. A Disenchant source group has one too: the most any item in it is worth paying to Disenchant, seen through Listings of any of its items. An item is flagged by the higher of its own and its group's. It isn't an Action and isn't a Flip: the Addon only flags it, and the player buys (ADR-0003, ADR-0019).
 _Avoid_: snipe, target price, max price
 
+**Loot Alert**:
+The Addon's raid-warning text, sound and chat line when the player loots a drop whose one unit is worth at least the threshold: the greater of `loot_alert_share` (10%) of the Market's pooled gold, as of the last Character Read, and `loot_alert_floor` (10g). One unit is judged, not the stack, so a pile of cheap mats never fires one, though the line still shows the quantity and total. The worth is the unit's Best Exit Value with its Action, valued alone: no held unit of the Item Key takes a way's room ahead of it, since the question is what the drop is worth, not what it adds to the bags. Only the player's own "You receive loot" lines count: not what they create, buy, get in the mail or as a quest reward, nor a Disenchant's mats. An Item Key no Scan has seen (a Bind on Pickup drop) gets none. Display only (ADR-0003).
+_Avoid_: drop alert, loot popup
+
 **Recommendation**:
 The best Action for one Candidate Item, with quantity, price ceiling, the full Action path, expected profit and return per day.
 _Avoid_: signal, tip

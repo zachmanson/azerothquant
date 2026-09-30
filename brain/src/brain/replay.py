@@ -241,6 +241,7 @@ def replay(
                         buy_under=False,
                         pricer=pricers.get(policy),
                         paid=False,
+                        loot_alert=False,
                     ),
                     vendor,
                     config.shopping_list_rows,

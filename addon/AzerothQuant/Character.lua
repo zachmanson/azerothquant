@@ -6,12 +6,17 @@
 -- happens in CharacterRead.lua; this file only talks to the WoW API. On load it also deletes the Reads the Brain has
 -- imported (Prune.lua).
 --
+-- It also shows Loot Alerts (#54, LootAlert.lua): a drop the Brain says is worth at least
+-- its threshold gets raid-warning text, a sound and a chat line. A Disenchant's mats get
+-- none, which is why it lives here, beside the Disenchant capture.
+--
 -- Gold and bags are read while in the world and kept in memory, like the bank: on a
 -- real logout (not /reload) the client has already emptied them by PLAYER_LOGOUT, so
 -- reading them there records 0 gold and empty bags.
 --
 -- Read-only (ADR-0003): only calls that read gold, containers, item info, the loot window
--- and who the player is. Nothing that moves, uses, loots or deletes items.
+-- and who the player is, and the Loot Alert's display. Nothing that moves, uses, loots or
+-- deletes items.
 local _, ns = ...
 local CharacterRead = ns.CharacterRead
 local Scan = ns.Scan
@@ -21,6 +26,7 @@ local Chat = ns.Chat
 local Professions = ns.Professions
 local Merchant = ns.Merchant
 local DisenchantCapture = ns.DisenchantCapture
+local LootAlert = ns.LootAlert
 
 local DISENCHANT_SPELL = 13262
 
@@ -125,6 +131,25 @@ local function lootSlots()
   return loot
 end
 
+-- A Loot Alert for a CHAT_MSG_LOOT line, if it's the player's own drop and worth one.
+local function alertLoot(msg)
+  local now = time()
+  if disenchants:isDisenchantLoot(now) then
+    return
+  end
+  local saved = AzerothQuantRecommendations
+  local formats = { single = LOOT_ITEM_SELF, multiple = LOOT_ITEM_SELF_MULTIPLE }
+  local realm, faction = GetRealmName(), UnitFactionGroup("player")
+  local line = LootAlert.forMessage(saved and saved.recommendations, realm, faction, msg, formats, now)
+  if not line then
+    return
+  end
+  RaidNotice_AddMessage(RaidWarningFrame, line, ChatTypeInfo["RAID_WARNING"])
+  PlaySound(SOUNDKIT.RAID_WARNING)
+  -- Not Chat.say: the line carries its own "AQ:" prefix, like the tooltip lines.
+  print(line)
+end
+
 local function readCarriedSoon()
   if carriedTimer then
     carriedTimer:Cancel()
@@ -149,6 +174,8 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_MONEY")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("LOOT_READY")
+frame:RegisterEvent("LOOT_CLOSED")
+frame:RegisterEvent("CHAT_MSG_LOOT")
 frame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
 frame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
@@ -184,6 +211,10 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     disenchants:castSucceeded()
   elseif event == "LOOT_READY" then
     disenchants:lootReady(lootSlots(), readContainers(bagIds(), {}), time())
+  elseif event == "LOOT_CLOSED" then
+    disenchants:lootClosed(time())
+  elseif event == "CHAT_MSG_LOOT" then
+    alertLoot(arg1)
   elseif event == "BANKFRAME_CLOSED" then
     -- Catch a change still waiting out the quiet time before the bank closes for good.
     if atBank and timer then

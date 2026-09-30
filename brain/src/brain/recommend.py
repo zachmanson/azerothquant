@@ -480,6 +480,23 @@ class BuyUnder:
 
 
 @dataclass(frozen=True)
+class LootValue:
+    """One unit's Best Exit Value, and the Action it's by (#54)."""
+
+    value: float
+    way: Action
+
+
+@dataclass(frozen=True)
+class LootAlert:
+    """What a drop must be worth for the Addon to flag it (#54): the `threshold` for one
+    unit, and each Item Key in the Scan whose one unit alone is worth at least that."""
+
+    threshold: int
+    items: dict[str, LootValue] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
     as_of: int  # requested_at of the Scan it was valued at
@@ -514,6 +531,7 @@ class MarketRecommendations:
     # Each active Prediction Item Key's Beta/Live Fair Value ratio, while the Beta Sell
     # Rate may count (#110).
     beta_ratios: dict[str, float] = field(default_factory=dict)
+    loot_alert: LootAlert = field(default_factory=lambda: LootAlert(0))
 
     @property
     def spend(self) -> int:
@@ -567,6 +585,7 @@ def recommend_market(
     pricer: Pricer | None = None,
     why_not: bool = False,
     paid: bool = True,
+    loot_alert: bool = True,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
@@ -575,7 +594,9 @@ def recommend_market(
     `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
     the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click.
     `why_not` as in `recommend`. Without `paid`, the Holdings rows get no Paid or ROI:
-    working out a past Scan, whose Lots may rest on what it named (#55), or a replay."""
+    working out a past Scan, whose Lots may rest on what it named (#55), or a replay.
+    Without `loot_alert`, the Loot Alert has no items: only the latest Scan's is shown
+    (#54), and valuing every Item Key in a Scan adds up over a replay."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -710,7 +731,28 @@ def recommend_market(
         buy_under=_buy_unders(conn, config, market, now, valuer, plans) if buy_under else [],
         why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
         beta_ratios=ratios,
+        loot_alert=_loot_alert(gold, valuer, plans, config, with_items=loot_alert),
     )
+
+
+def _loot_alert(
+    gold: int, valuer: "_Valuer", plans: list["_Plan"], config: Config, with_items: bool
+) -> LootAlert:
+    """The Loot Alert (#54): its threshold is a share of the pooled gold, never under the
+    floor, and it keeps each Item Key in the Scan whose best way out for one unit is worth
+    at least that. The unit is valued alone: no held unit takes a way's room ahead of it,
+    since the question is what the drop is worth, not what it adds to the bags."""
+    threshold = max(round(config.loot_alert_share * gold), config.loot_alert_floor_copper)
+    if not with_items:
+        return LootAlert(threshold)
+    alone = valuer.after({}, {})
+    sources = _nothing_held(alone, plans, config)
+    items = {}
+    for item_key in sorted(alone.supply):
+        out = _way_out(item_key, alone, config, sources)
+        if out is not None and out.value >= threshold:
+            items[item_key] = LootValue(out.value, out.way)
+    return LootAlert(threshold, items)
 
 
 def named_set(m: MarketRecommendations) -> NamedSet:
@@ -841,17 +883,7 @@ def _buy_unders(
     Listing at or under. The Holdings don't move them: a Craft way's other reagents come
     from their cheapest current source (ADR-0014's, with nothing held)."""
     window = config.buy_under_window_days
-    sources = _Sources(
-        held={},
-        crafted={},
-        asks=valuer.others,
-        merchant=valuer.merchant,
-        valuer=valuer,
-        under=set(),
-        plans=plans,
-        spent=Counter(),
-        config=config,
-    )
+    sources = _nothing_held(valuer, plans, config)
     result: list[tuple[float, BuyUnder]] = []
 
     def add(
@@ -907,6 +939,22 @@ def _buy_unders(
         add(None, group, _disenchant_way(disenchanter, expected, sources, config), effort, cheapest)
     result.sort(key=lambda pair: -pair[0])
     return [buy for _, buy in result]
+
+
+def _nothing_held(valuer: "_Valuer", plans: list["_Plan"], config: Config) -> "_Sources":
+    """Sources for a way out with nothing held: a Craft way's other reagents come from
+    their cheapest current source (ADR-0014's)."""
+    return _Sources(
+        held={},
+        crafted={},
+        asks=valuer.others,
+        merchant=valuer.merchant,
+        valuer=valuer,
+        under=set(),
+        plans=plans,
+        spent=Counter(),
+        config=config,
+    )
 
 
 def _cheapest_by_group(
@@ -1304,6 +1352,7 @@ def rework(
         scan_at,
         as_of=scan_at,
         paid=False,
+        loot_alert=False,
     )
     shown = {
         r.item_key: Named(

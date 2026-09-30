@@ -16,6 +16,8 @@ from brain.recommend import (
     CharacterHolding,
     DisenchantFlip,
     ListingBuy,
+    LootAlert,
+    LootValue,
     MarketRecommendations,
     MatYield,
     NodeKind,
@@ -802,3 +804,24 @@ def test_a_real_lua_reads_a_flip_to_disenchant(tmp_path, lua):
     )
 
     assert out.splitlines() == ["armor	16	Bob	10940	9998	300"]
+
+
+def test_a_real_lua_reads_the_loot_alert(tmp_path, lua):
+    alert = LootAlert(
+        100000,
+        {"2770": LootValue(123456.7, Action.SELL), "10940": LootValue(200000, Action.DISENCHANT)},
+    )
+    m = MarketRecommendations(MARKET, 1790000000, 0, loot_alert=alert)
+    file = tmp_path / FILE_NAME
+    file.write_text(render({}, markets=[m]), encoding="utf-8")
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local a = r.recommendations["Quel\'Thalas"].Horde.lootAlert '
+        'local i, d = a.items["2770"], a.items["10940"] '
+        "print(a.threshold, i.value, i.action, d.value, d.action)",
+    )
+
+    # Whole copper, as the Addon's Money.format shows it.
+    assert out == "100000	123457	Sell	200000	Disenchant"

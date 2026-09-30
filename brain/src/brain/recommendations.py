@@ -43,6 +43,7 @@ from brain.recommend import (
     BuyUnder,
     ChainNode,
     DisenchantFlip,
+    LootAlert,
     MarketRecommendations,
     ReagentBuy,
     Row,
@@ -94,6 +95,9 @@ _HEADER = (
     "-- A Flip to Disenchant's row (action Disenchant on the shoppingList, no itemKey) has\n"
     "-- disenchant = { group, disenchanter, mats, buys = { { itemKey, price } } }: the\n"
     "-- group it buys, as a Buy Under's, and the Listings it buys, cheapest first.\n"
+    "-- lootAlert is what a drop must be worth for a Loot Alert: { threshold (one unit),\n"
+    '-- items = { [itemKey] = { value, action = "Sell"|"Vendor"|"Disenchant"|"Craft" } } }:\n'
+    "-- each Item Key in the Scan whose one unit alone is worth at least the threshold.\n"
     "-- disenchantExcluded is what can't be Disenchanted, whatever its group: itemIDs and\n"
     "-- equipLocs, each a set.\n"
 )
@@ -162,6 +166,7 @@ def _recommendations(
                 for item_key, whose in m.held.items()
             },
             "buyUnder": [_buy_under(b) for b in m.buy_under],
+            "lootAlert": _loot_alert(m.loot_alert),
         }
         if m.budget is not None:  # a Lua table can't hold nil
             by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
@@ -301,6 +306,16 @@ def _buy_under(buy: BuyUnder) -> dict[str, object]:
     if buy.listed_now:
         out["listedNow"] = True
     return out
+
+
+def _loot_alert(alert: LootAlert) -> dict[str, object]:
+    return {
+        "threshold": alert.threshold,
+        "items": {
+            item_key: {"value": round(v.value), "action": str(v.way)}
+            for item_key, v in alert.items.items()
+        },
+    }
 
 
 def _disenchant_excluded(table: DisenchantTable) -> dict[str, dict]:

@@ -28,6 +28,7 @@ RecommendationTable.lua
 CraftChain.lua
 TooltipLines.lua
 BuyUnderMatch.lua
+LootAlert.lua
 
 # WoW glue (thin; not unit tested)
 DataAddon.lua

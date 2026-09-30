@@ -29,6 +29,7 @@ from brain.recommend import (
     DisenchantFlip,
     Grade,
     ListingBuy,
+    LootValue,
     MarketRecommendations,
     NodeKind,
     ReagentBuy,
@@ -4179,3 +4180,49 @@ def test_a_flip_to_disenchant_names_each_item_it_buys_up_to_its_dearest_listing(
     assert named_set(m) == NamedSet(
         items={"9999": 300, "9998": 150}, groups={(2, "armor", 16, 20): 200}
     )
+
+
+# --- Loot Alert (#54) ---
+
+
+@pytest.mark.parametrize(
+    ("money", "threshold"),
+    [
+        (GOLD, 10 * 10000),  # 10% of 100g beats the 5g floor
+        (20 * 10000, 5 * 10000),  # 10% of 20g is 2g, under the floor
+    ],
+)
+def test_a_loot_alerts_threshold_is_a_share_of_the_pooled_gold_never_under_the_floor(
+    db, money, threshold
+):
+    config = replace(CONFIG, loot_alert_share=0.1, loot_alert_floor_copper=5 * 10000)
+    result = run(db, [scan(T0, row(ORE))], [character_read(money=money)], config=config)
+
+    assert result[MARKET].loot_alert.threshold == threshold
+
+
+def test_a_loot_alert_keeps_the_item_keys_in_the_scan_worth_at_least_its_threshold(db):
+    config = replace(CONFIG, loot_alert_share=0, loot_alert_floor_copper=1000)
+    result = run(
+        db,
+        [scan(T0, row(ORE), row(LINEN))],
+        [character_read(vendor_prices={2770: 1000, 2589: 999})],
+        config=config,
+    )
+
+    assert result[MARKET].loot_alert.items == {ORE_KEY: LootValue(1000, Action.VENDOR)}
+
+
+def test_a_loot_alert_values_one_unit_alone_ahead_of_the_held_ones(db):
+    config = replace(CONFIG, loot_alert_share=0, loot_alert_floor_copper=50)
+    # 10 held Linen fill the 6-unit horizon, so one more held would be Vendored at 10.
+    result = run(
+        db,
+        selling_two_linen_an_hour(),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+        config=config,
+    )
+
+    assert result[MARKET].loot_alert.items == {
+        LINEN_KEY: LootValue(pytest.approx(99 * 0.95), Action.SELL)
+    }

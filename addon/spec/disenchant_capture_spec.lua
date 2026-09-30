@@ -138,4 +138,35 @@ describe("DisenchantCapture", function()
 
     assert.are.same({ { mats = { [10940] = 2 }, at = 1790450000 } }, capture.results)
   end)
+
+  it("tells the loot lines of a Disenchant's mats from a drop's (#54)", function()
+    local capture = DisenchantCapture.new()
+    local bags = { slot(1, GREEN, 1, CHEST) }
+
+    capture:lootReady({ { link = LINEN, quantity = 3 } }, bags, 1790450000) -- a mob's loot
+    assert.is_false(capture:isDisenchantLoot(1790450000))
+    capture:lootClosed(1790450001)
+
+    capture:castStarted(bags)
+    capture:castSucceeded()
+    capture:lootReady({ { link = DUST, quantity = 2 } }, { slot(1) }, 1790450010)
+    -- Without autoloot the window stays open until the player takes the mats.
+    assert.is_true(capture:isDisenchantLoot(1790450070))
+    capture:lootClosed(1790450071)
+    -- Its loot lines can come just after the window closes.
+    assert.is_true(capture:isDisenchantLoot(1790450072))
+    assert.is_false(capture:isDisenchantLoot(1790450080))
+  end)
+
+  it("takes the next loot window after a Disenchant's for a drop's (#54)", function()
+    local capture = DisenchantCapture.new()
+
+    capture:castStarted({ slot(1, GREEN, 1, CHEST) })
+    capture:castSucceeded()
+    capture:lootReady({ { link = DUST, quantity = 2 } }, { slot(1) }, 1790450000)
+    capture:lootClosed(1790450001)
+    capture:lootReady({ { link = LINEN, quantity = 3 } }, { slot(1) }, 1790450002) -- a mob's loot
+
+    assert.is_false(capture:isDisenchantLoot(1790450002))
+  end)
 end)
