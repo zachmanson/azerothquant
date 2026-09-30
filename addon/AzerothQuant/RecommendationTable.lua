@@ -282,6 +282,10 @@ local function details(r, nameOf, held, holdersOf)
     local siblings = (r.siblingSales or 0) > 0 and " (+" .. r.siblingSales .. " other suffixes)" or ""
     lines[#lines + 1] = "Sales " .. r.saleEvents .. siblings
   end
+  -- A Prediction buy's Max Loss counted Beta's Sale Events toward its room (#110).
+  if r.roomFromBeta then
+    lines[#lines + 1] = "Room partly from Beta"
+  end
   local note = RecommendationTable.note(r, nameOf)
   if note then
     lines[#lines + 1] = note

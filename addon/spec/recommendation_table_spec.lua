@@ -227,6 +227,17 @@ describe("RecommendationTable.build", function()
     assert.are.same({ "Sales 3" }, tooltip(none))
   end)
 
+  it("says when a Prediction buy's room came partly from the Beta Sell Rate (#110)", function()
+    local function tooltip(r)
+      return build(entry({ predictionBuys = { r } }), AS_OF, names).sections[4].rows[1].tooltip
+    end
+    local buy = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens" }
+    local fromBeta = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens", roomFromBeta = true }
+
+    assert.are.same({}, tooltip(buy))
+    assert.are.same({ "Room partly from Beta" }, tooltip(fromBeta))
+  end)
+
   it("tells a Flip to Craft's crafter what to mail it", function()
     local held = { ["2320"] = { { character = "Alt-One", bags = 1, bank = 0, bound = 0 } } }
 

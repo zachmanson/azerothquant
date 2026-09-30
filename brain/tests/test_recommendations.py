@@ -8,6 +8,7 @@ from brain.disenchant import Group
 from brain.history import Market, open_history
 from brain.recommend import (
     Action,
+    BetaRoom,
     Blocked,
     BlockReason,
     BuyUnder,
@@ -215,6 +216,57 @@ def test_every_kind_of_row_reaches_lua_with_absent_values_as_nil(tmp_path, lua):
         "12360|Hold|5|nil|nil|nil|nil|nil|nil|90000|BWL opens|nil",
         "2589|Sell|20|15|300|40|nil|12|nil|300|nil|nil",
         "12359|Hold|10|800|nil|nil|nil|nil|nil|8000|BWL opens|1500",
+    ]
+
+
+def test_a_real_lua_reads_which_prediction_buys_room_came_partly_from_beta(tmp_path, lua):
+    def buy(item_key: str, beta_room: BetaRoom | None) -> Row:
+        return Row(
+            item_key=item_key,
+            action=Action.HOLD,
+            quantity=10,
+            price=800.0,
+            prediction="BWL opens",
+            max_loss=1500.0,
+            beta_room=beta_room,
+        )
+
+    file = tmp_path / FILE_NAME
+    file.write_text(
+        render(
+            {},
+            markets=[
+                MarketRecommendations(
+                    market=MARKET,
+                    as_of=1790000000,
+                    gold=500000,
+                    prediction_buys=[
+                        buy("12359", BetaRoom(post_at=900.0, room=12, from_beta=4)),
+                        # A quiet Beta watered Live's rate down: no room came from it.
+                        buy("12360", BetaRoom(post_at=900.0, room=8, from_beta=-2)),
+                        buy("12361", BetaRoom(post_at=900.0, room=10, from_beta=0)),
+                        buy("12362", None),
+                    ],
+                    prediction_cost=32000,
+                )
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'for _, row in ipairs(r.recommendations["Quel\'Thalas"].Horde.predictionBuys) do '
+        "  print(row.itemKey, tostring(row.roomFromBeta)) "
+        "end",
+    )
+
+    assert out.splitlines() == [
+        "12359	true",
+        "12360	nil",
+        "12361	nil",
+        "12362	nil",
     ]
 
 

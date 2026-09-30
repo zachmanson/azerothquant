@@ -213,6 +213,9 @@ def _row(row: Row) -> dict[str, object]:
         out[key] = str(value) if isinstance(value, Action) else value
     if row.roi_hint:
         out["roiHint"] = True
+    # A Prediction buy's room is partly the Beta Sell Rate's only when Beta added to it (#110).
+    if row.beta_room and row.beta_room.from_beta > 0:
+        out["roomFromBeta"] = True
     if row.buys:
         out["buys"] = [_buy(b) for b in row.buys]
     if row.uses:
