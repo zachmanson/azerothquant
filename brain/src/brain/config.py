@@ -40,6 +40,10 @@ DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
 # A Scan more than this much older than its Market's latest is archived and waits for
 # `brain rebuild` instead of re-matching the Market's tail (ADR-0026).
 DEFAULT_POOL_REMATCH_HOURS = 48
+DEFAULT_POOL_MIN_COMPLETENESS = 0.8
+DEFAULT_POOL_COMPLETENESS_WINDOW = 10
+DEFAULT_POOL_SYNC_MINUTES = 5
+DEFAULT_POOL_BACKFILL_DAYS = 30
 
 
 # Fair Value averages the cheapest this share of a Market's units of an Item Key (#21).
@@ -146,6 +150,18 @@ class Config:
     observation_window_max_seconds: int = DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES * 60
     # A late Scan older than its Market's latest by more than this waits for `brain rebuild`.
     pool_rematch_seconds: int = DEFAULT_POOL_REMATCH_HOURS * 3600
+    # A Pooled Scan with fewer readable Listings than this share of the median of its
+    # Market's last pool_completeness_window Scans is archived but not imported.
+    pool_min_completeness: float = DEFAULT_POOL_MIN_COMPLETENESS
+    pool_completeness_window: int = DEFAULT_POOL_COMPLETENESS_WINDOW
+    # The Scan Pool's Worker and this player's member key. Both unset means the pool is
+    # off and nothing leaves the PC.
+    pool_url: str | None = None
+    pool_key: str | None = None
+    # `brain watch` pulls this often, besides right before each import.
+    pool_sync_seconds: int = DEFAULT_POOL_SYNC_MINUTES * 60
+    # The first pull reaches back this far.
+    pool_backfill_days: int = DEFAULT_POOL_BACKFILL_DAYS
     # The Archive folder (ADR-0005). A loaded config always has one; None, for
     # tests and for rebuilding from the archive itself, means Scans aren't archived.
     archive_dir: Path | None = None
@@ -291,6 +307,26 @@ def load_config(path: Path) -> Config:
             f"{path}: pool_rematch_hours must be a positive whole number of hours, "
             f"got {rematch_hours!r}"
         )
+    pool_url, pool_key = _parse_pool_access(path, raw)
+    pool_sync_minutes = _parse_whole(
+        path, raw.get("pool_sync_minutes", DEFAULT_POOL_SYNC_MINUTES), "pool_sync_minutes", 1
+    )
+    backfill_days = _parse_whole(
+        path, raw.get("pool_backfill_days", DEFAULT_POOL_BACKFILL_DAYS), "pool_backfill_days", 1
+    )
+    min_completeness = _parse_number(
+        path,
+        raw.get("pool_min_completeness", DEFAULT_POOL_MIN_COMPLETENESS),
+        "pool_min_completeness",
+        lambda x: 0 <= x <= 1,
+        "from 0 to 1",
+    )
+    completeness_window = _parse_whole(
+        path,
+        raw.get("pool_completeness_window", DEFAULT_POOL_COMPLETENESS_WINDOW),
+        "pool_completeness_window",
+        3,  # the guard needs 3 Scans to compare against
+    )
     history = raw.get("history_path", DEFAULT_HISTORY_FILE)
     if not isinstance(history, str) or not history:
         raise ConfigError(f"{path}: history_path must be a file path, got {history!r}")
@@ -487,6 +523,12 @@ def load_config(path: Path) -> Config:
         history_path=path.parent / history,
         observation_window_max_seconds=window_minutes * 60,
         pool_rematch_seconds=rematch_hours * 3600,
+        pool_min_completeness=min_completeness,
+        pool_completeness_window=completeness_window,
+        pool_url=pool_url,
+        pool_key=pool_key,
+        pool_sync_seconds=pool_sync_minutes * 60,
+        pool_backfill_days=backfill_days,
         archive_dir=path.parent / archive,
         fair_value_slice_share=slice_share,
         fair_value_outlier_share=outlier_share,
@@ -534,6 +576,29 @@ def _parse_number(
     if isinstance(value, bool) or not isinstance(value, int | float) or not allowed(value):
         raise ConfigError(f"{config_path}: {key} must be a number {wording}, got {value!r}")
     return value
+
+
+def _parse_whole(config_path: Path, value: object, key: str, least: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < least:
+        raise ConfigError(
+            f"{config_path}: {key} must be a whole number of at least {least}, got {value!r}"
+        )
+    return value
+
+
+def _parse_pool_access(config_path: Path, raw: dict) -> tuple[str | None, str | None]:
+    """pool_url and pool_key: both set, or neither (the pool is off). Pushing and pulling
+    come as one, so a member always gives as well as takes."""
+    url, key = raw.get("pool_url"), raw.get("pool_key")
+    if url is None and key is None:
+        return None, None
+    if url is None or key is None:
+        raise ConfigError(f"{config_path}: pool_url and pool_key must be set together")
+    if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+        raise ConfigError(f"{config_path}: pool_url must be an http(s) URL, got {url!r}")
+    if not isinstance(key, str) or not key:
+        raise ConfigError(f"{config_path}: pool_key must be the key the pool admin gave you")
+    return url, key
 
 
 def _parse_copper(config_path: Path, value: object, key: str) -> int:

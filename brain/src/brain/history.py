@@ -15,10 +15,11 @@ import logging
 import math
 import os
 import sqlite3
+import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from brain.archive import Archive
+from brain.archive import Archive, ArchivedScan
 from brain.config import Config, Era
 from brain.disenchant import DisenchantResult, ItemInfo
 from brain.mailbox import (
@@ -34,7 +35,7 @@ from brain.mailbox import (
 )
 from brain.matching import match
 from brain.savedvariables import parse_savedvariables
-from brain.scan import ItemKey, ItemStringError, Scan, ScanFormatError
+from brain.scan import ItemKey, ItemStringError, Scan, ScanFormatError, ScanSource
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,24 @@ CREATE TABLE IF NOT EXISTS scan (
     dropped_rows INTEGER NOT NULL,
     inexact_rows INTEGER NOT NULL,
     unreadable_rows INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'own',  -- own or pool (a Pooled Scan, ADR-0026)
+    pool_id TEXT,          -- the pool's ID: a Pooled Scan's, or an own Scan's once uploaded
+    readable_rows INTEGER, -- rows the Brain could read; NULL in Scans from before #122
     UNIQUE (market_id, requested_at)
+);
+
+-- Every Pooled Scan downloaded into the Archive, imported or not, so a pull skips it and a
+-- rollback can find it (#122).
+CREATE TABLE IF NOT EXISTS pooled_scan (
+    pool_id TEXT PRIMARY KEY,
+    market_id INTEGER NOT NULL REFERENCES market (id),
+    requested_at INTEGER NOT NULL
+);
+
+-- Where the last pull from the Scan Pool got to. One row at most.
+CREATE TABLE IF NOT EXISTS pool_cursor (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    cursor INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS listing (
@@ -398,6 +416,11 @@ class ImportReport:
     # Older than their Market's latest by more than pool_rematch_hours (or with no Archive
     # to re-match from): archived, and imported by the next `brain rebuild`.
     scans_waiting_for_rebuild: int = 0
+    # Pooled Scans with too few Listings next to their Market's recent Scans: archived,
+    # not imported (ADR-0026).
+    scans_incomplete: int = 0
+    # Pooled Scans the pool rolled back, taken out of the Archive (and history).
+    scans_rolled_back: int = 0
     # Missing a field the Brain needs.
     scans_unreadable: int = 0
     inexact_rows: int = 0
@@ -446,6 +469,9 @@ def open_history(path: str | Path) -> sqlite3.Connection:
     _add_column(conn, "known_profession", "max_skill_level", "INTEGER")  # #76
     _add_column(conn, "craft", "output_item_id", "INTEGER")  # #44
     _add_column(conn, "craft", "quantity_min", "INTEGER")  # #44
+    _add_column(conn, "scan", "source", "TEXT NOT NULL DEFAULT 'own'")  # #122
+    _add_column(conn, "scan", "pool_id", "TEXT")  # #122
+    _add_column(conn, "scan", "readable_rows", "INTEGER")  # #122
     return conn
 
 
@@ -513,30 +539,77 @@ def import_scans(
     it is imported (ADR-0005). If that write fails the error propagates and the Scan
     stays out of the history, so the Addon doesn't prune it and it's retried later.
     """
+    return _import(conn, [ArchivedScan(raw) for raw in raw_scans], era, config, archived=False)
+
+
+def import_pooled_scans(
+    conn: sqlite3.Connection, pooled: list[tuple[str, dict]], era: Era, config: Config
+) -> ImportReport:
+    """Import Pooled Scans, as (pool ID, Scan) pairs downloaded from the Scan Pool.
+
+    Each is archived under its Market's pool/ folder and recorded as downloaded, then
+    imported as `import_scans` does, except that one with too few Listings next to its
+    Market's recent Scans is left out (ADR-0026).
+    """
+    entries = [ArchivedScan(raw, ScanSource.POOL, pool_id) for pool_id, raw in pooled]
+    return _import(conn, entries, era, config, archived=False)
+
+
+def import_archived_scans(
+    conn: sqlite3.Connection, scans: list[ArchivedScan], era: Era, config: Config
+) -> ImportReport:
+    """Import Scans, own and Pooled, that are already in the Archive (`brain rebuild`)."""
+    return _import(conn, scans, era, config, archived=True)
+
+
+def _import(
+    conn: sqlite3.Connection,
+    entries: list[ArchivedScan],
+    era: Era,
+    config: Config,
+    archived: bool,
+) -> ImportReport:
     report = ImportReport()
     archive = Archive(config.archive_dir) if config.archive_dir is not None else None
     scans = []
-    for raw in raw_scans:
+    for entry in entries:
         try:
-            scans.append((Scan.from_saved(raw), raw))
+            scans.append((Scan.from_saved(entry.raw), entry))
         except ScanFormatError as e:
             report.scans_unreadable += 1
             report.warn(f"Skipped a Scan the Brain can't read: {e}")
 
-    for scan, raw in sorted(scans, key=lambda s: s[0].requested_at):
-        if archive is not None:
-            archive.write(era, raw)
+    # At the same requestedAt the own Scan goes first, and so wins.
+    for scan, entry in sorted(
+        scans, key=lambda s: (s[0].requested_at, s[1].source is ScanSource.POOL)
+    ):
+        if archive is not None and not archived:
+            if entry.source is ScanSource.POOL:
+                archive.write_pooled(era, entry.raw, entry.pool_id)
+            else:
+                archive.write(era, entry.raw)
         with conn:
-            _import_scan(conn, scan, era, config, archive, report)
+            if entry.source is ScanSource.POOL:
+                conn.execute(
+                    "INSERT OR IGNORE INTO pooled_scan (pool_id, market_id, requested_at)"
+                    " VALUES (?, ?, ?)",
+                    (
+                        entry.pool_id,
+                        _market_id(conn, Market(scan.realm, scan.faction, era)),
+                        scan.requested_at,
+                    ),
+                )
+            _import_scan(conn, scan, entry, era, config, archive, report)
             source = f"Scan at {scan.requested_at}"
-            _record_vendor_prices(conn, era, raw, scan.requested_at, source, report)
-            _record_item_info(conn, era, raw, scan.requested_at, source, report)
+            _record_vendor_prices(conn, era, entry.raw, scan.requested_at, source, report)
+            _record_item_info(conn, era, entry.raw, scan.requested_at, source, report)
     return report
 
 
 def _import_scan(
     conn: sqlite3.Connection,
     scan: Scan,
+    entry: ArchivedScan,
     era: Era,
     config: Config,
     archive: Archive | None,
@@ -545,22 +618,34 @@ def _import_scan(
     market = Market(realm=scan.realm, faction=scan.faction, era=era)
     market_id = _market_id(conn, market)
     exists = conn.execute(
-        "SELECT 1 FROM scan WHERE market_id = ? AND requested_at = ?",
+        "SELECT source FROM scan WHERE market_id = ? AND requested_at = ?",
         (market_id, scan.requested_at),
     ).fetchone()
-    if exists:
+    # An own Scan takes the place of a Pooled one from the same second, as `brain rebuild`
+    # would have it: the re-match below finds the own one first in the Archive.
+    replaces_pooled = (
+        exists is not None and exists[0] == ScanSource.POOL and entry.source is ScanSource.OWN
+    )
+    if exists and not replaces_pooled:
         report.scans_already_imported += 1
+        return
+    if not _complete_enough(conn, market_id, scan, entry.source, config):
+        report.scans_incomplete += 1
+        report.warn(
+            f"Left out the Pooled Scan at {scan.requested_at} for {market}: it has only "
+            f"{len(scan.rows)} Listings, too few next to the Market's recent Scans to be whole."
+        )
         return
 
     _, latest_at = _latest_scan(conn, market_id)
     if latest_at is None or scan.requested_at > latest_at:
-        _insert_scan(conn, market_id, scan, config)
+        _insert_scan(conn, market_id, scan, entry.source, entry.pool_id, config)
     else:
         # A late Scan re-matches the Market's tail (ADR-0026): every Scan from it on, the
         # late one included, comes back from the Archive in time order.
         tail = None
         if archive is not None and latest_at - scan.requested_at <= config.pool_rematch_seconds:
-            tail = _archived_tail(archive, era, scan)
+            tail = _archived_tail(archive, market, scan.requested_at)
         if tail is None:
             report.scans_waiting_for_rebuild += 1
             report.warn(
@@ -569,9 +654,7 @@ def _import_scan(
                 "from it on can't be re-matched."
             )
             return
-        _rewind(conn, market_id, scan.requested_at)
-        for tail_scan in tail:
-            _insert_scan(conn, market_id, tail_scan, config)
+        _rematch_tail(conn, market_id, scan.requested_at, tail, config)
         report.scans_rematched += 1
     report.scans_imported += 1
     report.inexact_rows += scan.inexact_rows
@@ -588,15 +671,69 @@ def _import_scan(
         )
 
 
-def _archived_tail(archive: Archive, era: Era, scan: Scan) -> list[Scan] | None:
-    """The Market's archived Scans from `scan` on, oldest first, or None if one can't be
+def _archived_tail(
+    archive: Archive, market: Market, since: int
+) -> list[tuple[Scan, ArchivedScan]] | None:
+    """The Market's archived Scans from `since` on, oldest first, or None if one can't be
     read. Read before anything is rewound, so a bad file leaves the history as it was."""
     try:
-        raws = archive.market_scans(era, scan.realm, scan.faction, since=scan.requested_at)
-        return [Scan.from_saved(raw) for raw in raws]
+        entries = archive.market_scans(market.era, market.realm, market.faction, since=since)
+        return [(Scan.from_saved(e.raw), e) for e in entries]
     except (OSError, ValueError, KeyError, ScanFormatError) as e:
-        log.warning("Can't read the Archive from the Scan at %s: %s", scan.requested_at, e)
+        log.warning("Can't read the Archive from the Scan at %s: %s", since, e)
         return None
+
+
+def _rematch_tail(
+    conn: sqlite3.Connection,
+    market_id: int,
+    since: int,
+    tail: list[tuple[Scan, ArchivedScan]],
+    config: Config,
+) -> None:
+    """Rewind the Market to before `since`, then import `tail`, its archived Scans from
+    there on, in time order, as if they had arrived in that order."""
+    # An own Scan's pool ID is only in the history, so it's kept across the rewind.
+    uploaded = dict(
+        conn.execute(
+            "SELECT requested_at, pool_id FROM scan WHERE market_id = ? AND requested_at >= ?"
+            " AND source = 'own' AND pool_id IS NOT NULL",
+            (market_id, since),
+        ).fetchall()
+    )
+    _rewind(conn, market_id, since)
+    previous_at = None
+    for tail_scan, entry in tail:
+        # A Pooled Scan from the same second as an own one comes after it, and loses.
+        if tail_scan.requested_at == previous_at:
+            continue
+        if not _complete_enough(conn, market_id, tail_scan, entry.source, config):
+            continue
+        pool_id = entry.pool_id or uploaded.get(tail_scan.requested_at)
+        _insert_scan(conn, market_id, tail_scan, entry.source, pool_id, config)
+        previous_at = tail_scan.requested_at
+
+
+def _complete_enough(
+    conn: sqlite3.Connection, market_id: int, scan: Scan, source: ScanSource, config: Config
+) -> bool:
+    """False for a Pooled Scan with fewer readable Listings than pool_min_completeness of
+    the median of the Market's last pool_completeness_window Scans before it: most likely
+    cut short, and importing it would make a Disappearance of everything it missed. The
+    player's own Scans always pass, and so does any Scan with under 3 Scans to compare."""
+    if source is not ScanSource.POOL:
+        return True
+    counts = [
+        n
+        for (n,) in conn.execute(
+            "SELECT readable_rows FROM scan WHERE market_id = ? AND requested_at < ?"
+            " AND readable_rows IS NOT NULL ORDER BY requested_at DESC LIMIT ?",
+            (market_id, scan.requested_at, config.pool_completeness_window),
+        )
+    ]
+    if len(counts) < 3:
+        return True
+    return len(scan.rows) >= config.pool_min_completeness * statistics.median(counts)
 
 
 def _latest_scan(conn: sqlite3.Connection, market_id: int) -> tuple[int | None, int | None]:
@@ -652,19 +789,30 @@ def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
     conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
 
 
-def _insert_scan(conn: sqlite3.Connection, market_id: int, scan: Scan, config: Config) -> None:
+def _insert_scan(
+    conn: sqlite3.Connection,
+    market_id: int,
+    scan: Scan,
+    source: ScanSource,
+    pool_id: str | None,
+    config: Config,
+) -> None:
     """Add a Scan newer than every other in its Market, matched against the latest one."""
     latest_id, latest_at = _latest_scan(conn, market_id)
     scan_id = conn.execute(
         "INSERT INTO scan (market_id, requested_at, character, dropped_rows, inexact_rows,"
-        " unreadable_rows) VALUES (?, ?, ?, ?, ?, ?)",
+        " unreadable_rows, source, pool_id, readable_rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             market_id,
             scan.requested_at,
-            scan.character,
+            # A Pooled Scan has no character; the column predates them.
+            scan.character or "",
             scan.dropped_rows,
             scan.inexact_rows,
             scan.unreadable_rows,
+            source.value,
+            pool_id,
+            len(scan.rows),
         ),
     ).lastrowid
 
@@ -715,6 +863,131 @@ def _insert_scan(conn: sqlite3.Connection, market_id: int, scan: Scan, config: C
             for c in result.new
         ],
     )
+
+
+# --- the Scan Pool's side of the history (#122, ADR-0026) ---
+
+
+def scans_to_push(conn: sqlite3.Connection) -> list[tuple[Market, int]]:
+    """The player's own Scans not yet uploaded to the pool, as (Market, requestedAt),
+    newest first so the latest Scans go up before an old backlog."""
+    rows = conn.execute(
+        "SELECT m.realm, m.faction, m.era, s.requested_at FROM scan s"
+        " JOIN market m ON m.id = s.market_id"
+        " WHERE s.source = 'own' AND s.pool_id IS NULL ORDER BY s.requested_at DESC, m.id"
+    )
+    return [(Market(realm, faction, Era(era)), at) for realm, faction, era, at in rows]
+
+
+def record_upload(
+    conn: sqlite3.Connection, market: Market, requested_at: int, pool_id: str
+) -> None:
+    """Note the pool ID an own Scan was uploaded as, so it isn't pushed again."""
+    with conn:
+        conn.execute(
+            "UPDATE scan SET pool_id = ? WHERE requested_at = ? AND source = 'own'"
+            " AND market_id = (SELECT id FROM market WHERE realm = ? AND faction = ? AND era = ?)",
+            (pool_id, requested_at, *_market_params(market)),
+        )
+
+
+def has_pooled_scan(conn: sqlite3.Connection, pool_id: str, market: Market, at: int) -> bool:
+    """Whether a pull can skip this pool entry: it was downloaded already, or the Market
+    already has a Scan from that second (an own one always wins, and a Pooled one got
+    there first)."""
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM pooled_scan WHERE pool_id = ? UNION ALL"
+            " SELECT 1 FROM scan s JOIN market m ON m.id = s.market_id"
+            f" WHERE {_MARKET_FILTER} AND s.requested_at = ?",
+            (pool_id, *_market_params(market), at),
+        ).fetchone()
+    )
+
+
+def pool_cursor(conn: sqlite3.Connection) -> int | None:
+    """Where the last pull got to in the pool's index, or None before the first one."""
+    row = conn.execute("SELECT cursor FROM pool_cursor WHERE id = 1").fetchone()
+    return row[0] if row else None
+
+
+def set_pool_cursor(conn: sqlite3.Connection, cursor: int) -> None:
+    with conn:
+        conn.execute(
+            "INSERT INTO pool_cursor (id, cursor) VALUES (1, ?)"
+            " ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor",
+            (cursor,),
+        )
+
+
+def copy_pool_state(source: sqlite3.Connection, target: sqlite3.Connection) -> None:
+    """Carry what only the history knows about the pool into a rebuilt one: which own
+    Scans were uploaded, and where the last pull got to. (Pooled Scans' IDs are in the
+    Archive.)"""
+    uploads = source.execute(
+        "SELECT m.realm, m.faction, m.era, s.requested_at, s.pool_id FROM scan s"
+        " JOIN market m ON m.id = s.market_id WHERE s.source = 'own' AND s.pool_id IS NOT NULL"
+    ).fetchall()
+    for realm, faction, era, at, pool_id in uploads:
+        record_upload(target, Market(realm, faction, Era(era)), at, pool_id)
+    cursor = pool_cursor(source)
+    if cursor is not None:
+        set_pool_cursor(target, cursor)
+
+
+def roll_back_pooled(conn: sqlite3.Connection, pool_ids: list[str], config: Config) -> ImportReport:
+    """Take the Scans the pool rolled back out of the Archive and the history.
+
+    An own Scan is never deleted: one uploaded as a Scan the pool already had got that
+    Scan's ID, so it only forgets the ID and is pushed again. A Pooled Scan's file is
+    deleted, and if it was imported its Market's tail is re-matched without it, unless
+    that reaches back further than pool_rematch_hours: then it stays in the history until
+    the next `brain rebuild`, which won't find it.
+    """
+    report = ImportReport()
+    if not pool_ids:
+        return report
+    marks = ",".join("?" * len(pool_ids))
+    archive = Archive(config.archive_dir) if config.archive_dir is not None else None
+    with conn:
+        conn.execute(
+            f"UPDATE scan SET pool_id = NULL WHERE source = 'own' AND pool_id IN ({marks})",
+            pool_ids,
+        )
+        found = conn.execute(
+            "SELECT p.pool_id, p.market_id, p.requested_at, m.realm, m.faction, m.era,"
+            " EXISTS (SELECT 1 FROM scan s WHERE s.market_id = p.market_id"
+            "  AND s.requested_at = p.requested_at AND s.pool_id = p.pool_id)"
+            f" FROM pooled_scan p JOIN market m ON m.id = p.market_id WHERE p.pool_id IN ({marks})",
+            pool_ids,
+        ).fetchall()
+        conn.execute(f"DELETE FROM pooled_scan WHERE pool_id IN ({marks})", pool_ids)
+    rematch_from: dict[tuple[int, Market], int] = {}
+    for _, market_id, at, realm, faction, era, imported in found:
+        market = Market(realm, faction, Era(era))
+        if archive is not None:
+            archive.delete_pooled(market.era, realm, faction, at)
+        report.scans_rolled_back += 1
+        if imported:
+            key = (market_id, market)
+            rematch_from[key] = min(at, rematch_from.get(key, at))
+
+    for (market_id, market), since in rematch_from.items():
+        _, latest_at = _latest_scan(conn, market_id)
+        tail = None
+        if archive is not None and latest_at - since <= config.pool_rematch_seconds:
+            tail = _archived_tail(archive, market, since)
+        if tail is None:
+            report.scans_waiting_for_rebuild += 1
+            report.warn(
+                f"The pool rolled back a Scan at {since} for {market}. It's out of the Archive,"
+                " but too old to re-match now: run `brain rebuild` to take it out of the history."
+            )
+            continue
+        with conn:
+            _rematch_tail(conn, market_id, since, tail, config)
+        report.scans_rematched += 1
+    return report
 
 
 def import_mailbox_reads(
@@ -1409,6 +1682,19 @@ def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
         "SELECT m.realm, m.faction, MAX(s.requested_at) FROM scan s"
         " JOIN market m ON m.id = s.market_id"
         " WHERE m.era = ? GROUP BY m.id ORDER BY m.realm, m.faction",
+        (era.value,),
+    )
+    return {Market(realm, faction, era): at for realm, faction, at in rows}
+
+
+def latest_own_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
+    """requested_at of the latest of the player's own Scans imported for each Market in the
+    Era: what the Addon may prune its stored Scans up to. Pooled Scans don't count, since
+    the Addon never had them."""
+    rows = conn.execute(
+        "SELECT m.realm, m.faction, MAX(s.requested_at) FROM scan s"
+        " JOIN market m ON m.id = s.market_id"
+        " WHERE m.era = ? AND s.source = 'own' GROUP BY m.id ORDER BY m.realm, m.faction",
         (era.value,),
     )
     return {Market(realm, faction, era): at for realm, faction, at in rows}

@@ -7,9 +7,12 @@
     brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
     brain flips      grade the Flips to Sell made: did they sell at the Post at named
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
+    brain pool push  upload the player's Scans the Scan Pool doesn't have yet
+    brain pool pull [--since DATE]  download and import other members' Scans
 
 All of them only read the Addon's SavedVariables and write the Brain's own files; nothing
-here touches the game process (ADR-0003).
+here touches the game process (ADR-0003). Only `brain watch` and `brain pool` go online, and
+only with pool_url and pool_key set: to the Scan Pool, with stripped Scans (ADR-0026).
 """
 
 import argparse
@@ -23,10 +26,10 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from brain.archive import Archive
+from brain.archive import Archive, ArchivedScan
 from brain.beta_prior import BetaPrior, beta_prior
 from brain.config import Config, ConfigError, Era, load_config
 from brain.disenchant import Group, load_table
@@ -40,17 +43,20 @@ from brain.history import (
     Market,
     Purchase,
     character_markets,
+    copy_pool_state,
     crafts,
     disenchant_results,
+    import_archived_scans,
     import_character_reads,
     import_file,
     import_mailbox_reads,
-    import_scans,
     open_history,
     purchases,
     scan_times,
 )
 from brain.lots import happened_at, start_of
+from brain.pool import HttpPool, Pool
+from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
 from brain.recommend import (
     Action,
@@ -148,9 +154,11 @@ def run_rebuild(config: Config) -> ImportReport:
     if config.archive_dir is None:
         raise RebuildError("no archive folder configured")
     archive = Archive(config.archive_dir)
-    scans_by_era: dict[Era, list[dict]] = {}
+    scans_by_era: dict[Era, list[ArchivedScan]] = {}
     for era, raw in archive.scans():
-        scans_by_era.setdefault(era, []).append(raw)
+        scans_by_era.setdefault(era, []).append(ArchivedScan(raw))
+    for era, pooled in archive.pooled_scans():
+        scans_by_era.setdefault(era, []).append(pooled)
     reads_by_era: dict[Era, list[dict]] = {}
     for era, raw in archive.mailbox_reads():
         reads_by_era.setdefault(era, []).append(raw)
@@ -171,11 +179,20 @@ def run_rebuild(config: Config) -> ImportReport:
     try:
         with closing(open_history(rebuilt)) as conn:
             for era, raws in scans_by_era.items():
-                _add_report(total, import_scans(conn, raws, era, from_archive))
+                _add_report(total, import_archived_scans(conn, raws, era, from_archive))
             for era, raws in reads_by_era.items():
                 import_mailbox_reads(conn, raws, era, from_archive, total)
             for era, raws in character_reads_by_era.items():
                 import_character_reads(conn, raws, era, from_archive, total)
+            if config.history_path.exists():
+                try:
+                    with closing(open_history(config.history_path)) as old:
+                        copy_pool_state(old, conn)
+                except sqlite3.Error as e:
+                    # The old history may be why it's being rebuilt. Without its pool state
+                    # the next sync pushes every own Scan again and lists the whole pool,
+                    # which costs time but loses nothing.
+                    log.warning("Couldn't keep the Scan Pool state of the old history: %s", e)
         os.replace(rebuilt, config.history_path)
     except BaseException:
         rebuilt.unlink(missing_ok=True)
@@ -1016,15 +1033,55 @@ def _money(copper: float | None) -> str:
     return f"{sign}{copper}c"
 
 
+def _pool(config: Config, command: str, since: date | None) -> int:
+    pool = make_pool(config)
+    if pool is None:
+        log.error("The Scan Pool is off: set pool_url and pool_key in the config to use it")
+        return 1
+    config.history_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with closing(open_history(config.history_path)) as conn:
+            if command == "push":
+                report = push(conn, pool, config)
+            else:
+                start = None
+                if since is not None:
+                    day = datetime(since.year, since.month, since.day, tzinfo=UTC)
+                    start = int(day.timestamp())
+                report = pull(conn, pool, config, now=int(time.time()), since=start)
+                if report.pulled or report.rolled_back:
+                    _write_recommendations(conn, config)
+    except (OSError, sqlite3.Error) as e:
+        log.error("Couldn't sync with the Scan Pool: %s", e)
+        return 1
+    log.info(report.summary())
+    return 1 if report.failed else 0
+
+
+def make_pool(config: Config) -> Pool | None:
+    """The Scan Pool, or None when it's off (pool_url and pool_key unset)."""
+    if config.pool_url is None or config.pool_key is None:
+        return None
+    return HttpPool(config.pool_url, config.pool_key)
+
+
+def pool_syncer(config: Config) -> PoolSyncer | None:
+    pool = make_pool(config)
+    return PoolSyncer(config, pool) if pool is not None else None
+
+
 def _watch(config: Config) -> int:
     watcher = Watcher(settle_seconds=SETTLE_SECONDS)
     # Kept for as long as the watcher runs, so each pass only computes the new Scans' (#105).
     fair_value_cache = FairValueCache()
+    pool_sync = pool_syncer(config)
     folders = ", ".join(str(i.path) for i in config.installs)
     log.info("Watching %s in %s (Ctrl+C to stop)", SAVEDVARIABLES_FILE, folders)
+    if pool_sync is not None:
+        log.info("Syncing with the Scan Pool at %s", config.pool_url)
     try:
         while True:
-            watch_step(config, watcher, fair_value_cache=fair_value_cache)
+            watch_step(config, watcher, fair_value_cache=fair_value_cache, pool_sync=pool_sync)
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         return 0
@@ -1035,6 +1092,7 @@ def watch_step(
     watcher: Watcher,
     clock: Callable[[], float] = time.monotonic,
     fair_value_cache: FairValueCache | None = None,
+    pool_sync: PoolSyncer | None = None,
 ) -> None:
     ready: list[Path] = []
     try:
@@ -1042,7 +1100,11 @@ def watch_step(
         noticed = clock()
         ready = watcher.poll(savedvariables_files(config), now=noticed)
         if not ready:
+            if pool_sync is not None:
+                pool_sync.tick()
             return
+        if pool_sync is not None:
+            pool_sync.before_import()
         results = run_import(config, ready, fair_value_cache=fair_value_cache)
         _log_results(results)
         failed = [r.path for r in results if r.error is not None]
@@ -1050,6 +1112,8 @@ def watch_step(
             # Up to Recommendations.lua written: what the Addon's RELOAD_READY_AFTER guesses
             # at (#71), less the settle time. Not logged when every file failed.
             log.info("Import took %.1fs", clock() - noticed)
+        if pool_sync is not None:
+            pool_sync.after_import()
     except Exception:
         # A long-running watcher logs and carries on rather than exit on one bad pass.
         log.exception("Import failed; will try again")
@@ -1099,6 +1163,17 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "disenchants", help="check the Disenchant tables against your Disenchant Results"
     )
+    pooling = commands.add_parser("pool", help="sync with the Scan Pool by hand")
+    pool_commands = pooling.add_subparsers(dest="pool_command", required=True)
+    pool_commands.add_parser("push", help="upload your Scans the pool doesn't have yet")
+    pulling = pool_commands.add_parser(
+        "pull", help="download and import other members' Scans since the last pull"
+    )
+    pulling.add_argument(
+        "--since",
+        type=date.fromisoformat,
+        help="go back to this day (YYYY-MM-DD, UTC) instead of the last pull",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -1108,6 +1183,8 @@ def main(argv: list[str] | None = None) -> int:
         log.error("Can't load the config: %s", e)
         return 2
 
+    if args.command == "pool":
+        return _pool(config, args.pool_command, getattr(args, "since", None))
     if args.command == "import":
         return _import_once(config)
     if args.command == "rebuild":

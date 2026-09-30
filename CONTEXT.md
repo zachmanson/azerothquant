@@ -43,7 +43,7 @@ The Auction House mail in one Character's inbox (sales, purchases, cancellations
 _Avoid_: mail scan (a Scan is only ever the Auction House)
 
 **Archive**:
-Every Scan, Mailbox Read and Character Read exactly as the Addon recorded it, one file each, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
+Every Scan, Mailbox Read and Character Read exactly as the Addon recorded it, plus every Pooled Scan as downloaded, one file each, kept forever (a Pooled Scan the pool rolls back is the one thing deleted). It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
 _Avoid_: Scan Archive (it holds more than Scans), backup, raw dump
 
 **Scan Pool**:
@@ -51,7 +51,7 @@ A shared online store of Scans that several players' Brains upload to and downlo
 _Avoid_: cloud, shared database, AuctionDB
 
 **Pooled Scan**:
-A Scan from the Scan Pool that another player took. It goes into the player's Archive and history like one of their own Scans, but nothing in it is own.
+A Scan from the Scan Pool that another player took. It goes into the player's Archive (under `pool/`, apart from their own) and history like one of their own Scans, but nothing in it is own. One with too few Listings next to its Market's recent Scans is taken as cut short: archived, never imported. It never counts toward what the Addon may prune.
 _Avoid_: remote Scan, foreign Scan
 
 **Item Key**:

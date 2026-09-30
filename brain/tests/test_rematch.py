@@ -184,7 +184,7 @@ def test_a_scan_past_the_rematch_cap_waits_for_rebuild(db, config):
     assert report.scans_waiting_for_rebuild == 1
     assert "brain rebuild" in report.warnings[0]
     assert [
-        s["requestedAt"]
+        s.raw["requestedAt"]
         for s in Archive(config.archive_dir).market_scans(
             Era.BETA, "Classic Beta PvP", "Alliance", since=0
         )

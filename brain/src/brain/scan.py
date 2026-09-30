@@ -6,6 +6,7 @@ turns that into Brain terms: the Item Key and the unit buyout.
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 
 # Positions in "item:itemID:enchant:gem1:gem2:gem3:gem4:suffix:unique:level:spec:
 # modifiersMask:context:numBonusIDs:bonusID1:..." (after the "item:" prefix).
@@ -90,6 +91,13 @@ def unit_buyout(buyout: int, quantity: int) -> int | None:
     return None if remainder else unit
 
 
+class ScanSource(StrEnum):
+    """Whose Scan it is: the player's own, or a Pooled Scan from the Scan Pool (ADR-0026)."""
+
+    OWN = "own"
+    POOL = "pool"
+
+
 class ScanFormatError(ValueError):
     """A Scan in SavedVariables is missing a field the Brain needs."""
 
@@ -117,7 +125,8 @@ class Scan:
     requested_at: int
     realm: str
     faction: str
-    character: str
+    # None on a Pooled Scan: stripped before upload (ADR-0026).
+    character: str | None
     rows: tuple[ScanRow, ...]
     # Rows the Addon already dropped for missing item data.
     dropped_rows: int
@@ -132,7 +141,8 @@ class Scan:
         if not isinstance(raw, dict):
             raise ScanFormatError(f"a Scan must be a table, got {raw!r}")
         requested_at = _required(raw, "requestedAt", int)
-        header = {f: _required(raw, f, str) for f in ("realm", "faction", "character")}
+        header = {f: _required(raw, f, str) for f in ("realm", "faction")}
+        character = _required(raw, "character", str) if "character" in raw else None
         raw_listings = raw.get("listings", [])
         if not isinstance(raw_listings, list):
             raise ScanFormatError(f"Scan at {requested_at}: listings must be a sequence")
@@ -156,6 +166,7 @@ class Scan:
             dropped_rows=_required(raw, "droppedRows", int) if "droppedRows" in raw else 0,
             inexact_rows=inexact,
             unreadable_rows=unreadable,
+            character=character,
             **header,
         )
 

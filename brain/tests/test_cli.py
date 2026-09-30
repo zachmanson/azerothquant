@@ -13,6 +13,8 @@ import pytest
 from brain.archive import Archive
 from brain.cli import (
     RebuildError,
+    main,
+    pool_syncer,
     run_disenchants,
     run_flips,
     run_import,
@@ -33,6 +35,7 @@ from brain.history import (
     holdings,
     import_character_reads,
     import_mailbox_reads,
+    import_pooled_scans,
     import_scans,
     known_recipes,
     listings,
@@ -40,14 +43,18 @@ from brain.history import (
     open_history,
     outcomes,
     pooled_gold,
+    scan_times,
     vendor_prices,
 )
 from brain.lots import NamedSet
+from brain.pool import strip_scan
+from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import Prediction
 from brain.recommend import grades
 from brain.recommendations import FILE_NAME, GLOBAL_NAME, addon_folder
 from brain.savedvariables import parse_savedvariables
 from brain.watch import Watcher
+from tests.fake_pool import FakePool
 
 FIXTURE = Path(__file__).parent / "fixtures" / "AzerothQuant.lua"
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
@@ -164,6 +171,109 @@ def test_watch_keeps_its_fair_value_cache_from_one_pass_to_the_next(tmp_path, mo
     watch_step(config, watcher, fair_value_cache=cache)  # it has settled: import
 
     assert passed == [cache]
+
+
+FRIEND_SCAN_AT = 1_790_000_600  # between the fixture's two Scans
+
+
+def _watching_with_a_pool(tmp_path):
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    pool = FakePool()
+    fixture = parse_savedvariables(FIXTURE.read_text(encoding="utf-8"))["AzerothQuantDB"]
+    friend = strip_scan({**fixture["scans"][0], "requestedAt": FRIEND_SCAN_AT})
+    pool.upload(Era.BETA, friend)
+    return config, pool
+
+
+def test_watch_pulls_the_pool_before_an_import_and_pushes_right_after(tmp_path):
+    config, pool = _watching_with_a_pool(tmp_path)
+    syncer = PoolSyncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT + 3600)
+    watcher = Watcher(settle_seconds=0)
+
+    watch_step(config, watcher, pool_sync=syncer)  # sees the file for the first time: sync
+    watch_step(config, watcher, pool_sync=syncer)  # it has settled: pull, import, push
+
+    assert pool.calls == ["list", "fetch", "list", "push", "push"]
+    with closing(open_history(config.history_path)) as conn:
+        assert scan_times(conn, MARKET) == [1790000000, FRIEND_SCAN_AT, 1790001200]
+
+
+def test_watch_pulls_every_pool_sync_minutes_and_retries_a_failed_push(tmp_path):
+    config, pool = _watching_with_a_pool(tmp_path)
+    run_import(config, savedvariables_files(config))
+    now = [0.0]
+    syncer = PoolSyncer(config, pool, clock=lambda: now[0], now=lambda: FRIEND_SCAN_AT + 3600)
+    watcher = Watcher(settle_seconds=3600)  # the file never settles here
+    pool.fail = True
+    watch_step(config, watcher, lambda: now[0], pool_sync=syncer)
+    pool.fail = False
+    pool.calls.clear()
+
+    now[0] = config.pool_sync_seconds - 1
+    watch_step(config, watcher, lambda: now[0], pool_sync=syncer)
+    assert pool.calls == []
+    now[0] = config.pool_sync_seconds
+    watch_step(config, watcher, lambda: now[0], pool_sync=syncer)
+    # The two just pushed are in the index too, so it takes two pages.
+    assert pool.calls == ["push", "push", "list", "fetch", "list"]
+
+
+def test_watch_imports_even_when_the_pool_is_down(tmp_path, caplog):
+    config, pool = _watching_with_a_pool(tmp_path)
+    pool.fail = True
+    syncer = PoolSyncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT)
+    watcher = Watcher(settle_seconds=0)
+
+    watch_step(config, watcher, pool_sync=syncer)
+    watch_step(config, watcher, pool_sync=syncer)
+
+    assert "Couldn't pull from the Scan Pool" in caplog.text
+    with closing(open_history(config.history_path)) as conn:
+        assert scan_times(conn, MARKET) == [1790000000, 1790001200]
+
+
+def test_watch_logs_what_it_pushed_pulled_rejected_and_rematched(tmp_path, caplog):
+    config, pool = _watching_with_a_pool(tmp_path)
+    run_import(config, savedvariables_files(config))
+    caplog.set_level(logging.INFO)
+    syncer = PoolSyncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT + 3600)
+
+    syncer.sync()
+
+    assert "Scan Pool: pushed 2, pulled 1, rejected 0, re-matched 1" in caplog.text
+
+
+def test_with_no_pool_key_nothing_leaves_the_pc(tmp_path, monkeypatch, caplog):
+    def no_network(*args, **kwargs):
+        raise AssertionError("a network call with the pool off")
+
+    monkeypatch.setattr("urllib.request.urlopen", no_network)
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        f"[[installs]]\npath = '{tmp_path / 'wow'}'\nera = 'beta'\n", encoding="utf-8"
+    )
+
+    assert pool_syncer(config) is None
+    assert main(["--config", str(config_file), "pool", "push"]) == 1
+    assert main(["--config", str(config_file), "pool", "pull"]) == 1
+    assert "pool_url and pool_key" in caplog.text
+
+
+def test_pool_commands_sync_by_hand(tmp_path, monkeypatch):
+    config, pool = _watching_with_a_pool(tmp_path)
+    run_import(config, savedvariables_files(config))
+    monkeypatch.setattr("brain.cli.load_config", lambda path: config)
+    monkeypatch.setattr("brain.cli.make_pool", lambda config: pool)
+
+    assert main(["pool", "push"]) == 0
+    assert main(["pool", "pull", "--since", "2026-09-01"]) == 0
+
+    assert len(pool.pushed()) == 2
+    with closing(open_history(config.history_path)) as conn:
+        assert FRIEND_SCAN_AT in scan_times(conn, MARKET)
 
 
 def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_path):
@@ -413,6 +523,47 @@ def test_known_recipes_and_merchant_costs_come_back_the_same_from_the_archive(tm
         assert merchant_costs(conn, MARKET) == expected_costs
 
 
+def test_rebuild_includes_the_pooled_scans_in_the_archive(tmp_path):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    [(_, own), *_] = sorted(Archive(config.archive_dir).scans(), key=lambda s: s[1]["requestedAt"])
+    late = strip_scan({**own, "requestedAt": own["requestedAt"] + 60})
+    with closing(open_history(config.history_path)) as conn:
+        import_pooled_scans(conn, [("p1", late)], Era.BETA, config)
+        before = scan_times(conn, MARKET)
+    imported = dump(config.history_path)
+
+    report = run_rebuild(config)
+
+    assert own["requestedAt"] + 60 in before
+    assert report.scans_imported == 3
+    assert dump(config.history_path) == imported
+
+
+def test_rebuild_keeps_what_the_scan_pool_already_has(tmp_path):
+    # Only the history knows which own Scans went up and where the last pull got to;
+    # losing that would push every own Scan again and list the whole pool.
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    pool = FakePool()
+    with closing(open_history(config.history_path)) as conn:
+        pushed = push(conn, pool, config).pushed
+        pull(conn, pool, config, now=1_790_000_000)
+
+    run_rebuild(config)
+
+    pool.listed_since.clear()
+    with closing(open_history(config.history_path)) as conn:
+        assert pushed == 2
+        assert push(conn, pool, config).pushed == 0
+        pull(conn, pool, config, now=1_790_000_000)
+    assert pool.listed_since == [2]
+
+
 def test_rebuild_replaces_a_history_that_has_drifted_from_the_archive(tmp_path):
     install = tmp_path / "_classic_beta_"
     file = install_with_savedvariables(install)
@@ -450,6 +601,26 @@ def test_rebuild_tells_the_addon_what_is_in_the_rebuilt_history(tmp_path):
     (addon_folder(Install(install, Era.BETA)) / FILE_NAME).unlink()
 
     run_rebuild(config)
+
+    assert read_recommendations(install)["lastImported"] == {
+        "Classic Beta PvP": {"Alliance": 1790001200}
+    }
+
+
+def test_the_addon_is_only_told_about_the_player_s_own_scans(tmp_path):
+    # The Addon deletes its stored Scans up to lastImported. A Pooled Scan newer than an
+    # own Scan the Brain hasn't read yet must not get that one deleted.
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    install_addon(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+    run_import(config, [file])
+    [*_, (_, own)] = sorted(Archive(config.archive_dir).scans(), key=lambda s: s[1]["requestedAt"])
+    newer = strip_scan({**own, "requestedAt": own["requestedAt"] + 600})
+    with closing(open_history(config.history_path)) as conn:
+        import_pooled_scans(conn, [("p1", newer)], Era.BETA, config)
+
+    run_import(config, [file])
 
     assert read_recommendations(install)["lastImported"] == {
         "Classic Beta PvP": {"Alliance": 1790001200}

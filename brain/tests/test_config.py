@@ -483,3 +483,53 @@ def test_rejects_bad_prediction_guards(tmp_path, key, value):
 
     with pytest.raises(ConfigError, match=key):
         load_config(path)
+
+
+def test_the_scan_pool_is_off_unless_configured(tmp_path):
+    config = load_config(write_config(tmp_path, INSTALL))
+
+    assert config.pool_url is None and config.pool_key is None
+    assert config.pool_sync_seconds == 5 * 60
+    assert config.pool_backfill_days == 30
+    assert config.pool_min_completeness == 0.8
+    assert config.pool_completeness_window == 10
+
+
+def test_the_scan_pool_settings_can_be_set(tmp_path):
+    settings = (
+        "pool_url = 'https://pool.example.workers.dev'\n"
+        "pool_key = 'k123'\n"
+        "pool_sync_minutes = 2\n"
+        "pool_backfill_days = 90\n"
+        "pool_min_completeness = 0.5\n"
+        "pool_completeness_window = 20\n"
+    )
+    config = load_config(write_config(tmp_path, settings + INSTALL))
+
+    assert config.pool_url == "https://pool.example.workers.dev"
+    assert config.pool_key == "k123"
+    assert config.pool_sync_seconds == 2 * 60
+    assert config.pool_backfill_days == 90
+    assert config.pool_min_completeness == 0.5
+    assert config.pool_completeness_window == 20
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "pool_url = 'https://pool.example.workers.dev'",  # a key too, or neither
+        "pool_key = 'k123'",
+        "pool_url = 5\npool_key = 'k'",
+        "pool_url = 'ftp://pool'\npool_key = 'k'",
+        "pool_url = 'https://pool'\npool_key = ''",
+        "pool_sync_minutes = 0",
+        "pool_backfill_days = 1.5",
+        "pool_min_completeness = 1.5",
+        "pool_completeness_window = 2",
+    ],
+)
+def test_rejects_bad_scan_pool_settings(tmp_path, setting):
+    path = write_config(tmp_path, setting + "\n" + INSTALL)
+
+    with pytest.raises(ConfigError, match="pool_"):
+        load_config(path)

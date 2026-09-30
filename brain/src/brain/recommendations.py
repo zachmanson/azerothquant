@@ -34,7 +34,7 @@ from brain.history import (
     Market,
     latest_character_read_times,
     latest_mailbox_read_times,
-    latest_scan_times,
+    latest_own_scan_times,
 )
 from brain.lua_literal import assignment
 from brain.recommend import (
@@ -54,8 +54,8 @@ GLOBAL_NAME = "AzerothQuantRecommendations"
 
 _HEADER = (
     "-- Written by the azerothquant Brain after every import; edits are overwritten.\n"
-    "-- lastImported[realm][faction] is when the latest imported Scan in that Market\n"
-    "-- was requested. The Addon deletes stored Scans up to then.\n"
+    "-- lastImported[realm][faction] is when the latest of your own imported Scans in\n"
+    "-- that Market was requested. The Addon deletes stored Scans up to then.\n"
     "-- lastMailboxRead[realm][character] is when the latest imported Mailbox Read of\n"
     "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
@@ -363,7 +363,7 @@ def write_recommendations(
         return None
     path = folder / FILE_NAME
     text = render(
-        latest_scan_times(conn, install.era),
+        latest_own_scan_times(conn, install.era),
         latest_mailbox_read_times(conn, install.era),
         latest_character_read_times(conn, install.era),
         [m for m in markets if m.market.era is install.era],
