@@ -1,3 +1,12 @@
+2026-09-30 (later 42): Grilled #111. It's now ready-for-agent, and the spec is on the issue. The fix is a one-line pick-key change in `_spend_on_predictions` (prefer a BetaRoom with from_beta > 0, then the biggest room), plus two tests. Build it before ~Nov 6.
+
+Next, in order (grill first where not ready-for-agent):
+1. #111 (ready-for-agent, small). Then #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82.
+2. When at the PC: run the #85 checks (#97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Optionally glance at a "Room partly from Beta" tooltip once w > 0. Then grill #39 using the probe results.
+3. On dates: Nov 4, #91's list. ~Nov 6: run `brain recommend --beta-ratios` for #91's Item Keys, and set `beta_sell_rate_weight = 0.5` if they're close to 1. Nov 18: look back and close #110.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. This PC has no `lua` binary, so the Brain's `lua` fixture tests skip silently. To run them, point `LUA` at a shim: a .bat that runs a Python script, which runs `-e <script>` on `lupa.lua51` and prints with tabs. `python scripts/busted.py` runs the addon specs.
+
 2026-09-30 (later 41): Built #110 slice 2 (1715615). `_row` writes `roomFromBeta = true` on a Prediction buy whose `BetaRoom.from_beta > 0` (not 0 or negative), and `RecommendationTable` `details()` adds "Room partly from Beta" to its tooltip. Both sides have tests: test_recommendations.py (real Lua read) and recommendation_table_spec.lua (the tooltip lines are built there, so the frame only shows them). The review found that a merged Prediction row can drop the flag when its tiers disagree on the sign of from_beta. Filed as #111 (needs-triage). #110 stays open until the Nov 18 look-back.
 
 Next, in order (grill first where not ready-for-agent):
