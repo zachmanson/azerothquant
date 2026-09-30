@@ -1,3 +1,11 @@
+2026-09-30 (later 30): Grilled #58. The spec is posted on the issue; it's ready-for-agent. Pool demand (not price, not Fair Value) across an itemID's suffixes, for held units only: sibling Sale Events at or above the post price count at `suffix_pool_weight` (0.5), the #41 cap uses own + sibling Sale Events, and the tooltip shows `(+M other suffixes)`. Flips and Buy Under are untouched.
+
+Next, in order:
+1. At the PC or on a date: unchanged (#85's checks, the Oct 3 #83 replay, Nov 4 #91, Nov 18 #110), plus #58's tooltip glance once it's built (on the issue, not blocking).
+2. Away from the game: /tdd #58 (Brain plus a busted test for the tooltip line, then CONTEXT.md and ADR-0022). Then the (later 29) list from its item 2 on: /grilling #60, #14, #10, then the grills.
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. For #58, the held-unit post price and sibling evidence depend on each other: work out the price first (cap = dearest own + sibling Sale Event), then count siblings at or above it. Keep the pooled rate out of `rates`, which Flips read.
+
 2026-09-29 (later 29): QUEUE CHANGE. The user wants `later` work done while `core` waits on the PC. Every open `core` item is blocked (in game, or a date), so work down this list when away from the game.
 
 Next, in order:
