@@ -1,3 +1,13 @@
+2026-09-30 (later 37): Built #97 slice 1 (8976314): right-click toggles a buy-side row's Bought mark. New `BoughtMarks.lua` (toggle, forMarket clearing by `entry.asOf`, spent, goldLeft) has busted specs, and `RecommendationTable.build` takes `marks, gold`. Bought rows grey out, sort last, can't be selected and never fold away. Once something is marked, the Shopping List and Flips to Craft fold on the gold left, and header line 2 shows ", Bought X". ADR-0016/0017 were amended and CONTEXT.md has **Bought mark**. It hasn't been tried in game yet. #97 stays open for slice 2 (gated on the #85 buy-event probe).
+
+Next, in order (grill first where not ready-for-agent):
+1. In game: right-click a Shopping List row, check it greys and sorts last, check the header and fold, `/reload` and check it persists. Add this to the #85 in-game check list.
+2. #39 search the AH from a Shopping List row (needs in-game throttle probe)
+3. #110 Beta Prior as an engine nudge: grill before Nov 4
+4. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. `BoughtMarks.forMarket` requires RecommendationTable lazily (load-order cycle, noted in the file). `spent` counts every live mark, including ones whose row a newer Brain run dropped (that gold really left). `python scripts/busted.py` runs the addon specs.
+
 2026-09-30 (later 36): Grilled #97. The spec is on the issue, and it's ready-for-agent. Bought buy-side rows (Shopping List, Flips to Craft, Prediction buys, not Buy Under) grey out and sort to the bottom, with no re-sizing. The Budget fold (#86) re-runs on gold left = min(Budget - spent, gold). Marks are per Market in `AzerothQuantDB` and cleared once an import's `entry.asOf` is later than the mark. Slice 1 is the manual right-click toggle (build now). Slice 2 is automatic detection by Item Key, gated on the new buy-event probe comment on #85.
 
 Next, in order (grill first where not ready-for-agent):
