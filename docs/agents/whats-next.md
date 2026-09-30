@@ -1,3 +1,13 @@
+2026-09-30 (later 36): Grilled #97. The spec is on the issue, and it's ready-for-agent. Bought buy-side rows (Shopping List, Flips to Craft, Prediction buys, not Buy Under) grey out and sort to the bottom, with no re-sizing. The Budget fold (#86) re-runs on gold left = min(Budget - spent, gold). Marks are per Market in `AzerothQuantDB` and cleared once an import's `entry.asOf` is later than the mark. Slice 1 is the manual right-click toggle (build now). Slice 2 is automatic detection by Item Key, gated on the new buy-event probe comment on #85.
+
+Next, in order (grill first where not ready-for-agent):
+1. #97 slice 1 (manual Bought mark): /tdd. Put the pure logic in a module with busted specs, and keep the WoW glue thin.
+2. #39 search the AH from a Shopping List row (needs in-game throttle probe)
+3. #110 Beta Prior as an engine nudge: grill before Nov 4
+4. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82
+
+- Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. Right-click is free on rows (left-click = select for post/cancel, later #39). `python scripts/busted.py` runs the addon specs. #97 slice 2 waits on the #85 probe.
+
 2026-09-30 (later 35): Fixed #108 (746a0d7), closed. `--why-not` now prices its Checks at the shortest run of the cheapest Listings that would clear the Flip margin if room were no limit and that has the minimum of Sale Events at its post price (`_Valuer.clearing_run`, which goes through the same `_flips` with an undercut pricer). `WhyNot` has new `post_at` and `needs` fields, and Room fails when room < held + needs. 5631 at forced Days to Sell now reads "Room fail: room for 112 at 4s 43c, needs 0 held + 177". Plain `recommend` is byte-identical, and made the list == Shopping List (22/22). #109 still only needs the user's OK to close.
 
 Next, in order (grill first where not ready-for-agent):
