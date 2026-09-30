@@ -19,7 +19,7 @@ _Avoid_: model, AI
 ## Market data
 
 **Era**:
-Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed: no decision reads the other Era. The Beta Prior only puts a Beta price on screen beside Live's.
+Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed: no decision reads the other Era, with one exception. The Beta Prior only puts a Beta price on screen beside Live's. The exception is the Beta Sell Rate, which may count toward a Prediction buy's Max Loss room early in Live, when switched on (ADR-0024).
 _Avoid_: season, phase
 
 **Market**:
@@ -27,8 +27,12 @@ One Auction House in one Era, identified by realm, faction (Alliance, Horde or N
 _Avoid_: server, AH (when you mean the data scope)
 
 **Beta Prior**:
-A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and its tooltip names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
+A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it, though it may use the Beta Sell Rate. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and its tooltip names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
 _Avoid_: Beta price as a prior or input (it's display only)
+
+**Beta Sell Rate**:
+The Sell Rate of the Beta Market a Live Market's Beta Prior comes from. Its tooltip shows it, and for `beta_column_days` from the Live Market's first Scan, a Prediction buy's Max Loss room may count it (`beta_sell_rate_weight`, 0 and so off by default). Each Beta Sale Event priced at or above the Live post price times the Item Key's Beta/Live Fair Value ratio counts as that share of a Sale Event, and each Beta Observation Window hour as that share of an hour, added to Live's, so Live takes over as its own hours build. Only demand is borrowed, never a price, and nothing else reads it: not Flips, Flip to Craft, Holdings or Buy Under (#110, ADR-0024).
+_Avoid_: Sell Rate Prior (that's empty hours added, not events borrowed)
 
 **Scan**:
 One full pass over every Listing on the Auction House, as it stood at the moment the Scan was requested.
@@ -92,7 +96,7 @@ The price an Item Key can realistically be sold at in its Market, based on the c
 _Avoid_: market value, price, min buyout
 
 **Sell Rate**:
-Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity. When deciding whether to buy something to Sell (a Flip to Sell, a Flip to Craft's output, a Hold buy's Max Loss, a Buy Under's Sell way), the Sell Rate is measured at the price it would post at: only the Sale Events priced at or above it count, toward both the units a day and the minimum number of Sale Events. Held units use the whole Sell Rate: their gold is already spent. Theirs also counts their Siblings' Sale Events at or above the price they post at, each as half a Sale Event (`suffix_pool_weight`); a buy's never does (ADR-0022).
+Units sold per day for an Item Key in a Market: the Partial Sales and Probable Sales inside Observation Windows, divided by the total time of those Observation Windows. The Decision Engine's measure of liquidity. When deciding whether to buy something to Sell (a Flip to Sell, a Flip to Craft's output, a Hold buy's Max Loss, a Buy Under's Sell way), the Sell Rate is measured at the price it would post at: only the Sale Events priced at or above it count, toward both the units a day and the minimum number of Sale Events. Held units use the whole Sell Rate: their gold is already spent. Theirs also counts their Siblings' Sale Events at or above the price they post at, each as half a Sale Event (`suffix_pool_weight`); a buy's never does (ADR-0022). Early in Live, a Prediction buy's Max Loss may also count the Beta Sell Rate (ADR-0024).
 _Avoid_: volume, velocity
 
 **Sell Rate Prior**:

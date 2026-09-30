@@ -35,7 +35,7 @@ Realized profit from Lots and Sold mail is reported alongside as the confirmatio
 - Brain feature work after Dec 2 depends on the verdict (#83), and a stop freezes it.
 - DBMarket and DBMinBuyout emulation lives in the harness as a baseline. It isn't a Brain price.
 - An outside data source is a prior: it's per Market, and it gives way to Live observation.
-- The Beta Prior is display only (#90): the Decision Engine never reads it, so it isn't ablated. Using Beta as an engine prior is a separate question (#110).
+- The Beta Prior is display only (#90): the Decision Engine never reads it, so it isn't ablated. The Beta Sell Rate is read (#110, ADR-0024), so while `beta_sell_rate_weight` is above 0 the replay also runs a `Brain without Beta Sell Rate` ablation, with the weight at 0.
 
 ## How the replay grades (#80)
 

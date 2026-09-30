@@ -1194,3 +1194,93 @@ def test_recommend_why_not_leaves_the_checks_after_the_first_failed_one_unreache
         ["Budget", "-"],
         ["Row cap", "-"],
     ]
+
+
+def _linen_early_in_live(tmp_path, weight=0.5) -> Config:
+    """#110: Live's first Scan of Linen (5 at 1s, 10 at 1s 20c; Fair Value 1s) under a
+    Prediction, and a Beta Market whose Fair Value is 2s and whose stack at 2s 40c sold a
+    unit every half hour: 3 Sale Events in 1.5 h. As in test_beta_sell_rate, the Beta
+    Sell Rate makes room for 6 at the 1s 19c post price."""
+    live_start = 1_795_000_000  # 2026-11-18
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_", Era.LIVE)),
+        predictions_path=tmp_path / "predictions.toml",
+        sale_horizon_seconds=3 * 3600,
+        sell_rate_prior_hours_flips=0,
+        sale_size_prior_events_flips=0,
+        flip_min_sale_events=1,
+        beta_sell_rate_weight=weight,
+    )
+    config.predictions_path.write_text(
+        """
+[[predictions]]
+name = "Linen spike"
+reason = "Tailoring quests"
+item_keys = ["2589"]
+catalyst = "Phase 2"
+written = 2026-11-01
+lapse = 2027-01-01
+""",
+        encoding="utf-8",
+    )
+
+    def linen(quantity, unit):
+        return {
+            "itemString": "item:2589::::::::20:1490",
+            "quantity": quantity,
+            "buyout": quantity * unit,
+            "timeLeft": 4,
+        }
+
+    def scan(at, realm, *rows):
+        return {
+            "requestedAt": at,
+            "realm": realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": list(rows),
+        }
+
+    beta = [
+        scan(1_790_000_000 + n * 1800, MARKET.realm, linen(5, 200), linen(10 - n, 240))
+        for n in range(4)
+    ]
+    live = [scan(live_start, "Forever", linen(5, 100), linen(10, 120))]
+    read = {
+        "readAt": live_start,
+        "realm": "Forever",
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 1_000_000,
+        "vendorPrices": {},
+        "bags": [],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, beta, Era.BETA, config)
+        import_scans(conn, live, Era.LIVE, config)
+        import_character_reads(conn, [read], Era.LIVE, config)
+    return config
+
+
+def test_recommend_prints_the_beta_live_fair_value_ratios_when_borrowing(tmp_path):
+    text = run_recommend(_linen_early_in_live(tmp_path))
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Beta/Live Fair Value of the Predictions' Item Keys (Beta Sell Rate x0.5)" in text
+    assert ["2589", "2.00"] in lines
+
+
+def test_recommend_prints_the_ratios_when_asked_even_with_no_weight(tmp_path):
+    config = _linen_early_in_live(tmp_path, weight=0)
+
+    assert "Beta/Live Fair Value" not in run_recommend(config)
+    assert "Beta/Live Fair Value of the Predictions' Item Keys (Beta Sell Rate off)" in (
+        run_recommend(config, beta_ratios=True)
+    )
+
+
+def test_recommend_why_not_a_prediction_buy_says_how_much_of_its_room_is_from_beta(tmp_path):
+    text = run_recommend(_linen_early_in_live(tmp_path), why_not="2589")
+
+    assert "2589: Prediction buy of 6 under Linen spike" in text
+    assert "room for 6 at 1s 19c, 6 of it from Beta" in text

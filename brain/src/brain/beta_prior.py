@@ -54,7 +54,7 @@ def beta_prior(
     times = scan_times(conn, market)
     if not times or now >= times[0] + config.beta_column_days * DAY:
         return None
-    beta = _beta_market(conn, market)
+    beta = beta_market(conn, market)
     if beta is None:
         return None
     beta_now = latest_scan_times(conn, Era.BETA)[beta]
@@ -94,7 +94,7 @@ def _daily_fair_values(
     }
 
 
-def _beta_market(conn: sqlite3.Connection, market: Market) -> Market | None:
+def beta_market(conn: sqlite3.Connection, market: Market) -> Market | None:
     """The Beta Market of the same faction, or else the Alliance one: of the same realm when
     there is one, so a Beta Market gets its own."""
     markets = sorted(

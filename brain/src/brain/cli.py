@@ -280,12 +280,14 @@ def _import_once(config: Config) -> int:
     return 1 if any(r.error is not None for r in results) else 0
 
 
-def _recommend(config: Config, chain: str | None = None, why_not: str | None = None) -> int:
+def _recommend(
+    config: Config, chain: str | None = None, why_not: str | None = None, beta_ratios: bool = False
+) -> int:
     if not config.history_path.exists():
         log.error("No history at %s yet; run `brain import` first", config.history_path)
         return 1
     try:
-        text = run_recommend(config, chain, why_not)
+        text = run_recommend(config, chain, why_not, beta_ratios)
     except sqlite3.Error as e:
         log.error("Couldn't read the history: %s", e)
         return 1
@@ -481,11 +483,14 @@ def _mean_qty(c: MatCheck) -> str:
     return f"{c.qty:.2f} ({low:.2f} to {high:.2f})"
 
 
-def run_recommend(config: Config, chain: str | None = None, why_not: str | None = None) -> str:
+def run_recommend(
+    config: Config, chain: str | None = None, why_not: str | None = None, beta_ratios: bool = False
+) -> str:
     """The Recommendations for every Market the player has Characters in, as text, or
     with `chain` an Item Key's Craft rows as their Craft Chains (#77), or with `why_not`
     why Item Keys on sale aren't Flips on the Shopping List: "" for each Market's near
-    misses, else for the Item Key or item name it matches (#108)."""
+    misses, else for the Item Key or item name it matches (#108). The Beta/Live Fair Value
+    ratios are shown while the Beta Sell Rate is on, or with `beta_ratios` (#110)."""
     predictions = load_predictions(config.predictions_path)
     with closing(open_history(config.history_path)) as conn:
         markets = recommend(conn, config, predictions, why_not=why_not is not None)
@@ -501,7 +506,12 @@ def run_recommend(config: Config, chain: str | None = None, why_not: str | None 
         now = int(time.time())
         made = {m.market: flips(conn, config, m.market, predictions, now) for m in markets}
     range_days = config.sell_rate_range_seconds // 86400
-    return "\n".join(_render_market(m, range_days, made[m.market]) for m in markets)
+    weight = config.beta_sell_rate_weight
+    return "\n".join(
+        _render_market(m, range_days, made[m.market])
+        + (_render_beta_ratios(m, weight) if weight or beta_ratios else "")
+        for m in markets
+    )
 
 
 def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Flip]) -> str:
@@ -621,6 +631,19 @@ def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Fli
     )
 
 
+def _render_beta_ratios(m: MarketRecommendations, weight: float) -> str:
+    """Each active Prediction Item Key's Beta/Live Fair Value ratio (#110): whether Beta's
+    prices look like Live's, before the Beta Sell Rate is turned on. Nothing once it may
+    no longer count."""
+    if not m.beta_ratios:
+        return ""
+    table = _table(
+        ["Item", "Beta/Live"], [[k, f"{r:.2f}"] for k, r in sorted(m.beta_ratios.items())]
+    )
+    on = f"x{weight:g}" if weight else "off"
+    return f"Beta/Live Fair Value of the Predictions' Item Keys (Beta Sell Rate {on})\n{table}"
+
+
 def _flip_record(made: Sequence[Flip]) -> str:
     """The graded Flips' record line (#60)."""
     r = flip_record(made)
@@ -697,8 +720,10 @@ def _render_near_misses(m: MarketRecommendations) -> str:
 
 def _render_why_not(markets: list[MarketRecommendations], item: str) -> str:
     """Every Check of the one Item Key on sale that `item` is, or else is part of the name
-    of, in each Market it's on sale in (#108). Several matches are listed instead."""
-    candidates = {w.item_key: w.name for m in markets for w in m.why_not}
+    of, in each Market it's on sale in (#108). Several matches are listed instead. A
+    Prediction buy's Item Key, matched by Item Key only, shows its Beta room (#110)."""
+    candidates = {r.item_key: None for m in markets for r in m.prediction_buys}
+    candidates |= {w.item_key: w.name for m in markets for w in m.why_not}
     if item in candidates:
         found = {item: candidates[item]}
     else:
@@ -710,11 +735,29 @@ def _render_why_not(markets: list[MarketRecommendations], item: str) -> str:
         return f"{len(found)} Item Keys match '{item}':\n{listed}"
     [item_key] = found
     return "\n".join(
-        _market_title(m) + _render_checks(w, m)
-        for m in markets
-        for w in m.why_not
-        if w.item_key == item_key
+        [
+            _market_title(m) + _render_checks(w, m)
+            for m in markets
+            for w in m.why_not
+            if w.item_key == item_key
+        ]
+        + [
+            _market_title(m) + _render_prediction_buy(r)
+            for m in markets
+            for r in m.prediction_buys
+            if r.item_key == item_key
+        ]
     )
+
+
+def _render_prediction_buy(r: Row) -> str:
+    """A Prediction buy, and how much of the room its Max Loss counted on came from the
+    Beta Sell Rate (#110)."""
+    head = f"{r.item_key}: Prediction buy of {r.quantity} under {r.prediction}\n"
+    b = r.beta_room
+    if b is None:
+        return f"{head}  no Beta Sell Rate\n"
+    return f"{head}  room for {b.room} at {_money(b.post_at)}, {b.from_beta} of it from Beta\n"
 
 
 def _by_name(found: tuple[str, str | None]) -> tuple[str, str]:
@@ -998,7 +1041,14 @@ def main(argv: list[str] | None = None) -> int:
         const="",
         metavar="ITEM",
         help="print why items on sale aren't Flips on the Shopping List: the near misses, "
-        "or every check of one Item Key or item name",
+        "or every check of one Item Key or item name; for a Prediction buy's Item Key, how "
+        "much of its room came from Beta",
+    )
+    recommending.add_argument(
+        "--beta-ratios",
+        action="store_true",
+        help="print the Beta/Live Fair Value ratio of each Prediction's Item Keys early in "
+        "Live, even with beta_sell_rate_weight at 0",
     )
     replaying = commands.add_parser(
         "replay", help="grade the Brain against Auctionator and emulated TSM on past Scans"
@@ -1025,7 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rebuild":
         return _rebuild(config)
     if args.command == "recommend":
-        return _recommend(config, args.chain, args.why_not)
+        return _recommend(config, args.chain, args.why_not, args.beta_ratios)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
     if args.command == "disenchants":

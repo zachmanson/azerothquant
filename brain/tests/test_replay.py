@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from brain.history import (
     import_scans,
     open_history,
 )
+from brain.predictions import Prediction
 from brain.recommend import Action, CraftOutput, recommend_market
 from brain.replay import Policy, db_market, db_min_buyout, replay
 
@@ -656,3 +658,38 @@ def test_units_with_no_vendor_price_to_vendor_at_bring_nothing(db):
 
     # The 4 left over bring nothing either way. Held untouched, 6 Sell at 19.
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(6 * 99 * 0.95 - 6 * 19 * 0.95)
+
+
+def test_the_brain_is_replayed_without_the_beta_sell_rate_only_when_it_is_on(db):
+    # #110: Live's first Scan, 5 Linen at 100 and 10 at 120 under a Prediction, and a Beta
+    # Market at twice the price whose 240s sold 3 in 1.5 h: as in test_beta_sell_rate,
+    # the Brain buys to Hold on Beta's room. Without it, nothing is bought.
+    live_start = T0 + 60 * DAY
+    live_realm = "Forever"
+    live = Market(realm=live_realm, faction="Alliance", era=Era.LIVE)
+    config = replace(CONFIG, beta_sell_rate_weight=0.5)
+    beta = [
+        scan(T0 + n * 1800, row(quantity=5, unit=200), row(quantity=10 - n, unit=240))
+        for n in range(4)
+    ]
+    live_scans = [
+        scan(live_start + n * HOUR, row(quantity=5, unit=100), row(quantity=10, unit=120))
+        | {"realm": live_realm}
+        for n in range(4)
+    ]
+    import_scans(db, beta, Era.BETA, config)
+    import_scans(db, live_scans, Era.LIVE, config)
+    read = character_read(money=10_000, at=live_start) | {"realm": live_realm}
+    import_character_reads(db, [read], Era.LIVE, config)
+    written = date.fromtimestamp(live_start)
+    linen = Prediction(
+        "Linen spike", "Tailoring quests", ("2589",), "Phase 2", written, written + timedelta(7)
+    )
+
+    [on] = replay(db, config, [linen], live_start, live_start)
+    [off] = replay(db, replace(config, beta_sell_rate_weight=0), [linen], live_start, live_start)
+
+    assert on.market == live
+    assert on.graded[Policy.BRAIN_WITHOUT_BETA_SELL_RATE] == 0
+    assert on.graded[Policy.BRAIN] != 0
+    assert Policy.BRAIN_WITHOUT_BETA_SELL_RATE not in off.graded

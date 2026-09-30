@@ -68,6 +68,8 @@ class Policy(StrEnum):
     BRAIN_WITHOUT_DEPOSITS = "Brain without Deposits"
     # Priced by the emulated TSM's rule instead of the own-Market Sell Rate (#84).
     BRAIN_WITHOUT_SELL_RATE = "Brain without own-Market Sell Rate"
+    # Only while the Beta Sell Rate is on (#110).
+    BRAIN_WITHOUT_BETA_SELL_RATE = "Brain without Beta Sell Rate"
 
 
 # Each Brain run's config, from the full Brain's.
@@ -78,6 +80,7 @@ _BRAINS: dict[Policy, Callable[[Config], Config]] = {
     Policy.BRAIN_WITHOUT_DEPOSITS: lambda c: replace(c, deposits=False),
     # With the pricer the replay gives it (`_tsm_pricer`).
     Policy.BRAIN_WITHOUT_SELL_RATE: lambda c: c,
+    Policy.BRAIN_WITHOUT_BETA_SELL_RATE: lambda c: replace(c, beta_sell_rate_weight=0),
 }
 
 
@@ -236,6 +239,7 @@ def replay(
                     config.shopping_list_rows,
                 )
                 for policy, run in _BRAINS.items()
+                if config.beta_sell_rate_weight or policy is not Policy.BRAIN_WITHOUT_BETA_SELL_RATE
             } | {
                 Policy.AUCTIONATOR: _auctionator(held, others, vendor, gold, deposit, cut),
                 Policy.TSM: _tsm(

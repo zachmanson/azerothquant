@@ -120,6 +120,14 @@
 # it. 0 never shows it. Defaults to 14. Must come before the first [[installs]].
 # beta_column_days = 14
 
+# Optional: the Beta Sell Rate (#110, ADR-0024). For beta_column_days from a Market's first
+# Scan, a Prediction buy's Max Loss may count on Beta's Sale Events, each as this share of
+# a Sale Event (and each Beta Observation Window hour as this share of an hour), priced
+# for Live by the Beta/Live Fair Value ratio. Nothing else reads it. Check the ratios with
+# `brain recommend --beta-ratios` before turning it on. From 0 to 1, defaults to 0 (off).
+# Must come before the first [[installs]].
+# beta_sell_rate_weight = 0
+
 # Optional: when a Holdings Sell is hinted at as a good time to sell (#50): its ROI, what
 # it nets after the cut over what its units cost on the Auction House, is at least this
 # share. Only a hint; the Action stands either way. Defaults to 0.20. Must come before the

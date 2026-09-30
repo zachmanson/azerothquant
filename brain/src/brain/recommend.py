@@ -17,6 +17,7 @@ from functools import cache, cached_property
 from itertools import groupby
 from types import MappingProxyType
 
+from brain.beta_sell_rate import BetaSellRate, beta_ratios, beta_sell_rates
 from brain.config import Config
 from brain.disenchant import DisenchantTable, Group, ItemInfo, load_table
 from brain.fair_value import FairValueCache, Supply, fair_value
@@ -133,6 +134,17 @@ class Check(StrEnum):
     MARGIN = "Flip margin"
     BUDGET = "Budget"
     ROW_CAP = "Row cap"
+
+
+@dataclass(frozen=True)
+class BetaRoom:
+    """How much of a Prediction buy's Max Loss room came from the Beta Sell Rate (#110):
+    the `room` at `post_at` with it, `from_beta` more units than without it. Negative when
+    Beta's hours, with too few Sale Events at the price, water Live's rate down."""
+
+    post_at: float
+    room: int
+    from_beta: int
 
 
 @dataclass(frozen=True)
@@ -255,6 +267,9 @@ class Row:
     # A Prediction buy's Max Loss for the whole quantity: what's lost if the Prediction is
     # wrong and the units are let go at today's prices.
     max_loss: float | None = None
+    # A Prediction buy's room when the Beta Sell Rate counts for its Item Key (#110): the
+    # biggest room it was bought on.
+    beta_room: BetaRoom | None = None
     buys: tuple[ReagentBuy, ...] = ()  # a Flip to Craft's reagents to buy
     # A Craft's Character, the one that knows the recipe, or a Disenchant's, the one with
     # the Enchanting skill.
@@ -365,6 +380,7 @@ class _HoldBuy:
     unit_buyout: int
     quantity: int
     unit_max_loss: float
+    beta_room: BetaRoom | None = None
 
 
 @dataclass(frozen=True)
@@ -459,6 +475,9 @@ class MarketRecommendations:
     buy_under: list[BuyUnder] = field(default_factory=list)
     # Each Item Key with other players' Listings, if asked for (#108).
     why_not: list[WhyNot] = field(default_factory=list)
+    # Each active Prediction Item Key's Beta/Live Fair Value ratio, while the Beta Sell
+    # Rate may count (#110).
+    beta_ratios: dict[str, float] = field(default_factory=dict)
 
     @property
     def spend(self) -> int:
@@ -553,6 +572,8 @@ def recommend_market(
     gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
     budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
     spend = _spend(gold, budget)
+    ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
+    beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
     hold_buys = [
         buy
         for item_key, offers in sorted(for_sale.items())
@@ -569,6 +590,7 @@ def recommend_market(
             valuer.queue(item_key, flips=True),
             cut,
             config,
+            beta.get(item_key),
         )
     ]
 
@@ -639,6 +661,7 @@ def recommend_market(
         held=_whose(by_character),
         buy_under=_buy_unders(conn, config, market, now, valuer, plans) if buy_under else [],
         why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
+        beta_ratios=ratios,
     )
 
 
@@ -2868,6 +2891,7 @@ def _hold_buys(
     queue: _Queue,
     cut: float,
     config: Config,
+    beta: BetaSellRate | None = None,
 ) -> list[_HoldBuy]:
     """What's worth buying of an Item Key to Hold under a Prediction, from other players'
     (unit buyout, quantity) offers, cheapest first: the units whose Max Loss is small
@@ -2880,7 +2904,8 @@ def _hold_buys(
     above what a merchant charges (#63). Each is less the deposits it's expected to lose
     waiting its turn in the `queue` at that rate (#78). The rest can only be Vendored, or
     are worth nothing without a Vendor Price. Nothing is bought at or above the Merchant
-    Cost after the `cut`, since no Sell fetches more than that (#91).
+    Cost after the `cut`, since no Sell fetches more than that (#91). Early in Live, the
+    demand at the post price also counts the `beta` Sell Rate (#110, ADR-0024).
     """
     bought: Supply = []
     buys = []
@@ -2897,10 +2922,13 @@ def _hold_buys(
                 queued - held,
                 _post_at(supply, offers, [*bought, (unit, quantity)], config, merchant_cost),
                 _post_at(supply, offers, [*bought, (unit, quantity - 1)], config, merchant_cost),
-                lambda price: _room_at(rate, price, held, config, config.sale_horizon_seconds),
+                lambda price: _room_at(
+                    rate, price, held, config, config.sale_horizon_seconds, beta
+                ),
             )
         resale = post_at * (1 - cut) if take else 0
-        at_price = _flip_queue(queue, _demand_at(rate, post_at), config)
+        beta_room = _beta_room(rate, beta, post_at, held, config) if take else None
+        at_price = _flip_queue(queue, _demand_at(rate, post_at, beta), config)
         exits = [
             max(resale - at_price.lost(queued + i), vendor_price or 0) for i in range(take)
         ] + [vendor_price or 0] * (quantity - take)
@@ -2909,10 +2937,26 @@ def _hold_buys(
             max_loss = unit - exit_value
             if max_loss > unit * config.prediction_max_loss_share:
                 return buys
-            buys.append(_HoldBuy(item_key, prediction, unit, n, max_loss))
+            buys.append(_HoldBuy(item_key, prediction, unit, n, max_loss, beta_room))
         bought.append((unit, take))
         selling = selling and take == quantity
     return buys
+
+
+def _beta_room(
+    rate: SellRate | None,
+    beta: BetaSellRate | None,
+    post_at: float | None,
+    held: int,
+    config: Config,
+) -> BetaRoom | None:
+    """The room at `post_at` a Prediction buy counts on, and how much of it the `beta`
+    Sell Rate makes (#110); None without one."""
+    if beta is None or post_at is None:
+        return None
+    horizon = config.sale_horizon_seconds
+    room = _room_at(rate, post_at, held, config, horizon, beta)
+    return BetaRoom(post_at, room, room - _room_at(rate, post_at, held, config, horizon))
 
 
 def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[Row]:
@@ -2935,6 +2979,11 @@ def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[
             price=max(r.price, buy.unit_buyout),
             cost=r.cost + cost,
             max_loss=r.max_loss + quantity * buy.unit_max_loss,
+            beta_room=max(
+                (b for b in (r.beta_room, buy.beta_room) if b is not None),
+                key=lambda b: b.room,
+                default=None,
+            ),
         )
     return list(rows.values())
 
@@ -2955,18 +3004,29 @@ def _sell_take(
     return max(0, min(quantity - 1, room_at(post_if_part) - bought)), post_if_part
 
 
-def _demand_at(rate: SellRate | None, post_at: float | None) -> SellRate | None:
+def _demand_at(
+    rate: SellRate | None, post_at: float | None, beta: BetaSellRate | None = None
+) -> SellRate | None:
     """The Sell Rate a unit bought to Sell counts on when posted at `post_at` (#107): only
-    the Sale Events at or above it. None without a Sell Rate or a price."""
-    return None if rate is None or post_at is None else rate.at_or_above(post_at)
+    the Sale Events at or above it, pooled with a Prediction buy's `beta` Sell Rate
+    (#110). None without a Sell Rate or a price."""
+    if post_at is None:
+        return None
+    demand = None if rate is None else rate.at_or_above(post_at)
+    return demand if beta is None else beta.pooled(demand, post_at)
 
 
 def _room_at(
-    rate: SellRate | None, post_at: float | None, held: int, config: Config, horizon_seconds: int
+    rate: SellRate | None,
+    post_at: float | None,
+    held: int,
+    config: Config,
+    horizon_seconds: int,
+    beta: BetaSellRate | None = None,
 ) -> int:
     """Units bought at `post_at` that should sell within `horizon_seconds` after the
     `held` ones, from the demand at that price (`_demand_at`, `_flip_room`)."""
-    return max(0, _flip_room(_demand_at(rate, post_at), config, horizon_seconds) - held)
+    return max(0, _flip_room(_demand_at(rate, post_at, beta), config, horizon_seconds) - held)
 
 
 def _flip_queue(queue: _Queue, demand: SellRate | None, config: Config) -> _Queue:

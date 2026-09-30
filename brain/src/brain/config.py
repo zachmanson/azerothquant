@@ -96,6 +96,9 @@ DEFAULT_BUY_UNDER_MIN_SIGHTINGS = 1
 DEFAULT_BUY_UNDER_WINDOW_DAYS = 7
 # Days the Beta Prior column shows for, from a Market's first Scan (#90).
 DEFAULT_BETA_COLUMN_DAYS = 14
+# What each Beta Sale Event counts for in a Prediction buy's Max Loss room over those same
+# days (#110, ADR-0024); off by default.
+DEFAULT_BETA_SELL_RATE_WEIGHT = 0.0
 # Holdings ROI (#50): a Sell that nets at least this share over what its units cost is
 # hinted at as a good time to sell.
 DEFAULT_ROI_HINT = 0.20
@@ -190,6 +193,9 @@ class Config:
     buy_under_window_days: int = DEFAULT_BUY_UNDER_WINDOW_DAYS
     # The Beta Prior shows for this many days from the Market's first Scan (#90); 0 never.
     beta_column_days: int = DEFAULT_BETA_COLUMN_DAYS
+    # What each Beta Sale Event and Observation Window hour counts for in the room a
+    # Prediction buy's Max Loss counts on, over beta_column_days (#110); 0 never.
+    beta_sell_rate_weight: float = DEFAULT_BETA_SELL_RATE_WEIGHT
     # A Sell's ROI from which it's hinted at as a good time to sell (only a hint).
     roi_hint: float = DEFAULT_ROI_HINT
     # What a Flip is charged per unit it buys and per unit it posts of an Item Key that
@@ -425,6 +431,13 @@ def load_config(path: Path) -> Config:
         lambda x: 0 <= x <= 1,
         "from 0 to 1",
     )
+    beta_weight = _parse_number(
+        path,
+        raw.get("beta_sell_rate_weight", DEFAULT_BETA_SELL_RATE_WEIGHT),
+        "beta_sell_rate_weight",
+        lambda x: 0 <= x <= 1,
+        "from 0 to 1",
+    )
     return Config(
         installs=installs,
         time_left_max_seconds=tuple(m * 60 for m in minutes),
@@ -459,6 +472,7 @@ def load_config(path: Path) -> Config:
         buy_under_min_sightings=sightings,
         buy_under_window_days=window_days,
         beta_column_days=beta_days,
+        beta_sell_rate_weight=beta_weight,
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,

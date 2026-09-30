@@ -280,6 +280,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.buy_under_min_sightings == 1
     assert config.buy_under_window_days == 7
     assert config.beta_column_days == 14
+    assert config.beta_sell_rate_weight == 0
 
 
 def test_decision_engine_knobs_can_be_set(tmp_path):
@@ -308,6 +309,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "buy_under_min_sightings = 3\n"
         "buy_under_window_days = 14\n"
         "beta_column_days = 0\n"
+        "beta_sell_rate_weight = 0.5\n"
     )
     config = load_config(write_config(tmp_path, text + INSTALL))
 
@@ -334,6 +336,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.disenchant_check_min_results == 50
     assert (config.buy_under_min_sightings, config.buy_under_window_days) == (3, 14)
     assert config.beta_column_days == 0
+    assert config.beta_sell_rate_weight == 0.5
 
 
 @pytest.mark.parametrize(
@@ -371,6 +374,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("beta_column_days", "-1"),
         ("beta_column_days", "1.5"),
         ("beta_column_days", "true"),
+        ("beta_sell_rate_weight", "-0.1"),
+        ("beta_sell_rate_weight", "1.5"),
+        ("beta_sell_rate_weight", "true"),
         ("disenchant_check_min_results", "1"),  # an interval needs 2
         ("disenchant_check_min_results", "2.5"),
         ("disenchant_check_min_results", "true"),
