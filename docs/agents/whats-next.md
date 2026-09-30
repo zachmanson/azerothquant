@@ -1,3 +1,12 @@
+2026-09-29 (later 21): AT THE PC. Built #91's code change (faeaf84): `_hold_buys` in recommend.py stops at the first Listing at or above the Merchant Cost after the Market's cut. Review was clean on both axes. #91 stays open for the Nov 4 at-the-PC steps (read Mister Graphed's Item Keys, write the four Predictions).
+- Restart `brain watch` so it picks up the change.
+
+Next, in order:
+1. Grill #106's open questions.
+2. Nov 4 at the PC: #91's list (see gotcha below).
+
+- Gotchas: unchanged from the entry below.
+
 2026-09-29 (later 20): AT THE PC. Built #90 (d1dd9d4), checked in game on Beta data, closed.
 - `brain/src/brain/beta_prior.py` runs from `cli._write_recommendations` after `recommend`, never inside it (ADR-0015). It reuses the pass's FairValueCache, so a pass takes ~50 s, up from ~40 s. The remaining ~9 s is `sell_rates` on the Beta Market. Beta freezes on Oct 21, so that result could be saved and reused if speed ever matters.
 - Beta Markets get their own Beta Prior too (the user chose this so it could be checked in game), so the column shows on Beta until about Oct 10.
