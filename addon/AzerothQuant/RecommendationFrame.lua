@@ -7,12 +7,15 @@
 -- open/closed is not.
 --
 -- Read-only: hover shows a tooltip, a click selects the row and shift-click links the item
--- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the left (#77).
+-- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the left (#77). A
+-- right-click on a buy-side row toggles its Bought mark (#97), saved per Market in
+-- AzerothQuantDB.bought: it greys out and the Budget fold runs on the gold left.
 -- The Budget box (#86) only saves what the player will spend: the table hides options over
 -- it at once, and Character.lua hands it to the Brain in the next Character Read. The Days
 -- to Sell box (#109) is saved and handed over the same way, and changes nothing until then.
 local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
+local BoughtMarks = ns.BoughtMarks
 local CraftChain = ns.CraftChain
 local Money = ns.Money
 local Scan = ns.Scan
@@ -166,7 +169,7 @@ local function getLine(i)
   end
   line = CreateFrame("Button", nil, content)
   line:SetHeight(LINE_HEIGHT)
-  line:RegisterForClicks("LeftButtonUp")
+  line:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   line:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
   line.stripe = line:CreateTexture(nil, "BACKGROUND")
   line.stripe:SetAllPoints()
@@ -186,12 +189,17 @@ local function getLine(i)
     end
   end)
   line:SetScript("OnLeave", GameTooltip_Hide)
-  line:SetScript("OnClick", function(self)
-    if IsModifiedClick("CHATLINK") then
+  line:SetScript("OnClick", function(self, button)
+    if button == "RightButton" then
+      if self.markable then
+        BoughtMarks.toggle(self.marks, self.id, self.cost, time())
+        redraw()
+      end
+    elseif IsModifiedClick("CHATLINK") then
       if self.itemString then
         linkInChat(self)
       end
-    elseif self.id then
+    elseif self.id and not self.bought then
       selectedId = self.id
       redraw()
     end
@@ -202,8 +210,8 @@ end
 
 -- Lays out one line: for an item, its icon and then its cells in columns of the given
 -- widths, striped on every other row. Otherwise one text spans the line (the empty-tab
--- line, "N more").
-local function drawLine(i, texts, widths, font, item, justify)
+-- line, "N more"). marks, for a row of a buy-side tab, are the Market's Bought marks.
+local function drawLine(i, texts, widths, font, item, justify, marks)
   local line = getLine(i)
   line:ClearAllPoints()
   line:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * LINE_HEIGHT)
@@ -211,6 +219,10 @@ local function drawLine(i, texts, widths, font, item, justify)
   line.itemString = item and item.itemString
   line.tooltip = item and item.tooltip
   line.id = item and item.id
+  line.bought = item and item.bought
+  line.marks = marks
+  line.markable = marks ~= nil and item ~= nil
+  line.cost = item and item.record.cost or 0
   if line.id and line.id == selectedId then
     line:LockHighlight()
   else
@@ -523,19 +535,24 @@ function redraw()
   if not frame or not frame:IsShown() then
     return
   end
+  local recommendations = AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations
+  local realm, faction = GetRealmName(), UnitFactionGroup("player") or ""
+  local marks = BoughtMarks.forMarket(db, recommendations, realm, faction)
   local view = RecommendationTable.build(
-    AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations,
-    GetRealmName(),
-    UnitFactionGroup("player"),
+    recommendations,
+    realm,
+    faction,
     time(),
     nameOf,
     table.concat({ UnitFullName("player") }, "-"),
-    savedBudget()
+    savedBudget(),
+    marks,
+    GetMoney()
   )
   local n = 0
-  local function add(texts, widths, font, item, justify)
+  local function add(texts, widths, font, item, justify, rowMarks)
     n = n + 1
-    drawLine(n, texts, widths, font, item, justify)
+    drawLine(n, texts, widths, font, item, justify, rowMarks)
   end
 
   drawTabs(view)
@@ -561,7 +578,8 @@ function redraw()
           add({ section.empty }, nil, "GameFontDisable", nil, "CENTER")
         end
         for _, row in ipairs(section.rows) do
-          add(row.cells, widths, "GameFontHighlight", row)
+          local font = row.bought and "GameFontDisable" or "GameFontHighlight"
+          add(row.cells, widths, font, row, nil, section.markable and marks or nil)
         end
         if section.more then
           add({ section.more }, nil, "GameFontDisable")
@@ -575,11 +593,13 @@ function redraw()
   end
   content:SetHeight(math.max(n, 1) * LINE_HEIGHT)
 
-  -- The selection clears once no tab has its row, so a tab switch keeps it. A selected
-  -- Craft row on show opens its chain; any other row, or none, closes it.
+  -- The selection clears once no tab has its row, or its row is marked Bought, so a tab
+  -- switch keeps it. A selected Craft row on show opens its chain; any other row, or none,
+  -- closes it.
   local kept = false
   for _, section in ipairs(view.sections or {}) do
-    kept = kept or (selectedId and RecommendationTable.find(section, selectedId)) ~= nil
+    local row = selectedId and RecommendationTable.find(section, selectedId)
+    kept = kept or (row ~= nil and not row.bought)
   end
   if not kept then
     selectedId = nil
@@ -899,6 +919,8 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("AUCTION_HOUSE_SHOW")
 events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+-- The gold on hand caps the gold left the fold runs on once a row is marked Bought (#97).
+events:RegisterEvent("PLAYER_MONEY")
 events:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
     if arg1 == "AzerothQuant" then
@@ -921,7 +943,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
       frame:Hide()
     end
     openedByAuctionHouse = false
-  elseif event == "GET_ITEM_INFO_RECEIVED" then
+  elseif event == "GET_ITEM_INFO_RECEIVED" or event == "PLAYER_MONEY" then
     queueRedraw()
   end
 end)

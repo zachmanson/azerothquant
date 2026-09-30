@@ -23,6 +23,7 @@ Prune.lua
 Freshness.lua
 Nudge.lua
 DisenchantGroup.lua
+BoughtMarks.lua
 RecommendationTable.lua
 CraftChain.lua
 TooltipLines.lua

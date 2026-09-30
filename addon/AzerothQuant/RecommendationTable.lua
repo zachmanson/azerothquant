@@ -10,6 +10,7 @@ ns = ns or {}
 -- In game Money.lua loads first (see the .toc), so require, which WoW lacks, isn't reached.
 local Money = ns.Money or require("Money")
 local DisenchantGroup = ns.DisenchantGroup or require("DisenchantGroup")
+local BoughtMarks = ns.BoughtMarks or require("BoughtMarks")
 
 local RecommendationTable = {}
 
@@ -33,14 +34,16 @@ local function formatTime(t)
 end
 
 -- budget: the one the player set in the box, nil for all the gold. entry.budget is the one
--- the Brain sized the options within, which lags it until the next reload.
-local function header(entry, now, budget)
+-- the Brain sized the options within, which lags it until the next reload. spent: what the
+-- rows marked Bought spent (#97).
+local function header(entry, now, budget, spent)
   local stale = budget ~= entry.budget and " (Reload to re-size)" or ""
+  local bought = spent > 0 and ", Bought " .. Money.format(spent) or ""
   return {
     "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf)
       .. string.format(", Observation Window %.1f h", entry.windowHours),
     "Gold " .. Money.format(entry.gold)
-      .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale
+      .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale .. bought
       .. ", Prediction buys " .. Money.format(entry.predictionCost),
   }
 end
@@ -460,15 +463,22 @@ local function insertAt(list, n, pos, value)
   list[pos] = value
 end
 
--- Where the Beta column goes in a section's columns: before the Note, else last.
-local function betaPlace(columns)
-  for c, name in ipairs(columns) do
-    if name == "Note" then
+-- The place of the column with that name, or nil.
+local function columnAt(columns, name)
+  for c, column in ipairs(columns) do
+    if column == name then
       return c
     end
   end
-  return #columns + 1
+  return nil
 end
+
+-- Where the Beta column goes in a section's columns: before the Note, else last.
+local function betaPlace(columns)
+  return columnAt(columns, "Note") or #columns + 1
+end
+
+local BOUGHT_LINE = "Bought: right-click to undo"
 
 -- What an empty tab says, in place of its rows.
 local NOTHING = {
@@ -480,11 +490,15 @@ local NOTHING = {
 }
 
 -- Orders a section's rows by state.column, largest first when state.descending. Rows
--- without a key for that column go last. Ties go largest Price x Qty first (so Holds,
--- whose Profit is unknown, line up by the gold they tie up), then in the Brain's order.
+-- marked Bought (#97) go after the rest, and rows without a key for that column go last.
+-- Ties go largest Price x Qty first (so Holds, whose Profit is unknown, line up by the gold
+-- they tie up), then in the Brain's order.
 function RecommendationTable.sort(section, state)
   local c = state.column
   table.sort(section.rows, function(a, b)
+    if a.bought ~= b.bought then
+      return b.bought ~= nil
+    end
     local ka, kb = a.keys[c], b.keys[c]
     if ka ~= kb then
       if ka == nil or kb == nil then
@@ -538,23 +552,32 @@ end
 -- for Holdings only, says whether the logged-in Character has it in its bags. budget, given
 -- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
 -- beta is the entry's Beta Prior, and adds its column while the Brain writes one (#90).
-local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta)
+-- marks, given for the buy-side tabs only, are the Market's rows marked Bought by id (#97).
+local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta, marks)
   local held = RecommendationTable.heldUnits(rows)
   local n, place = #columns, betaPlace(columns)
   if beta then
     columns = { unpack(columns) }
     insertAt(columns, n, place, "Beta")
   end
-  local out = { title = title, columns = columns, rows = {}, sort = default }
+  -- markable: a right-click toggles a row's Bought mark (#97).
+  local out = { title = title, columns = columns, rows = {}, sort = default, markable = marks ~= nil or nil }
+  local noteAt = columnAt(columns, "Note")
   local folded, over = 0, 0
   for _, r in ipairs(rows) do
-    if RecommendationTable.lowValue(r) then
+    -- A Disenchant source group's Buy Under is for no one item (#88).
+    local name = r.group and DisenchantGroup.name(r.group) or nameFor(r.itemKey, nameOf)
+    -- What a selection finds the row by after a redraw (#77), and what a Bought mark is
+    -- kept under (#97). A Buy Under has a way out instead of an action, and two Characters
+    -- can each Craft one output.
+    local id = table.concat({ r.itemKey or name, r.action or r.way or "", r.character or "" }, " ")
+    local bought = marks and marks[id] ~= nil or nil
+    -- A marked row stays on show whatever it's worth now: its mark is still undone there.
+    if RecommendationTable.lowValue(r) and not bought then
       folded = folded + 1
-    elseif budget and (r.cost or 0) > budget then
+    elseif budget and not bought and (r.cost or 0) > budget then
       over = over + 1
     else
-      -- A Disenchant source group's Buy Under is for no one item (#88).
-      local name = r.group and DisenchantGroup.name(r.group) or nameFor(r.itemKey, nameOf)
       local rowCells = cells(r, name, nameOf)
       if inBags and inBags(r.itemKey) then
         rowCells[1] = RecommendationTable.BAG .. " " .. name
@@ -567,10 +590,16 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         insertAt(rowKeys, n, place, p and p.price)
         rowTooltip[#rowTooltip + 1] = RecommendationTable.betaLine(beta, r.itemKey)
       end
+      if bought then
+        -- The Prediction buys tab has no Note: greyed out is all it shows.
+        if noteAt then
+          rowCells[noteAt] = "Bought"
+        end
+        rowTooltip[#rowTooltip + 1] = BOUGHT_LINE
+      end
       out.rows[#out.rows + 1] = {
-        -- What a selection finds the row by after a redraw (#77). A Buy Under has a way
-        -- out instead of an action, and two Characters can each Craft one output.
-        id = table.concat({ r.itemKey or name, r.action or r.way or "", r.character or "" }, " "),
+        id = id,
+        bought = bought,
         record = r,
         itemString = r.itemKey and itemString(r.itemKey),
         cells = rowCells,
@@ -593,7 +622,7 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
     more[#more + 1] = folded .. " more (worth 0c or no data)"
   end
   if over > 0 then
-    more[#more + 1] = over .. " over the Budget (Reload to re-size)"
+    more[#more + 1] = over .. " over the " .. (marks and BoughtMarks.spent(marks) > 0 and "gold left" or "Budget") .. " (Reload to re-size)"
   end
   out.more = #more > 0 and table.concat(more, ", ") or nil
   return out
@@ -669,13 +698,17 @@ function RecommendationTable.daysText(days)
 end
 
 -- character: the logged-in Character, as the Brain names it ("Name-Realm"). budget: the
--- copper the player set in the Budget box, nil for all the gold (#86).
-function RecommendationTable.build(recommendations, realm, faction, now, nameOf, character, budget)
+-- copper the player set in the Budget box, nil for all the gold (#86). marks: the Market's
+-- rows marked Bought (BoughtMarks.forMarket, #97). gold: the copper on hand now.
+function RecommendationTable.build(recommendations, realm, faction, now, nameOf, character, budget, marks, gold)
   local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
   if not entry then
     return { empty = EMPTY }
   end
   local holdersOf = entry.held or {}
+  local spent = BoughtMarks.spent(marks or {})
+  -- Once something is marked, the buy-side tabs fold on the gold left (#97).
+  local fold = BoughtMarks.goldLeft(budget, gold, spent)
   -- No re-sort and no filter: the marker only points out what's on hand (#38).
   local function inBags(itemKey)
     for _, h in ipairs(holdersOf[itemKey] or {}) do
@@ -697,7 +730,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
   }
   return {
     title = realm .. " " .. faction,
-    header = header(entry, now, budget),
+    header = header(entry, now, budget, spent),
     sections = {
       section(
         "Holdings",
@@ -722,8 +755,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nameOf,
         holdersOf,
         nil,
-        budget,
-        entry.beta
+        fold,
+        entry.beta,
+        marks
       ),
       section(
         "Flips to Craft",
@@ -735,8 +769,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nameOf,
         holdersOf,
         nil,
-        budget,
-        entry.beta
+        fold,
+        entry.beta,
+        marks
       ),
       section(
         "Prediction buys",
@@ -749,7 +784,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         holdersOf,
         nil,
         nil,
-        entry.beta
+        entry.beta,
+        marks
       ),
       -- In the Brain's order, best profit per unit first: no column sorts it by default, so
       -- the rows fall through to the tie-break on their order (a Buy Under's worth is 0).

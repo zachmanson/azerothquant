@@ -233,6 +233,10 @@ _Avoid_: profit per hour, velocity
 The most gold the player will spend in a Market, set in the Recommendation Table and carried to the Brain in each Character Read. Each Shopping List option, and the Prediction buys, spend up to the lesser of it and the pooled gold. None set means all the gold. The Prediction caps stay shares of the pooled gold (ADR-0006).
 _Avoid_: bankroll, allowance
 
+**Bought mark**:
+A flag the player puts on a buy-side row of the Recommendation Table (right-click) once they've bought it, so it isn't bought twice before the next Brain run (#97). The row greys out and sorts last, and its Cost counts as spent against the **gold left**: the lesser of the Budget less what's spent and the gold on hand, which the table folds options over. Marks are kept per Market and cleared once an import's Scan is later than the mark. Only the Addon reads them; the Brain learns of the buy from Purchases and the next Scan.
+_Avoid_: purchase (that's the stack read from mail), checked, done
+
 **Days to Sell**:
 The most days a buy that exits through Sell should take to sell, set per Market in the Recommendation Table next to the Budget and carried to the Brain in each Character Read. It caps how many units a Flip to Sell buys, a Flip to Craft's output Sells, and a Buy Under's Sell way is good for, after the held units ahead of them. None set, or more than the Sale Horizon, means the Sale Horizon. It doesn't touch Holdings, Best Exit Value, Prediction buys or grading, which stay on the Sale Horizon: that's how long the player will wait for what they already own, this is how much new stock they'll take on (ADR-0020).
 _Avoid_: stock horizon, buy horizon, max stock

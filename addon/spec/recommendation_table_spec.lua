@@ -6,7 +6,7 @@ local function noNames()
   return nil
 end
 
-local function build(recommendations, now, nameOf, character, budget)
+local function build(recommendations, now, nameOf, character, budget, marks, gold)
   return RecommendationTable.build(
     recommendations,
     REALM,
@@ -14,7 +14,9 @@ local function build(recommendations, now, nameOf, character, budget)
     now or 0,
     nameOf or noNames,
     character,
-    budget
+    budget,
+    marks,
+    gold
   )
 end
 
@@ -872,6 +874,97 @@ describe("the Beta Prior column (#90)", function()
     local view = build(entry({ holdings = { sell("2589") } }))
 
     assert.are.same({ "Item", "Action", "Qty", "Price", "Profit", "ROI", "Note" }, view.sections[1].columns)
+  end)
+end)
+
+describe("rows marked Bought (#97)", function()
+  local function sell()
+    return { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 3000 }
+  end
+
+  local function vendor()
+    return { itemKey = "2589", action = "Vendor", quantity = 2, price = 100, profit = 20.0, cost = 200 }
+  end
+
+  local function marked(recommendations, ids, budget, gold)
+    local marks = {}
+    for id, cost in pairs(ids) do
+      marks[id] = { cost = cost, at = AS_OF + 60 }
+    end
+    return build(recommendations, AS_OF, nil, nil, budget, marks, gold)
+  end
+
+  it("greys a marked Shopping List row to the bottom of its tab, its Note saying Bought", function()
+    local view = marked(entry({ shoppingList = { sell(), vendor() } }), { ["9749 Sell "] = 3000 })
+
+    local rows = view.sections[2].rows
+    assert.are.same({ "2589", "9749" }, { rows[1].record.itemKey, rows[2].record.itemKey })
+    assert.is_true(rows[2].bought)
+    assert.are.equal("Bought", rows[2].cells[11])
+    assert.is_nil(rows[1].bought)
+  end)
+
+  it("folds the options over the gold left, and never the marked row itself", function()
+    local view = marked(
+      entry({ shoppingList = { sell(), vendor(), flipToCraft() } }),
+      { ["9749 Sell "] = 3000 },
+      4000,
+      100000
+    )
+
+    local shopping, crafts = view.sections[2], view.sections[3]
+    assert.are.same({ "2589", "9749" }, { shopping.rows[1].record.itemKey, shopping.rows[2].record.itemKey })
+    assert.are.equal(0, #crafts.rows)
+    assert.are.equal("1 over the gold left (Reload to re-size)", crafts.more)
+  end)
+
+  it("folds on the gold on hand when it's under what's left of the Budget", function()
+    local view = marked(entry({ shoppingList = { sell(), flipToCraft() } }), { ["9749 Sell "] = 3000 }, nil, 1000)
+
+    assert.are.equal(0, #view.sections[3].rows)
+  end)
+
+  it("marks Flips to Craft and Prediction buys, but not Holdings or Buy Unders", function()
+    local hold = { itemKey = "2770", action = "Hold", quantity = 5, price = 90, cost = 450, maxLoss = 200, prediction = "Phase 2" }
+    local held = { itemKey = "2770", action = "Hold", quantity = 5, price = 90 }
+    local under = { itemKey = "2770", price = 80, way = "Hold", units = 5, seen = 3, windowDays = 7 }
+    local view = marked(
+      entry({ holdings = { held }, shoppingList = { flipToCraft() }, predictionBuys = { hold }, buyUnder = { under } }),
+      { ["2996 Craft Kash-Patel"] = 1250, ["2770 Hold "] = 450 }
+    )
+
+    assert.is_nil(view.sections[1].rows[1].bought)
+    assert.is_true(view.sections[3].rows[1].bought)
+    assert.are.equal("Bought", view.sections[3].rows[1].cells[8])
+    assert.is_true(view.sections[4].rows[1].bought)
+    assert.are.equal("Phase 2", view.sections[4].rows[1].cells[2])
+    assert.is_nil(view.sections[5].rows[1].bought)
+    local markable = {}
+    for i, section in ipairs(view.sections) do
+      markable[i] = section.markable or false
+    end
+    assert.are.same({ false, true, true, true, false }, markable)
+  end)
+
+  it("keeps a marked row on show even when it's worth nothing now", function()
+    local worthless = vendor()
+    worthless.profit = 0
+    local view = marked(entry({ shoppingList = { worthless } }), { ["2589 Vendor "] = 200 })
+
+    assert.is_true(view.sections[2].rows[1].bought)
+    assert.is_nil(view.sections[2].more)
+  end)
+
+  it("folds on the Budget, and says so, while the marks spent nothing", function()
+    local view = marked(entry({ shoppingList = { sell(), flipToCraft() } }), { ["9749 Sell "] = 0 }, 1000, 100000)
+
+    assert.are.equal("1 over the Budget (Reload to re-size)", view.sections[3].more)
+  end)
+
+  it("heads the table with what the marks spent", function()
+    local view = marked(entry({ shoppingList = { sell() } }), { ["9749 Sell "] = 3000 }, 50000, 100000)
+
+    assert.are.equal("Gold 17g 54s 71c, Budget 5g (Reload to re-size), Bought 30s, Prediction buys 0c", view.header[2])
   end)
 end)
 
