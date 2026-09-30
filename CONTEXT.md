@@ -46,6 +46,14 @@ _Avoid_: mail scan (a Scan is only ever the Auction House)
 Every Scan, Mailbox Read and Character Read exactly as the Addon recorded it, one file each, kept forever. It is the Brain's source of truth: the history database, and anything else the Brain stores, can be rebuilt from it.
 _Avoid_: Scan Archive (it holds more than Scans), backup, raw dump
 
+**Scan Pool**:
+A shared online store of Scans that several players' Brains upload to and download from, so each player gets the Scans the others took. It holds Scans only, stripped of anything that identifies the player: Mailbox Reads, Character Reads and everything tied to an account stay in each player's own Archive. Each Brain matches pooled Scans itself, as it does its own, so the pool holds raw Scans rather than a history someone else interpreted (#117).
+_Avoid_: cloud, shared database, AuctionDB
+
+**Pooled Scan**:
+A Scan from the Scan Pool that another player took. It goes into the player's Archive and history like one of their own Scans, but nothing in it is own.
+_Avoid_: remote Scan, foreign Scan
+
 **Item Key**:
 The identity used for pricing: itemID plus random suffix, so "of the Monkey" and "of the Eagle" versions are different Item Keys.
 _Avoid_: item (when you mean the priced identity), itemID
@@ -55,7 +63,7 @@ Another Item Key of the same itemID in the same Market: another random suffix of
 _Avoid_: variant, suffix group
 
 **Listing**:
-One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key, unit buyout and whether it is own, and identical Listings are interchangeable. Own means posted by the Character that did the Scan: the game hides every other seller, including the player's other Characters. Its quantity can only go down. Bids are ignored; buyout is the only price.
+One auction on the Auction House: an Item Key, a remaining quantity and a unit buyout, tracked across the Scans it appears in. The game shows no seller or auction ID, so a Listing is recognized by Item Key and unit buyout, and identical Listings are interchangeable. Own means one of the player's own Scans showed it as posted by the Character that did that Scan: the game hides every other seller, including the player's other Characters, and a Pooled Scan shows nothing as own. Once own, a Listing stays own (#117). Its quantity can only go down. Bids are ignored; buyout is the only price.
 _Avoid_: auction, post, order, stack (a Listing can hold more than one stack)
 
 **Disappearance**:

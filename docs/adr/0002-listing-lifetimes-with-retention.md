@@ -10,3 +10,7 @@ The full Scan gives no auction ID or seller, so Listings are matched between Sca
 
 - Summarize at import and discard raw rows: smallest, but locks every past Scan into whatever formula existed at import time.
 - One row per Listing per Scan: simplest to write, but grows several times faster for no extra information.
+
+## Amendment: own leaves the match key (#117)
+
+Listings are now matched by Item Key and unit buyout only. A Pooled Scan (ADR-0026) shows nothing as own, so with own in the key every switch between the player's Scan and a Pooled Scan would look like a Disappearance plus a new Listing on the player's own auctions. A Listing is own once any of the player's own Scans shows it as own, and stays own. The one cost is when the player and someone else both post the same Item Key at the same unit buyout: the own flag may land on the other Listing. Identical Listings were already interchangeable, so that's rare and harmless.
