@@ -1,3 +1,24 @@
+2026-09-30 (later 59): Built #122 (6252339, CI fix 182b306). The Brain syncs with the Scan Pool: `brain/src/brain/pool.py` (strip_scan, the `Pool` protocol, `HttpPool` on stdlib urllib), `pool_sync.py` (push, pull, `PoolSyncer` for `brain watch`), `brain pool push` / `brain pool pull [--since]`, and config `pool_url`, `pool_key`, `pool_sync_minutes`, `pool_backfill_days`, `pool_min_completeness`, `pool_completeness_window`. Rollback handling is built too (the #117 sync step lists it), so #123 is re-scoped (comment on #123): the key commands, `pool_admin_secret`, and a test that rolling back an unknown ID is a no-op. Decisions are in ADR-0026 Consequences and the ADR-0005 amendment:
+  - `lastImported` counts only own Scans.
+  - `brain rebuild` copies the own Scans' `pool_id`s and the cursor from the old history.
+  - An own Scan beats a Pooled one from the same second.
+  - Push goes newest first.
+  - A rollback past 48 h stays in history until `brain rebuild`.
+  - Setting only one of `pool_url` and `pool_key` is a config error.
+  The review filed #127 (needs-triage): non-ASCII realm names in `X-Scan-*` headers.
+
+Next, in order (grill first where not ready-for-agent):
+1. Scan Pool (#117): #123 (key commands, re-scoped) is next. Then #124 (ready-for-human: deploy the Worker, hand out keys).
+2. #61 (needs-info: grill), #14, #19, #10, #82, #125, #126, #127 (needs-triage). #81 is ready-for-human: do it at the PC.
+3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
+
+- Gotchas: same as later 58, plus:
+  - Test helpers shared between test files go in `brain/tests/<name>.py` and are imported bare (`from fake_pool import FakePool`). CI runs bare `pytest`, so `from tests.x import` fails there even though `python -m pytest` passes locally. Check with `python -P -m pytest`.
+  - The Worker sends the list `cursor` as a string. `HttpPool` casts it; the stub Worker in `test_pool.py` sends a string on purpose.
+  - A periodic pull in `brain watch` doesn't rewrite Recommendations.lua. Pooled data reaches the Addon at the next own import, which pulls first anyway. `brain pool pull` does rewrite it.
+  - `brain watch` logs the pool counts line only when something happened.
+  - `addon/AzerothQuant/Recommendations.lua` still has the big uncommitted edit. Still left out of commits: ask the user about it.
+
 2026-09-30 (later 58): Built #121 (9846a50). The Scan Pool Worker is in `pool/` (TypeScript, Cloudflare Worker, D1 for keys and the index, R2 for bodies), with 35 vitest tests under the Workers pool against the real endpoints and a new `pool` CI job (green). `pool/README.md` has the API table, local dev, secrets and `wrangler deploy`. Decisions made this session: the Scan header (era, realm, faction, requestedAt) goes in `X-Scan-*` HTTP headers, so the Worker never gunzips at all. The cursor is the seq of an ordered `events` log (add/rollback), paged by `limit` (max 1000) with a `more` flag. Revoke also deletes the key's R2 bodies. Keys are stored hashed.
 
 Next, in order (grill first where not ready-for-agent):
