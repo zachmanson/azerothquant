@@ -1,3 +1,14 @@
+2026-09-30 (later 60): Built #123 (5d423e2). `brain pool key add <name>` prints a new member key and `brain pool key revoke <name>` revokes one, through `PoolAdmin` in `brain/src/brain/pool.py` (shares the module-level `_request` with `HttpPool`). New config `pool_admin_secret` (the Worker's ADMIN_SECRET). The key commands exit 1 with a clear message without `pool_url` and `pool_admin_secret`, and log the Worker's reason on 409/404. Added a test that rolling back an unknown pool ID is a no-op (`FakePool` now lists rollbacks of IDs it never had). The Scan Pool code is done: #117's remaining sub-issue is #124, ready-for-human at the PC.
+
+Next, in order (grill first where not ready-for-agent):
+1. Scan Pool (#117): #124 (ready-for-human: deploy the Worker, make two keys with `brain pool key add`, check both directions and a revoke).
+2. #61 (needs-info: grill), #14, #19, #10, #82, #125, #126, #127 (needs-triage). #81 is ready-for-human: do it at the PC.
+3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
+
+- Gotchas: same as later 59, plus:
+  - The pool admin needs `pool_key` in the config too: `pool_url` without `pool_key` is still a config error (ADR-0026), even for `brain pool key`.
+  - `addon/AzerothQuant/Recommendations.lua` still has the big uncommitted edit. Still left out of commits: ask the user about it.
+
 2026-09-30 (later 59): Built #122 (6252339, CI fix 182b306). The Brain syncs with the Scan Pool: `brain/src/brain/pool.py` (strip_scan, the `Pool` protocol, `HttpPool` on stdlib urllib), `pool_sync.py` (push, pull, `PoolSyncer` for `brain watch`), `brain pool push` / `brain pool pull [--since]`, and config `pool_url`, `pool_key`, `pool_sync_minutes`, `pool_backfill_days`, `pool_min_completeness`, `pool_completeness_window`. Rollback handling is built too (the #117 sync step lists it), so #123 is re-scoped (comment on #123): the key commands, `pool_admin_secret`, and a test that rolling back an unknown ID is a no-op. Decisions are in ADR-0026 Consequences and the ADR-0005 amendment:
   - `lastImported` counts only own Scans.
   - `brain rebuild` copies the own Scans' `pool_id`s and the cursor from the old history.
