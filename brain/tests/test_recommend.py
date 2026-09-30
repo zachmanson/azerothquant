@@ -2958,6 +2958,20 @@ def test_a_buys_exit_is_never_a_resale_above_what_a_merchant_charges(db):
     assert buy.max_loss == pytest.approx(2 * -60)
 
 
+def test_a_prediction_buys_only_below_the_merchant_cost_after_the_cut(db):
+    # #91: a merchant sells Linen for 100, so no Sell fetches more than 95. A vendor pays
+    # 95, so every unit's Max Loss is within 10%, but only the 94s are under the 95.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=94), row(quantity=5, unit=95), row(quantity=5, unit=96))],
+        [character_read(money=GOLD, vendor_prices={2589: 95}, merchant_costs={2589: 100})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert (buy.quantity, buy.cost) == (5, 5 * 94)
+
+
 def test_held_units_take_the_sale_horizon_first_when_pricing_a_buys_exit(db):
     # 6 sell within the horizon, and the 4 held would go first if the Prediction is wrong,
     # so only 2 of the 100s could be resold, posted at 99 under the rest for 94.05.

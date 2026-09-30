@@ -2784,12 +2784,16 @@ def _hold_buys(
     the Sale Events at or above the resale's post price count (#107), and it's never
     above what a merchant charges (#63). Each is less the deposits it's expected to lose
     waiting its turn in the `queue` at that rate (#78). The rest can only be Vendored, or
-    are worth nothing without a Vendor Price.
+    are worth nothing without a Vendor Price. Nothing is bought at or above the Merchant
+    Cost after the `cut`, since no Sell fetches more than that (#91).
     """
     bought: Supply = []
     buys = []
     selling = True  # until a Listing is only partly taken: the rest of it stays up
+    most = math.inf if merchant_cost is None else merchant_cost * (1 - cut)
     for unit, quantity in sorted(offers):
+        if unit >= most:
+            return buys
         queued = held + sum(n for _, n in bought)
         take, post_at = 0, None
         if selling:
