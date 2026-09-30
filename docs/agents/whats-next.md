@@ -1,8 +1,8 @@
 2026-09-30 (later 54): Built #44 slice 2 (92cf42e), so #44 is done. `lots()` takes `craft_results` (`LotCraftResult`, named that because CONTEXT's **Craft** is the Action) next to Sold Outcomes and folds. A craft uses up reagent units from open non-Prediction Lots, oldest first. It opens an output Lot (`Lot.crafted`) only when every reagent unit is costed, from a Lot or a Merchant Cost, and never for an Item Key under a standing Prediction. Each craft snapshots its recipe at import from the same Read's `professions` into `craft` (`output_item_id`, `quantity_min`) and `craft_reagent`. So no-output recipes use up reagents and never become Known Recipes, and Known Recipes are unchanged. `recommend.lot_craft_results` resolves them with Merchant Costs as of the Read that carried the craft, because the Addon records a session's Merchant Costs at logout on that same Read. It's wired into `market_lots` (Paid/ROI, Flip grading) and replay `_realized`. `brain flips` prints `Crafts recorded: N (M with a costed output)`. The docs are done: CONTEXT Lot/Paid, the ADR-0007 amendment, and ADR-0023 pointing to #114.
 
 Next, in order (grill first where not ready-for-agent):
-1. #61 (needs-info: grill), #14, #19, #10, #82. #81 is ready-for-human: do it at the PC.
-2. #117 tickets, all `later`, as in later 52 below.
+1. Scan Pool (#117) is the priority now (user's call, 2026-09-30), though its tickets are still labeled `later`. Order: #118 (tail re-match) -> #119 (own out of the match key). #120 (GetServerTime) and #121 (Worker, TypeScript) can start any time. #122 (Brain sync) needs #118, #119 and #121. Then #123 (rollback and key commands), then #124 (deploy, ready-for-human). The spec comment is on #117.
+2. #61 (needs-info: grill), #14, #19, #10, #82. #81 is ready-for-human: do it at the PC.
 3. PC and date items are unchanged from later 51 and 50 below, plus the #44 craft probe on #85. Once real crafts are in, check the `Crafts recorded` line: M well below N means the capture or recipe snapshot has gaps.
 
 - Gotchas: same as later 50. From the #44 review, not taken:
