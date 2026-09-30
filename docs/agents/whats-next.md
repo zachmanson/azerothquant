@@ -1,8 +1,8 @@
 2026-09-30 (later 43): Built #111 (05a9771, closes it). `_spend_on_predictions` now picks a merged row's `BetaRoom` by `(from_beta > 0, room)`. Tests are in test_recommend.py (the merge) and test_recommendations.py (`_row` writes `roomFromBeta`). These are the first tests to import private names (`_HoldBuy`, `_Caps`, `_spend_on_predictions`, `_row`), which the spec allowed. The review suggested two things I didn't do: a `BetaRoom` property for "from Beta" (`from_beta > 0` is now written in both recommend.py and recommendations.py), and a CONTEXT.md line about the tie-break.
 
 Next, in order (grill first where not ready-for-agent):
-1. #76, #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82.
-2. When at the PC: run the #85 checks (#97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Optionally glance at a "Room partly from Beta" tooltip once w > 0. Then grill #39 using the probe results.
+1. #55, #81, then #89, #54, #44, #61, #14, #19, #10, #82.
+2. When at the PC: run the #85 checks (#76 and #88 Disenchant checks, #97 slice 1, #39 throttle probe, #97 slice 2 buy-event probe). Optionally glance at a "Room partly from Beta" tooltip once w > 0. Then grill #39 using the probe results.
 3. On dates: Nov 4, #91's list. ~Nov 6: run `brain recommend --beta-ratios` for #91's Item Keys, and set `beta_sell_rate_weight = 0.5` if they're close to 1. Nov 18: look back and close #110.
 
 - Gotchas: `addon/AzerothQuant/Recommendations.lua` is still modified by an import. Don't commit it. Don't use `git stash` on this Z: drive. A path-limited `stash push`/`pop` emptied `.git/index` (every file showed as deleted and untracked), and `git reset` rebuilt it. This PC has no `lua` binary, so the Lua fixture tests skip. `ruff` isn't on PATH, so use `python -m ruff`.
