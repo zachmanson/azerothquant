@@ -1,3 +1,9 @@
+2026-09-30 (later 63): Started `brain watch` (scripts/brain-watch.bat, own console window titled "brain watch"). It syncs the pool, so A's 46 un-pushed Scans drain one per 10 min (about 8 h). Restart it after a reboot.
+
+Next, in order: same as later 62 from item 2 on (PC items, then #61, #128, #129, the needs-triage list, date items).
+
+- Gotchas: same as later 62.
+
 2026-09-30 (later 62): #124 done (3ae5186), so the Scan Pool (#117) is closed. The Worker is live at https://azerothquant-pool.zachmanson9.workers.dev (account 605568062ea9d2f286c97d54929d5432, D1 `azerothquant-pool`, R2 `azerothquant-pool-scans` with a 60-day lifecycle rule, billing alert at 8 GB). `brain/config.toml` has `pool_url`, `pool_key` (member `zach`) and `pool_admin_secret`. Two-member check passed: both directions, re-match, and revoke (`member-b`, `member-b2` are revoked test keys). After the rollback, A's history matched a clean rebuild except vendor_price/item_info seen_at (#129). Two client bugs fixed: a `User-Agent` (Cloudflare 403s Python-urllib, error 1010), and the pool's TLS context now trusts only the Windows ROOT store (an expired ISRG Root X2 cross-sign cached in CurrentUser\CA broke Python's TLS). Re-match timing is on #116. Also ran the pending `brain rebuild` (4m40s, 47 Scans, 0 rejected). A pre-pool backup of the history is at `Z:\vibing\aq-backups\history.pre-pool-backup.sqlite`.
 
 Next, in order (grill first where not ready-for-agent):
@@ -7,7 +13,8 @@ Next, in order (grill first where not ready-for-agent):
 4. Date items unchanged from later 54.
 
 - Gotchas: same as later 60, plus:
-  - Node isn't on Git Bash PATH: prefix `PATH="/c/Program Files/nodejs:$PATH"`. wrangler needs `CLOUDFLARE_API_TOKEN="$(tr -d ' 
+  - Node isn't on Git Bash PATH: prefix `PATH="/c/Program Files/nodejs:$PATH"`. wrangler needs `CLOUDFLARE_API_TOKEN="$(tr -d ' 
+
 ' < pool/.cloudflare-token)"` (gitignored; `wrangler login` didn't hand back to this shell) and `CLOUDFLARE_ACCOUNT_ID=605568062ea9d2f286c97d54929d5432`.
   - Each key uploads one Scan per Market per 10 min, so `brain pool push` showing `pushed 0` right after a push is the rate limit, not a failure.
   - A test Scan copied with a shifted requestedAt makes many new Listings (short time-left buckets can't survive the gap). That's correct matching, not a pool bug.
