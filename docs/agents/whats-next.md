@@ -1,3 +1,12 @@
+2026-09-30 (later 61): Grilled #61, now ready-for-agent (small). The Flips to Craft tab's Post at cell shows `made.post_at` (blank when all units are Vendored). A partly sold row shows just the price, because the split is in the Craft Chain panel (#77). It's the same before-cut price as #59. Spec is in the issue comment.
+
+Next, in order (grill first where not ready-for-agent):
+1. Scan Pool (#117): #124 (ready-for-human: deploy the Worker, make two keys with `brain pool key add`, check both directions and a revoke).
+2. #61 (ready-for-agent, small: /tdd). Then #14, #19, #10, #82, #125, #126, #127 (needs-triage). #81 is ready-for-human: do it at the PC.
+3. PC and date items are unchanged from later 55 (including the `brain rebuild` once at the PC), plus the #120 probe on #85.
+
+- Gotchas: same as later 60.
+
 2026-09-30 (later 60): Built #123 (5d423e2). `brain pool key add <name>` prints a new member key and `brain pool key revoke <name>` revokes one, through `PoolAdmin` in `brain/src/brain/pool.py` (shares the module-level `_request` with `HttpPool`). New config `pool_admin_secret` (the Worker's ADMIN_SECRET). The key commands exit 1 with a clear message without `pool_url` and `pool_admin_secret`, and log the Worker's reason on 409/404. Added a test that rolling back an unknown pool ID is a no-op (`FakePool` now lists rollbacks of IDs it never had). The Scan Pool code is done: #117's remaining sub-issue is #124, ready-for-human at the PC.
 
 Next, in order (grill first where not ready-for-agent):
