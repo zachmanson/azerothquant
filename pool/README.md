@@ -51,8 +51,20 @@ npx wrangler login
 npx wrangler r2 bucket create azerothquant-pool-scans
 npx wrangler d1 create azerothquant-pool      # paste its database_id into wrangler.toml
 npx wrangler d1 migrations apply azerothquant-pool --remote
+npx wrangler r2 bucket lifecycle add azerothquant-pool-scans expire-60d --expire-days 60
 npx wrangler secret put ADMIN_SECRET
 ```
+
+R2 has to be enabled once in the dashboard first (it asks for a card even on the free tier).
+The lifecycle rule deletes Scan bodies after 60 days, which keeps the bucket under R2's free
+10 GB even if every member scanned nonstop at the upload limit. Brains never fetch pool Scans
+older than `pool_backfill_days` (30), so only a `brain pool pull --since` further back than
+60 days would get `404`s. A billing notification (Notifications, Usage Based Billing, R2
+storage over 8 GB) warns well before anything costs money.
+
+If `wrangler login` doesn't take (it can't hand the login back to some shells), use an API
+token instead: the "Edit Cloudflare Workers" template plus Account / D1 / Edit, in
+`CLOUDFLARE_API_TOKEN`. Keep it in `pool/.cloudflare-token` (gitignored), not in the repo.
 
 Then, for each change:
 

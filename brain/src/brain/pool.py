@@ -6,11 +6,15 @@ it or which auctions were theirs.
 """
 
 import copy
+import functools
 import gzip
 import json
+import ssl
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -196,10 +200,15 @@ def _request(
         url + path,
         data=body,
         method=method,
-        headers={"Authorization": f"Bearer {token}", **(headers or {})},
+        headers={
+            "Authorization": f"Bearer {token}",
+            # Cloudflare turns away Python-urllib's own User-Agent (error 1010).
+            "User-Agent": USER_AGENT,
+            **(headers or {}),
+        },
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_tls_context()) as response:
             return response.read()
     except urllib.error.HTTPError as e:
         if e.code == 429:
@@ -209,6 +218,37 @@ def _request(
         # UnicodeError: a header the HTTP library can't send, say a realm name outside
         # Latin-1.
         raise PoolError(f"{method} {path}: {e}") from None
+
+
+USER_AGENT = "azerothquant-brain"
+
+SERVER_AUTH = "1.3.6.1.5.5.7.3.1"
+
+
+@functools.cache
+def _tls_context() -> ssl.SSLContext:
+    if sys.platform == "win32":
+        return windows_root_context(ssl.enum_certificates)
+    return ssl.create_default_context()
+
+
+def windows_root_context(
+    enum_certificates: Callable[[str], list[tuple[bytes, str, set[str] | bool]]],
+) -> ssl.SSLContext:
+    """A TLS context that trusts only the Windows ROOT store's server-auth roots.
+
+    Python's own default also trusts the CA store, where Windows caches intermediates it
+    has seen, expired ones included. OpenSSL then anchors on an expired cached cross-sign
+    (ISRG Root X2 by X1, for Let's Encrypt) instead of walking on to the valid root.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    for cert, encoding, trust in enum_certificates("ROOT"):
+        if encoding == "x509_asn" and (trust is True or SERVER_AUTH in trust):
+            try:
+                context.load_verify_locations(cadata=cert)
+            except ssl.SSLError:
+                pass  # a malformed store entry: leave it out, as Python's default does
+    return context
 
 
 def _reason(error: urllib.error.HTTPError) -> str:

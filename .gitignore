@@ -30,3 +30,4 @@ brain/grades.toml
 pool/node_modules/
 pool/.wrangler/
 pool/.dev.vars
+pool/.cloudflare-token

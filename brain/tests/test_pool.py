@@ -3,6 +3,7 @@ Worker."""
 
 import gzip
 import json
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -17,6 +18,7 @@ from brain.pool import (
     PoolError,
     PoolPage,
     strip_scan,
+    windows_root_context,
 )
 from brain.scan import Scan
 
@@ -242,3 +244,76 @@ def test_a_taken_name_is_a_pool_error_with_the_worker_s_reason(worker):
 
     with pytest.raises(PoolError, match="409 name already taken"):
         PoolAdmin(worker, "s3cret").add_key("bob")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [lambda url: HttpPool(url, "k").list_since(None), lambda url: PoolAdmin(url, "s").add_key("n")],
+)
+def test_every_request_names_the_brain(worker, call):
+    # Cloudflare turns away Python-urllib's own User-Agent with a 403 (error 1010).
+    call(worker)
+
+    [(_, _, headers, _)] = _StubWorker.requests
+    assert headers["User-Agent"].startswith("azerothquant-brain")
+
+
+# Two throwaway self-signed certificates, standing in for Windows' certificate stores.
+ROOT_PEM = """-----BEGIN CERTIFICATE-----
+MIIBfjCCASWgAwIBAgIUHURkLE0FhKZegjpOvAe3LWhlSnEwCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJVGVzdCByb290MCAXDTI2MTAwMTAxMTk1N1oYDzIxMjYwOTA3
+MDExOTU3WjAUMRIwEAYDVQQDDAlUZXN0IHJvb3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAAQb3zEFKmLBPLRAwD3tafHZcz6VprTBmHv0937BYw21ddkDb0rvVn4m
+yTwZwLqO6nOlUChWKrBuhBAzRqtiHKmAo1MwUTAdBgNVHQ4EFgQU/NwkoO5W5PbB
+IX81O6sa8pYuxucwHwYDVR0jBBgwFoAU/NwkoO5W5PbBIX81O6sa8pYuxucwDwYD
+VR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiBRVJuoTRml9dRClvNM/azg
+BsBjwwbIDGRVIZs7r8/ioAIgQkLyvq9dtYaR85EHNn1ITpjym8+GpRGBjT3IiHaQ
+Iac=
+-----END CERTIFICATE-----
+"""
+CA_PEM = """-----BEGIN CERTIFICATE-----
+MIIBfDCCASGgAwIBAgIUChW/UdP0TxceaMrE13Gx8E35bPgwCgYIKoZIzj0EAwIw
+EjEQMA4GA1UEAwwHVGVzdCBjYTAgFw0yNjEwMDEwMTE5NTdaGA8yMTI2MDkwNzAx
+MTk1N1owEjEQMA4GA1UEAwwHVGVzdCBjYTBZMBMGByqGSM49AgEGCCqGSM49AwEH
+A0IABFGbtjXSrjz4y6WxyRSQUGRtY3gooD8IWONaxduqUwngN8dVi5mSKByNRdLu
+kEc07aigY4N24c8eMtt/5b8hR5ejUzBRMB0GA1UdDgQWBBScpXUlQ0/LYaFj//h4
+kMkXm96KbjAfBgNVHSMEGDAWgBScpXUlQ0/LYaFj//h4kMkXm96KbjAPBgNVHRMB
+Af8EBTADAQH/MAoGCCqGSM49BAMCA0kAMEYCIQCX7e2+EIARiZR1F4mnHDk17zM7
+vuG8RIZuGsigeaFopwIhAO2ur/6EVXGr5HPmZSYo9haKqRgjI7VCo7y4OWtbXd17
+-----END CERTIFICATE-----
+"""
+SERVER_AUTH = "1.3.6.1.5.5.7.3.1"
+
+
+def _trusted_names(context: ssl.SSLContext) -> set[str]:
+    return {
+        dict(rdn[0] for rdn in cert["subject"])["commonName"] for cert in context.get_ca_certs()
+    }
+
+
+def test_on_windows_only_the_root_store_is_trusted():
+    # Windows caches intermediates in the CA store, expired ones included. Python trusts that
+    # store too, so an expired ISRG Root X2 cross-sign there failed every request to the
+    # Worker (#124).
+    stores = {
+        "ROOT": [(ssl.PEM_cert_to_DER_cert(ROOT_PEM), "x509_asn", True)],
+        "CA": [(ssl.PEM_cert_to_DER_cert(CA_PEM), "x509_asn", True)],
+    }
+
+    context = windows_root_context(lambda store: stores[store])
+
+    assert _trusted_names(context) == {"Test root"}
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+@pytest.mark.parametrize(
+    "trust, trusted",
+    [(True, True), ({SERVER_AUTH}, True), ({"1.3.6.1.5.5.7.3.3"}, False)],
+)
+def test_a_root_is_trusted_only_for_server_auth(trust, trusted):
+    root = [(ssl.PEM_cert_to_DER_cert(ROOT_PEM), "x509_asn", trust)]
+
+    context = windows_root_context(lambda store: root)
+
+    assert _trusted_names(context) == ({"Test root"} if trusted else set())

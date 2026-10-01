@@ -1,6 +1,9 @@
 name = "azerothquant-pool"
 main = "src/index.ts"
 compatibility_date = "2026-08-15"
+# Served at azerothquant-pool.<account>.workers.dev; no per-version preview URLs.
+workers_dev = true
+preview_urls = false
 
 # Scan bodies (gzipped JSON, stored as uploaded).
 [[r2_buckets]]
@@ -11,7 +14,7 @@ bucket_name = "azerothquant-pool-scans"
 [[d1_databases]]
 binding = "DB"
 database_name = "azerothquant-pool"
-database_id = "00000000-0000-0000-0000-000000000000" # replace with the ID from `wrangler d1 create`
+database_id = "1db8de2c-b91e-495e-b59a-ccb4f26ea081"
 migrations_dir = "migrations"
 
 # Secret, set with `wrangler secret put ADMIN_SECRET` (and in .dev.vars for `wrangler dev`):
