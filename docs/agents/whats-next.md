@@ -1,3 +1,9 @@
+2026-10-02 (later 65): #128 and #129 triaged and done (fc73a1a). `pool_url` alone now loads (pool off until `pool_key` is set too), so a fresh admin can run `brain pool key add`. Pooled Scans no longer write `vendor_price`/`item_info` (option B: only own Scans and Character Reads do), so a rollback has nothing to undo there; `strip_scan` is unchanged. Ran `brain rebuild` (52 Scans, 0 rejected; 0 vendor/item rows from Pooled Scans) and restarted `brain watch`.
+
+Next, in order: PC items as in later 62 item 2, then #14, #19, #10, #82, #125, #126, #127 (needs-triage), then date items.
+
+- Gotchas: same as later 62.
+
 2026-10-02 (later 64): #61 done (8b936ca). A Flip to Craft row's `post_at` is its output's post price, None when no unit beats vendoring (gated on `made.selling`: `_outlet` keeps a `post_at` when held units take all the room, the output is bound, or the sale nets under the Vendor Price). The Flips to Craft tab's Post at cell needed no Addon change. Restart `brain watch` so it writes the new field, then /reload.
 
 Next, in order: PC items as in later 62 item 2, then #128 and #129 (needs-triage, small), then #14, #19, #10, #82, #125, #126, #127 (needs-triage).
