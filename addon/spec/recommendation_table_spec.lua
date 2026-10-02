@@ -46,6 +46,7 @@ local function flipToCraft()
     action = "Craft",
     quantity = 6,
     profit = 4500.0,
+    postAt = 999.0,
     cost = 1250.0,
     note = "on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
     buys = {
@@ -732,10 +733,20 @@ describe("RecommendationTable.build", function()
 
     local rows = view.sections[3].rows
     assert.are.same(
-      { "item:2996", "Craft", "6", "", "", "45s", "12s 50c", "on Kash-Patel, 2 reagents" },
+      { "item:2996", "Craft", "6", "", "9s 99c", "45s", "12s 50c", "on Kash-Patel, 2 reagents" },
       rows[1].cells
     )
     assert.are.equal("on Kash-Patel, 1 reagent", rows[2].cells[8])
+  end)
+
+  it("shows a Flip to Craft's output's Post at, blank when all of it Vendors (#61)", function()
+    local vendored = flipToCraft()
+    vendored.postAt = nil
+    local view = build(entry({ shoppingList = { flipToCraft(), vendored } }))
+
+    local rows = view.sections[3].rows
+    assert.are.equal("9s 99c", rows[1].cells[5])
+    assert.are.equal("", rows[2].cells[5])
   end)
 
   it("names a reagent not cached yet by its Item Key", function()

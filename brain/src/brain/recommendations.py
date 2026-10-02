@@ -65,7 +65,8 @@ _HEADER = (
     "-- Flip to Vendor row has listings (bought), posts (stacks posted) and days (until\n"
     "-- its last unit sells; nil on a Flip to Vendor, which sells now). A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
-    "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant }.\n"
+    "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant },\n"
+    "-- and its output's postAt (nil when none of it beats vendoring).\n"
     "-- Every Craft row names its character, and lists the held reagents it uses as\n"
     "-- uses = { { itemKey, quantity } }. One that can't be made says why as\n"
     '-- blocked = { reason = "noData", itemKey } or { reason = "unknownBindType" }.\n'

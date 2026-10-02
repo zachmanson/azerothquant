@@ -294,6 +294,7 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
                             action=Action.CRAFT,
                             quantity=6,
                             profit=4500.0,
+                            post_at=999.0,
                             cost=1250.0,
                             note="on Kash-Patel: uses 12 of 2589 (buy 12), 6 of 2320 (buy 5)",
                             buys=(
@@ -314,7 +315,7 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
         lua,
         file,
         'local row = r.recommendations["Quel\'Thalas"].Horde.shoppingList[1] '
-        "print(row.action, row.quantity, row.cost, #row.buys) "
+        "print(row.action, row.quantity, row.postAt, row.cost, #row.buys) "
         "for _, b in ipairs(row.buys) do "
         "  print(b.itemKey, b.quantity, b.maxUnitPrice, tostring(b.merchant)) "
         "end "
@@ -323,7 +324,7 @@ def test_a_real_lua_reads_a_flip_to_crafts_reagent_buys(tmp_path, lua):
     )
 
     assert out.splitlines() == [
-        "Craft	6	1250	2",
+        "Craft	6	999	1250	2",
         "2589	12	100	nil",
         "2320	5	10	true",
         "Kash-Patel	1",

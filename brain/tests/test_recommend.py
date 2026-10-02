@@ -2113,6 +2113,7 @@ def test_a_flip_to_craft_buys_only_the_reagents_held_ones_dont_cover(db):
             Action.CRAFT,
             6,
             profit=pytest.approx((949.05 - 94.05 - 100) + 5 * (949.05 - 200)),
+            post_at=999,
             cost=11 * 100,
             note="on Kash-Patel: uses 12 of 2589 (buy 11)",
             buys=(ReagentBuy(LINEN_KEY, 11, 100),),
@@ -2151,6 +2152,40 @@ def test_a_flip_to_crafts_output_is_never_resold_above_what_a_merchant_charges(d
     [craft] = result[MARKET].shopping_list
     assert (craft.action, craft.quantity) == (Action.CRAFT, 6)
     assert craft.profit == pytest.approx((475 - 94.05 - 100) + 5 * (475 - 200))
+
+
+def test_a_flip_to_craft_posts_its_output_where_it_sells(db):
+    # #61: the Bolts post at 999, under the 1000s.
+    result = run(db, linen_and_bolts_selling(), [character_read(money=GOLD, recipes=[recipe()])])
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.action, craft.quantity, craft.post_at) == (Action.CRAFT, 6, 999)
+
+
+def test_a_flip_to_craft_whose_output_all_vendors_has_no_post_price(db):
+    # #61: on 2 Sale Events a Bolt has no Sell room, but it Vendors for 500, over its 2
+    # Linen at 100: every Bolt goes to Vendor, so there's nothing to post.
+    result = run(
+        db,
+        linen_and_bolts_selling(sale_events=2),
+        [character_read(money=GOLD, vendor_prices={2996: 500}, recipes=[recipe()])],
+        config=replace(CONFIG, flip_min_sale_events=3),
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.action, craft.post_at) == (Action.CRAFT, None)
+
+
+def test_a_flip_to_craft_whose_sale_doesnt_beat_vendoring_has_no_post_price(db):
+    # #61: the Bolts would post at 999, 949.05 after the cut, but they Vendor for 960.
+    result = run(
+        db,
+        linen_and_bolts_selling(),
+        [character_read(money=GOLD, vendor_prices={2996: 960}, recipes=[recipe()])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.action, craft.post_at) == (Action.CRAFT, None)
 
 
 def test_a_flip_to_crafts_reagents_cost_what_walking_up_the_asks_costs(db):
@@ -2371,6 +2406,7 @@ def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
             Action.CRAFT,
             10,
             profit=pytest.approx(6 * (949.05 - 10) + 4 * (125 - 10)),
+            post_at=999,  # the 6 that Sell; the other 4 Vendor
             cost=100,
             note="on Kash-Patel: uses 10 of 2320 (buy 10)",
             character="Kash-Patel",

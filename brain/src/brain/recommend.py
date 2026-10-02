@@ -291,6 +291,7 @@ class Row:
     profit: float | None = None  # expected copper for the whole quantity
     # Per unit, a Flip to Sell's price to post at, which its Profit rests on, before the
     # cut (#59): just under the cheapest other player's Listing left once it's bought (#62).
+    # A Flip to Craft's is its output's, None when it all goes to Vendor (#61).
     post_at: float | None = None
     margin: float | None = None  # per unit, a Sell's proceeds over the Vendor Price
     sale_events: int | None = None  # the evidence behind the Sell Rate
@@ -3584,7 +3585,12 @@ def _option(
             selling = buy.selling + (r.made.selling if r.made else 0)
             made = CraftOutput(plan.crafts * plan.recipe.quantity_min, selling, buy.post_at)
             rows[recipe_id] = replace(
-                plan.row(), cost=r.cost + buy.gold, buys=_merged(r.buys, buy.buys), made=made
+                plan.row(),
+                cost=r.cost + buy.gold,
+                buys=_merged(r.buys, buy.buys),
+                # The outlet keeps a price even when no unit beats the Vendor Price.
+                post_at=made.post_at if made.selling else None,
+                made=made,
             )
             continue
         if isinstance(buy, _FlipToSell):
