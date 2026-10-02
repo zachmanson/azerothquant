@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from brain.cli import make_pool
 from brain.config import ConfigError, Era, load_config
 
 EXAMPLE_CONFIG = Path(__file__).parent.parent / "config.example.toml"
@@ -517,11 +518,20 @@ def test_the_scan_pool_settings_can_be_set(tmp_path):
     assert config.pool_completeness_window == 20
 
 
+def test_the_pool_admin_can_set_a_pool_url_before_they_have_a_key(tmp_path):
+    # #128: `brain pool key add` makes the admin's own key, so it can't need one first.
+    settings = "pool_url = 'https://pool.example.workers.dev'\npool_admin_secret = 's3cret'\n"
+    config = load_config(write_config(tmp_path, settings + INSTALL))
+
+    assert config.pool_url == "https://pool.example.workers.dev"
+    assert config.pool_key is None
+    assert make_pool(config) is None  # nothing syncs until the key is set too
+
+
 @pytest.mark.parametrize(
     "setting",
     [
-        "pool_url = 'https://pool.example.workers.dev'",  # a key too, or neither
-        "pool_key = 'k123'",
+        "pool_key = 'k123'",  # a key with no pool to send it to
         "pool_url = 5\npool_key = 'k'",
         "pool_url = 'ftp://pool'\npool_key = 'k'",
         "pool_url = 'https://pool'\npool_key = ''",

@@ -12,9 +12,11 @@ from brain.history import (
     Market,
     import_pooled_scans,
     import_scans,
+    item_info,
     listings,
     open_history,
     scan_times,
+    vendor_prices,
 )
 from brain.pool import strip_scan
 
@@ -192,3 +194,23 @@ def test_an_own_scan_replaces_a_pooled_scan_from_the_same_second(db, config, tmp
         assert history(db) == history(rebuilt)
     finally:
         rebuilt.close()
+
+
+def test_vendor_prices_and_item_info_come_only_from_own_scans(db, config):
+    # #129: a Pooled Scan's are never recorded, so rolling one back has none to undo.
+    linen_info = {"itemLevel": 5, "quality": 1, "classID": 7, "equipLoc": ""}
+    own = {
+        **scan(T0, row(own=True)),
+        "vendorPrices": {"2589": 13},
+        "itemInfo": {"2589": linen_info},
+    }
+    theirs = {
+        **pooled(T0 + MINUTE, row()),
+        "vendorPrices": {"2589": 99, "2592": 7},
+        "itemInfo": {"2589": {**linen_info, "quality": 4}, "2592": linen_info},
+    }
+    import_scans(db, [own], Era.BETA, config)
+    import_pooled_scans(db, [("p1", theirs)], Era.BETA, config)
+
+    assert vendor_prices(db, Era.BETA) == {2589: 13}
+    assert {i: info.quality for i, info in item_info(db, Era.BETA).items()} == {2589: 1}

@@ -120,7 +120,7 @@ Sale Events of a typical size that the Decision Engine adds to an Item Key's rea
 _Avoid_: stack-size cap, median sale
 
 **Vendor Price**:
-The fixed gold an NPC merchant pays for one unit of an item. It belongs to the itemID, so every random suffix of an item has the same one, and it is read from the game rather than taken from Classic, since Forever changed some.
+The fixed gold an NPC merchant pays for one unit of an item. It belongs to the itemID, so every random suffix of an item has the same one, and it is read from the game rather than taken from Classic, since Forever changed some. Only the player's own Scans and Character Reads supply it, never a Pooled Scan (#129).
 _Avoid_: sell price, vendor value
 
 **Merchant Cost**:

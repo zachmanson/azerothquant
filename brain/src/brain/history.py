@@ -600,9 +600,12 @@ def _import(
                     ),
                 )
             _import_scan(conn, scan, entry, era, config, archive, report)
-            source = f"Scan at {scan.requested_at}"
-            _record_vendor_prices(conn, era, entry.raw, scan.requested_at, source, report)
-            _record_item_info(conn, era, entry.raw, scan.requested_at, source, report)
+            # Only from own Scans: a rolled-back Pooled Scan's would outlive it (#129), and
+            # own Scans see every item on the player's Market anyway.
+            if entry.source is ScanSource.OWN:
+                source = f"Scan at {scan.requested_at}"
+                _record_vendor_prices(conn, era, entry.raw, scan.requested_at, source, report)
+                _record_item_info(conn, era, entry.raw, scan.requested_at, source, report)
     return report
 
 

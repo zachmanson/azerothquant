@@ -154,8 +154,8 @@ class Config:
     # Market's last pool_completeness_window Scans is archived but not imported.
     pool_min_completeness: float = DEFAULT_POOL_MIN_COMPLETENESS
     pool_completeness_window: int = DEFAULT_POOL_COMPLETENESS_WINDOW
-    # The Scan Pool's Worker and this player's member key. Both unset means the pool is
-    # off and nothing leaves the PC.
+    # The Scan Pool's Worker and this player's member key. Unless both are set, the pool
+    # is off and nothing leaves the PC.
     pool_url: str | None = None
     pool_key: str | None = None
     # The Worker's ADMIN_SECRET, for `brain pool key add/revoke`. Only the pool admin has it.
@@ -595,15 +595,18 @@ def _parse_whole(config_path: Path, value: object, key: str, least: int) -> int:
 
 
 def _parse_pool_access(config_path: Path, raw: dict) -> tuple[str | None, str | None]:
-    """pool_url and pool_key: both set, or neither (the pool is off). Pushing and pulling
-    come as one, so a member always gives as well as takes."""
+    """pool_url and pool_key. Pushing and pulling come as one and need both set, so a
+    member always gives as well as takes. pool_url alone is how the pool admin starts:
+    `brain pool key add` needs it to make their own key (#128)."""
     url, key = raw.get("pool_url"), raw.get("pool_key")
     if url is None and key is None:
         return None, None
-    if url is None or key is None:
-        raise ConfigError(f"{config_path}: pool_url and pool_key must be set together")
+    if url is None:
+        raise ConfigError(f"{config_path}: pool_key is set but pool_url isn't")
     if not isinstance(url, str) or not url.startswith(("https://", "http://")):
         raise ConfigError(f"{config_path}: pool_url must be an http(s) URL, got {url!r}")
+    if key is None:
+        return url, None
     if not isinstance(key, str) or not key:
         raise ConfigError(f"{config_path}: pool_key must be the key the pool admin gave you")
     return url, key

@@ -1084,7 +1084,7 @@ def _pool_key(config: Config, action: str, name: str) -> int:
 
 
 def make_pool(config: Config) -> Pool | None:
-    """The Scan Pool, or None when it's off (pool_url and pool_key unset)."""
+    """The Scan Pool, or None when it's off (pool_url or pool_key unset)."""
     if config.pool_url is None or config.pool_key is None:
         return None
     return HttpPool(config.pool_url, config.pool_key)
