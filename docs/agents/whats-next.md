@@ -1,3 +1,9 @@
+2026-10-02 (later 64): #61 done (8b936ca). A Flip to Craft row's `post_at` is its output's post price, None when no unit beats vendoring (gated on `made.selling`: `_outlet` keeps a `post_at` when held units take all the room, the output is bound, or the sale nets under the Vendor Price). The Flips to Craft tab's Post at cell needed no Addon change. Restart `brain watch` so it writes the new field, then /reload.
+
+Next, in order: PC items as in later 62 item 2, then #128 and #129 (needs-triage, small), then #14, #19, #10, #82, #125, #126, #127 (needs-triage).
+
+- Gotchas: same as later 62. `CraftOutput.post_at` (the replay's) still carries a price when `selling` is 0; the replay ignores it there, so it's harmless.
+
 2026-09-30 (later 63): Started `brain watch` (scripts/brain-watch.bat, own console window titled "brain watch"). It syncs the pool, so A's 46 un-pushed Scans drain one per 10 min (about 8 h). Restart it after a reboot.
 
 Next, in order: same as later 62 from item 2 on (PC items, then #61, #128, #129, the needs-triage list, date items).
