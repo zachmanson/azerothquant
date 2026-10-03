@@ -926,7 +926,11 @@ def _numbers(w: WhyNot, check: Check) -> str:
     """The numbers behind one Check of `w`."""
     match check:
         case Check.SALE_EVENTS:
-            return f"{w.sale_events}/{w.min_sale_events} Sale Events"
+            counted = f"{w.sale_events}/{w.min_sale_events} Sale Events"
+            if w.cheap_since is None:
+                return counted
+            since = datetime.fromtimestamp(w.cheap_since).strftime("%Y-%m-%d %H:%M")
+            return f"{counted} since cheaper Listings went up {since}"
         case Check.ROOM:
             at = "" if w.post_at is None else f" at {_money(w.post_at)}"
             return f"room for {w.room}{at}, needs {w.held} held + {w.needs}"

@@ -67,7 +67,7 @@ def beta_prior(
         sale_events = rate.sale_events if rate else 0
         units_per_day = rate.units_per_day if rate else None
         if rate is not None and sale_events >= MIN_SALE_EVENTS:
-            price, sold = median(p for p, _ in rate.sale_prices), True
+            price, sold = median(p for p, _, _ in rate.sale_prices), True
         elif daily.get(item_key):
             price, sold = median(daily[item_key]), False
         else:

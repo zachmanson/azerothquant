@@ -150,6 +150,7 @@ class SellRateEvidence:
     # Disappearances left as sales only because every new Listing like them was priced
     # higher (ADR-0004).
     coincidences: list[Disappearance] = field(default_factory=list)
+    windows: list[ObservationWindow] = field(default_factory=list)  # behind window_hours
 
     def event_counts(self) -> dict[str, int]:
         """How many sale events each Item Key has, so thin evidence can be discounted."""
@@ -222,6 +223,7 @@ def sell_rate_evidence(
         sale_events=_sale_events(sales),
         reposts=pairing.reposts,
         coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],
+        windows=windows,
     )
 
 

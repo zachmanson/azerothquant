@@ -1075,6 +1075,93 @@ def test_holdings_are_ranked_by_expected_profit_with_unknowns_last(db):
     ]
 
 
+# --- Demand since the cheapest Listings showed up (#132, ADR-0028) ---
+
+CHEAP_AT = T0 + 10 * HOUR  # the Scan the cheap 100 is first seen in
+
+
+def crashed(hours_since, sold_since=()):
+    """Hourly Scans: the 1000s sell 2 an hour for 10 h, one Sale Event each, then a 100
+    shows up and stays, and for `hours_since` more hours only 1 of the 1000s sells at
+    each of the `sold_since` hours after CHEAP_AT."""
+    scans = [scan(T0 + n * HOUR, row(quantity=40 - 2 * n, unit=1000)) for n in range(10)]
+    left = 20
+    for n in range(hours_since + 1):
+        left -= n in sold_since
+        scans.append(scan(CHEAP_AT + n * HOUR, row(quantity=left, unit=1000), row(unit=100)))
+    return scans
+
+
+FLIPS_NEED_3 = replace(CONFIG, flip_min_sale_events=3)
+
+
+def test_a_flip_to_sell_no_longer_counts_sales_from_before_its_cheap_run_showed_up(db):
+    # 10 Sale Events in the 10 h before the 100 showed up expect 24 in the 24 h since, and
+    # none came: nobody pays 999 with the 100 up. So nothing is bought to post at 999.
+    result = run(db, crashed(hours_since=24), [character_read(money=GOLD)], config=FLIPS_NEED_3)
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_on_a_listing_first_seen_in_the_latest_scan_still_counts_the_sales_before_it(db):
+    result = run(db, crashed(hours_since=0), [character_read(money=GOLD)], config=FLIPS_NEED_3)
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.price, flip.post_at, flip.sale_events) == (
+        Action.SELL,
+        1,
+        100,
+        999,
+        10,
+    )
+
+
+def test_a_flip_whose_post_price_kept_selling_since_its_cheap_run_showed_up_stands(db):
+    # Buyers took a 1000 at 3 of the 24 hours since, past the 100: enough on their own,
+    # and 3 sell in a day's Sale Horizon.
+    result = run(
+        db,
+        crashed(hours_since=24, sold_since=(5, 12, 20)),
+        [character_read(money=GOLD)],
+        config=replace(FLIPS_NEED_3, sale_horizon_seconds=DAY),
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at, flip.sale_events) == (1, 999, 3)
+
+
+def test_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(db):
+    _, why = why_not(db, crashed(hours_since=24), [character_read(money=GOLD)], FLIPS_NEED_3)
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.sale_events, linen.cheap_since) == (
+        Check.SALE_EVENTS,
+        0,
+        CHEAP_AT,
+    )
+
+
+def test_why_not_a_flip_left_whole_has_no_cheap_since(db):
+    _, why = why_not(db, crashed(hours_since=0), [character_read(money=GOLD)], FLIPS_NEED_3)
+
+    assert why[LINEN_KEY].cheap_since is None
+
+
+def test_a_prediction_buys_max_loss_counts_only_the_sales_since_its_cheap_run(db):
+    # Without the Prediction, the 100 would resell at 999 on the 10 Sale Events before it
+    # showed up, losing nothing. Nothing has sold that high since, and there's no Vendor
+    # Price, so its Max Loss is the whole 100.
+    result = run(
+        db,
+        crashed(hours_since=24),
+        [character_read(money=GOLD)],
+        config=FLIPS_NEED_3,
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].prediction_buys == []
+
+
 # --- Days to Sell (#109, ADR-0020) ---
 
 

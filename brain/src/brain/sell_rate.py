@@ -27,28 +27,55 @@ class SellRate:
     # of one to shrink their average size toward.
     sale_units: float = 0
     typical_sale_size: float = 1.0
-    # Each Sale Event's (dearest unit buyout, units), so a buy to Sell can count only the
-    # demand at the price it would post at (#107).
-    sale_prices: tuple[tuple[int, int], ...] = ()
+    # Each Sale Event's (dearest unit buyout, units, seen at), so a buy to Sell can count
+    # only the demand at the price it would post at (#107), and since when (#132).
+    sale_prices: tuple[tuple[int, int, int], ...] = ()
+    # The Observation Windows behind `window_hours`, as (start, end), to cut them at (#132).
+    windows: tuple[tuple[int, int], ...] = ()
 
     @property
     def max_sale_price(self) -> int | None:
         """The dearest unit buyout among the Sale Events, so held units are never counted
         on selling above what's been seen to sell (#41). None without any."""
-        return max((price for price, _ in self.sale_prices), default=None)
+        return max((price for price, _, _ in self.sale_prices), default=None)
 
     def at_or_above(self, price: float) -> "SellRate":
         """This Sell Rate from only the Sale Events priced at or above `price` (#107): the
         demand a unit posted at `price` can count on. The window hours and the typical
         sale size stay the Market's and the Item Key's."""
-        kept = tuple((p, units) for p, units in self.sale_prices if p >= price)
-        units = sum(n for _, n in kept)
+        kept = tuple(sale for sale in self.sale_prices if sale[0] >= price)
+        units = sum(n for _, n, _ in kept)
         return replace(
             self,
             units_per_day=units / self.window_hours * 24,
             sale_events=len(kept),
             sale_units=units,
             sale_prices=kept,
+        )
+
+    def since_cheap(self, cutoff: int | None, least: float) -> "SellRate":
+        """This Sell Rate from only the Sale Events and Observation Window hours after
+        `cutoff`, the Scan cheaper Listings than a buy to Sell would post at were first
+        seen in (#132, ADR-0028). Only once the Sale Events per hour before it, raw, would
+        have expected at least `least` of them in the hours since: until then there's too
+        little watching since to tell a crash from a quiet spell, and it's left whole."""
+        if cutoff is None:
+            return self
+        before = sum(1 for _, _, at in self.sale_prices if at <= cutoff)
+        hours_before = sum(end - start for start, end in self.windows if end <= cutoff) / 3600
+        hours_after = self.window_hours - hours_before
+        if not before or before / hours_before * hours_after < least:
+            return self
+        kept = tuple(sale for sale in self.sale_prices if sale[2] > cutoff)
+        units = sum(n for _, n, _ in kept)
+        return replace(
+            self,
+            units_per_day=units / hours_after * 24,
+            sale_events=len(kept),
+            window_hours=hours_after,
+            sale_units=units,
+            sale_prices=kept,
+            windows=tuple(w for w in self.windows if w[1] > cutoff),
         )
 
 
@@ -81,10 +108,11 @@ def sell_rates(
     market_sizes = [e.units for e in evidence.sale_events if e.item_key in stacking]
     market_size = median(market_sizes) if market_sizes else None
     units: Counter[str] = Counter()
-    prices: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    prices: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
     for event in evidence.sale_events:
         units[event.item_key] += event.units
-        prices[event.item_key].append((event.unit_buyout, event.units))
+        prices[event.item_key].append((event.unit_buyout, event.units, event.seen_at))
+    windows = tuple((w.start, w.end) for w in evidence.windows)
     events = evidence.event_counts()
     reposts = evidence.repost_counts()
     coincidences = evidence.coincidence_counts()
@@ -98,6 +126,7 @@ def sell_rates(
             sale_units=units[item_key],
             typical_sale_size=_typical_sale_size(market_size, quantities.get(item_key, [])),
             sale_prices=tuple(prices.get(item_key, ())),
+            windows=windows,
         )
         for item_key in {listing.item_key for listing in seen}
     }

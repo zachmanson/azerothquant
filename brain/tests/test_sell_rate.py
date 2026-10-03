@@ -116,10 +116,17 @@ def test_each_sell_rate_carries_its_evidence(db):
         reposts=0,
         coincidences=1,
         sale_units=6,
-        sale_prices=((100, 6),),
+        # #132: each Sale Event's time, and the Observation Windows, to cut them at.
+        sale_prices=((100, 6, T0 + 30 * MINUTE),),
+        windows=((T0, T0 + 30 * MINUTE),),
     )
     assert rates[SILK_KEY] == SellRate(
-        units_per_day=0, sale_events=0, window_hours=0.5, reposts=1, coincidences=0
+        units_per_day=0,
+        sale_events=0,
+        window_hours=0.5,
+        reposts=1,
+        coincidences=0,
+        windows=((T0, T0 + 30 * MINUTE),),
     )
 
 
@@ -148,7 +155,7 @@ def test_the_sell_rate_at_a_price_counts_only_the_sale_events_at_or_above_it():
         coincidences=0,
         sale_units=6,
         typical_sale_size=2,
-        sale_prices=((99, 1), (100, 2), (150, 3)),
+        sale_prices=((99, 1, T0), (100, 2, T0), (150, 3, T0)),
     )
 
     assert rate.at_or_above(100) == SellRate(
@@ -159,9 +166,96 @@ def test_the_sell_rate_at_a_price_counts_only_the_sale_events_at_or_above_it():
         coincidences=0,
         sale_units=5,
         typical_sale_size=2,
-        sale_prices=((100, 2), (150, 3)),
+        sale_prices=((100, 2, T0), (150, 3, T0)),
     )
     assert rate.at_or_above(151).sale_events == 0
+
+
+# --- Cut at the Scan the cheapest Listings showed up in (#132) ---
+
+CUTOFF = T0 + 10 * HOUR
+
+
+def hourly(before_events, after_hours, after_events=()):
+    """A Sell Rate over 10 hourly windows up to CUTOFF and `after_hours` more after it:
+    `before_events` Sale Events of 2 units at 100 before it, and one at each of the
+    `after_events` times."""
+    windows = tuple((T0 + h * HOUR, T0 + (h + 1) * HOUR) for h in range(10 + after_hours))
+    sales = tuple((100, 2, T0 + (h + 1) * HOUR) for h in range(before_events))
+    sales += tuple((100, 2, at) for at in after_events)
+    hours = 10 + after_hours
+    return SellRate(
+        units_per_day=2 * len(sales) / hours * 24,
+        sale_events=len(sales),
+        window_hours=hours,
+        reposts=0,
+        coincidences=0,
+        sale_units=2 * len(sales),
+        sale_prices=sales,
+        windows=windows,
+    )
+
+
+@pytest.mark.parametrize(
+    "after_hours",
+    [
+        2,  # 6 events in 10 h expects 1.2 in the 2 h since
+        4,  # 2.4 Sale Events: their 4.8 units don't count, Sale Events do
+    ],
+)
+def test_too_few_hours_since_the_cutoff_to_judge_leave_the_sell_rate_whole(after_hours):
+    rate = hourly(before_events=6, after_hours=after_hours)
+
+    assert rate.since_cheap(CUTOFF, least=3) == rate
+
+
+def test_a_cutoff_that_expected_enough_sales_drops_the_events_and_hours_before_it():
+    # 6 events in 10 h expects 3 in the 5 h since: they're cut, leaving the one after.
+    rate = hourly(before_events=6, after_hours=5, after_events=(CUTOFF + 2 * HOUR,))
+
+    assert rate.since_cheap(CUTOFF, least=3) == replace(
+        rate,
+        units_per_day=2 / 5 * 24,
+        sale_events=1,
+        window_hours=5,
+        sale_units=2,
+        sale_prices=((100, 2, CUTOFF + 2 * HOUR),),
+        windows=tuple((CUTOFF + h * HOUR, CUTOFF + (h + 1) * HOUR) for h in range(5)),
+    )
+
+
+def test_a_cut_with_nothing_sold_since_sells_zero_a_day():
+    rate = hourly(before_events=10, after_hours=24)
+
+    cut = rate.since_cheap(CUTOFF, least=3)
+
+    assert (cut.units_per_day, cut.sale_events, cut.window_hours) == (0, 0, 24)
+
+
+@pytest.mark.parametrize(("days_since", "cut"), [(1, False), (8, True)])
+def test_a_thin_item_key_takes_days_since_the_cutoff_to_judge(days_since, cut):
+    # 6 Sale Events in the 13 days before expect 0.46 in 1 day since, 3.7 in 8.
+    hours_before = 13 * 24
+    cutoff = T0 + hours_before * HOUR
+    hours = hours_before + days_since * 24
+    rate = SellRate(
+        units_per_day=6 / hours * 24,
+        sale_events=6,
+        window_hours=hours,
+        reposts=0,
+        coincidences=0,
+        sale_units=6,
+        sale_prices=tuple((100, 1, T0 + d * DAY) for d in range(1, 7)),
+        windows=tuple((T0 + h * HOUR, T0 + (h + 1) * HOUR) for h in range(hours)),
+    )
+
+    assert (rate.since_cheap(cutoff, least=3).sale_events == 0) == cut
+
+
+def test_no_cutoff_leaves_the_sell_rate_whole():
+    rate = hourly(before_events=10, after_hours=24)
+
+    assert rate.since_cheap(None, least=3) == rate
 
 
 @pytest.mark.parametrize(("ended_ago", "counted"), [(14 * DAY - 1, True), (14 * DAY, False)])
@@ -187,7 +281,12 @@ def test_a_setting_for_the_range_changes_which_windows_count(db):
     rates = sell_rates(db, MARKET, config, now=T0 + 2 * DAY + 30 * MINUTE)
 
     assert rates[LINEN_KEY] == SellRate(
-        units_per_day=0, sale_events=0, window_hours=0.5, reposts=0, coincidences=0
+        units_per_day=0,
+        sale_events=0,
+        window_hours=0.5,
+        reposts=0,
+        coincidences=0,
+        windows=((T0 + 2 * DAY, T0 + 2 * DAY + 30 * MINUTE),),
     )
 
 

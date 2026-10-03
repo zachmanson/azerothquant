@@ -225,6 +225,9 @@ class WhyNot:
     rank: int | None
     rows: int
     name: str | None = None  # only if the player has listed, bought or sold it
+    # The Scan the cheaper Listings were first seen in, when `sale_events` counts only the
+    # ones since (#132, ADR-0028). None if they all count.
+    cheap_since: int | None = None
 
 
 class BlockReason(StrEnum):
@@ -362,6 +365,23 @@ class _VendorBuy:
     @property
     def per_gold(self) -> float:
         return self.unit_profit / self.unit_buyout
+
+
+@dataclass(frozen=True)
+class _Cheap:
+    """Other players' Listings of an Item Key in the Scan, as (unit buyout, first seen),
+    for a buy to Sell that takes the cheapest and posts above them (#132, ADR-0028): the
+    demand at its post price counts only since they showed up, once the Sale Events per
+    hour before it would have expected `least` of them since."""
+
+    listed: tuple[tuple[int, int], ...]
+    least: int
+
+    def since(self, post_at: float) -> int | None:
+        """The Scan the earliest Listing under `post_at` was first seen in: the run a
+        buy posting there takes. None without one, as for a Sell posted under the
+        cheapest."""
+        return min((first for unit, first in self.listed if unit < post_at), default=None)
 
 
 @dataclass(frozen=True)
@@ -662,6 +682,7 @@ def recommend_market(
             cut,
             config,
             beta.get(item_key),
+            valuer.cheap(item_key),
         )
     ]
 
@@ -828,9 +849,13 @@ def _why_not(
         else:
             bought, needs, post_at = valuer.after({item_key: run.units}), run.quantity, run.post_at
         rate = valuer.rates.get(item_key)
-        demand = _demand_at(rate, post_at)
+        cheap = valuer.cheap(item_key)
+        demand = _demand_at(rate, post_at, cheap=cheap)
         sale_events = demand.sale_events if demand else 0
-        room = _room_at(rate, post_at, 0, config, config.days_to_sell_or_horizon_seconds)
+        cut = demand is not None and demand != rate.at_or_above(post_at)
+        room = _room_at(
+            rate, post_at, 0, config, config.days_to_sell_or_horizon_seconds, cheap=cheap
+        )
         held = valuer.held.get(item_key, 0)
         out = _way_out(item_key, bought, config)
         clear_at = (
@@ -864,6 +889,7 @@ def _why_not(
                 rank=rank.get(item_key),
                 rows=rows,
                 name=names.get(item_key),
+                cheap_since=cheap.since(post_at) if cut else None,
             )
         )
     return result
@@ -1576,8 +1602,19 @@ def _valuer(
             enchanting_skills(conn, market, skills_as_of),
         ),
         pricer=pricer,
+        listed=_others_first_seen(seen, at) if scanned else {},
     )
     return valuer.flips(under, unbound)
+
+
+def _others_first_seen(seen: Sequence[Listing], at: int) -> dict[str, tuple[tuple[int, int], ...]]:
+    """Other players' Listings in the Scan requested at `at`, as (unit buyout, the Scan
+    it was first seen in) per Item Key (#132)."""
+    listed: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for x in seen:
+        if not x.own and x.first_seen <= at <= x.last_seen:
+            listed[x.item_key].append((x.unit_buyout, x.first_seen))
+    return {item_key: tuple(sorted(units)) for item_key, units in listed.items()}
 
 
 def _by_item(rates: Mapping[str, SellRate]) -> dict[int, tuple[str, ...]]:
@@ -1656,8 +1693,10 @@ class _Valuer:
         disenchanting: _Disenchanting | None = None,
         pricer: Pricer | None = None,
         by_item: Mapping[int, tuple[str, ...]] | None = None,
+        listed: Mapping[str, tuple[tuple[int, int], ...]] = MappingProxyType({}),
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
+        self.listed = listed
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
@@ -1684,7 +1723,13 @@ class _Valuer:
             self.disenchanting,
             self._pricer,
             self._by_item,
+            self.listed,
         )
+
+    def cheap(self, item_key: str) -> _Cheap:
+        """Other players' Listings of an Item Key in the Scan with the Scan each was first
+        seen in, for a buy that takes the cheapest of them to Sell (#132)."""
+        return _Cheap(self.listed.get(item_key, ()), self._config.flip_min_sale_events)
 
     def deposit(self, item_key: str) -> float:
         """What posting one unit of an Item Key costs (#78): as on its latest Sold invoice,
@@ -1784,6 +1829,7 @@ class _Valuer:
             self.cut,
             self._config,
             pricer,
+            self.cheap(item_key),
         )
 
     def stack(self, item_key: str) -> float:
@@ -3230,6 +3276,7 @@ def _flips(
     cut: float,
     config: Config,
     pricer: Callable[[int | None], float | None] | None = None,
+    cheap: _Cheap | None = None,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
@@ -3251,7 +3298,8 @@ def _flips(
     Sell Rate at its post price.
 
     A `pricer` (`_Valuer.priced`) sets the post price instead, with no room limit and no
-    minimum of Sale Events (#84).
+    minimum of Sale Events (#84). With the `cheap` Listings, a run counts the demand at its
+    post price only since the ones it buys showed up (#132).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -3270,7 +3318,7 @@ def _flips(
                 _undercut(after[i + 1], own, config, merchant_cost),
                 _undercut(unit, own, config, merchant_cost),
                 lambda price: _room_at(
-                    rate, price, held, config, config.days_to_sell_or_horizon_seconds
+                    rate, price, held, config, config.days_to_sell_or_horizon_seconds, cheap=cheap
                 ),
             )
         else:
@@ -3279,7 +3327,7 @@ def _flips(
             break
         prefix = [*prefix, (unit, take)]
         bought += take
-        demand = _demand_at(rate, post_at)
+        demand = _demand_at(rate, post_at, cheap=cheap)
         at_price = _flip_queue(queue, demand, config)
         resale = post_at * (1 - cut)
         # Offers are cheapest first and the last unit waits longest, so if the dearest unit
@@ -3323,6 +3371,7 @@ def _hold_buys(
     cut: float,
     config: Config,
     beta: BetaSellRate | None = None,
+    cheap: _Cheap | None = None,
 ) -> list[_HoldBuy]:
     """What's worth buying of an Item Key to Hold under a Prediction, from other players'
     (unit buyout, quantity) offers, cheapest first: the units whose Max Loss is small
@@ -3336,7 +3385,9 @@ def _hold_buys(
     waiting its turn in the `queue` at that rate (#78). The rest can only be Vendored, or
     are worth nothing without a Vendor Price. Nothing is bought at or above the Merchant
     Cost after the `cut`, since no Sell fetches more than that (#91). Early in Live, the
-    demand at the post price also counts the `beta` Sell Rate (#110, ADR-0024).
+    demand at the post price also counts the `beta` Sell Rate (#110, ADR-0024). With the
+    `cheap` Listings, it counts only since the ones bought so far showed up, as a Flip's
+    does (#132).
     """
     bought: Supply = []
     buys = []
@@ -3354,12 +3405,12 @@ def _hold_buys(
                 _post_at(supply, offers, [*bought, (unit, quantity)], config, merchant_cost),
                 _post_at(supply, offers, [*bought, (unit, quantity - 1)], config, merchant_cost),
                 lambda price: _room_at(
-                    rate, price, held, config, config.sale_horizon_seconds, beta
+                    rate, price, held, config, config.sale_horizon_seconds, beta, cheap
                 ),
             )
         resale = post_at * (1 - cut) if take else 0
-        beta_room = _beta_room(rate, beta, post_at, held, config) if take else None
-        at_price = _flip_queue(queue, _demand_at(rate, post_at, beta), config)
+        beta_room = _beta_room(rate, beta, post_at, held, config, cheap) if take else None
+        at_price = _flip_queue(queue, _demand_at(rate, post_at, beta, cheap), config)
         exits = [
             max(resale - at_price.lost(queued + i), vendor_price or 0) for i in range(take)
         ] + [vendor_price or 0] * (quantity - take)
@@ -3380,14 +3431,16 @@ def _beta_room(
     post_at: float | None,
     held: int,
     config: Config,
+    cheap: _Cheap | None = None,
 ) -> BetaRoom | None:
     """The room at `post_at` a Prediction buy counts on, and how much of it the `beta`
-    Sell Rate makes (#110); None without one."""
+    Sell Rate makes (#110); None without one. `cheap` as in `_demand_at`."""
     if beta is None or post_at is None:
         return None
     horizon = config.sale_horizon_seconds
-    room = _room_at(rate, post_at, held, config, horizon, beta)
-    return BetaRoom(post_at, room, room - _room_at(rate, post_at, held, config, horizon))
+    room = _room_at(rate, post_at, held, config, horizon, beta, cheap)
+    without = _room_at(rate, post_at, held, config, horizon, cheap=cheap)
+    return BetaRoom(post_at, room, room - without)
 
 
 def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[Row]:
@@ -3436,14 +3489,20 @@ def _sell_take(
 
 
 def _demand_at(
-    rate: SellRate | None, post_at: float | None, beta: BetaSellRate | None = None
+    rate: SellRate | None,
+    post_at: float | None,
+    beta: BetaSellRate | None = None,
+    cheap: _Cheap | None = None,
 ) -> SellRate | None:
     """The Sell Rate a unit bought to Sell counts on when posted at `post_at` (#107): only
-    the Sale Events at or above it, pooled with a Prediction buy's `beta` Sell Rate
+    the Sale Events at or above it, and for a buy that takes the `cheap` Listings under
+    it, only since they showed up (#132), pooled with a Prediction buy's `beta` Sell Rate
     (#110). None without a Sell Rate or a price."""
     if post_at is None:
         return None
     demand = None if rate is None else rate.at_or_above(post_at)
+    if demand is not None and cheap is not None:
+        demand = demand.since_cheap(cheap.since(post_at), cheap.least)
     return demand if beta is None else beta.pooled(demand, post_at)
 
 
@@ -3454,10 +3513,12 @@ def _room_at(
     config: Config,
     horizon_seconds: int,
     beta: BetaSellRate | None = None,
+    cheap: _Cheap | None = None,
 ) -> int:
     """Units bought at `post_at` that should sell within `horizon_seconds` after the
     `held` ones, from the demand at that price (`_demand_at`, `_flip_room`)."""
-    return max(0, _flip_room(_demand_at(rate, post_at, beta), config, horizon_seconds) - held)
+    demand = _demand_at(rate, post_at, beta, cheap)
+    return max(0, _flip_room(demand, config, horizon_seconds) - held)
 
 
 def _flip_queue(queue: _Queue, demand: SellRate | None, config: Config) -> _Queue:

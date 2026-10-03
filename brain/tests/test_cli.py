@@ -1481,6 +1481,55 @@ def test_recommend_why_not_an_item_key_shows_every_check(tmp_path):
     ]
 
 
+def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(tmp_path):
+    # #132: Linen sold 2 an hour at 10s for 10 h, then a 1s showed up and nothing sold for
+    # the 24 h since, so only the Sale Events since it count at 9s 99c.
+    config = dataclasses.replace(
+        config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
+        flip_min_sale_events=3,
+    )
+    t0, hour, cheap_at = 1_790_000_000, 3600, 1_790_000_000 + 10 * 3600
+
+    def scan(at, *rows):
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": [
+                {
+                    "itemString": "item:2589::::::::20:1490",
+                    "quantity": q,
+                    "buyout": q * u,
+                    "timeLeft": 4,
+                }
+                for q, u in rows
+            ],
+        }
+
+    scans = [scan(t0 + n * hour, (40 - 2 * n, 1000)) for n in range(10)]
+    scans += [scan(cheap_at + n * hour, (20, 1000), (1, 100)) for n in range(25)]
+    read = {
+        "readAt": t0,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 123456,
+        "bags": [],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        import_scans(conn, scans, Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+
+    text = run_recommend(config, why_not="2589")
+
+    since = datetime.fromtimestamp(cheap_at).strftime("%Y-%m-%d %H:%M")
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert ["Sale Events", "fail", f"0/3 Sale Events since cheaper Listings went up {since}"] in (
+        lines
+    )
+
+
 def test_recommend_why_not_an_item_key_on_the_shopping_list_shows_its_row(tmp_path):
     # The two 7s 00c Linen are a Flip to Sell (above).
     text = run_recommend(_three_linen_held(tmp_path), why_not="2589")
