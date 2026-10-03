@@ -1,3 +1,9 @@
+2026-10-03 (later 71): Filed #132 (needs-triage): Flips to Sell count Sale Events from before a price drop as demand at the post price, so after a crash the Brain suggests buying the whole cheap wall and reposting at the old price (4807 LME at 47c, post 3.21s, "1.1 days"). Since the cheap Listings showed up, 0 units sold at the post price for 10938, 279965 or 248706. Proposed rule: only Sale Events after the cheap Listings the Flip buys first showed up count. Evidence and open questions are on the issue.
+
+Next, in order: grill #132 (it makes the current Shopping List misleading), then PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent, /tdd).
+
+- Gotchas: same as later 70.
+
 2026-10-03 (later 70): #114 done (ce082e7, CI green, issue closed). Flips to Craft are graded: `Lot.lineage` records the Lots a craft used up, and `lots_with_crafts` also returns the uncosted crafts. `craft_flips` in flips.py matches reagent Purchases to the frozen `[shown_crafts]` rows and grades through lineage. Grades are frozen in `[craft_flips]`, keyed `<recipe>@<Scan>`, and `FlipGrade` gained `crafted_after`. Not-gradable reasons are "uncosted reagents" and "not crafted by the horizon". `brain flips` has its own section for them, and `brain recommend` has a separate record line. ADR-0027.
 
 Next, in order: PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent: per-stage timings in brain watch, /tdd).
