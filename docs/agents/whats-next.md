@@ -1,3 +1,9 @@
+2026-10-03 (later 69): #114 grilled, now ready-for-agent (brief on the issue). Flips to Craft are anchored on reagent Purchases matched to the last Scan's Flip to Craft row, and traced through craft Lot lineage (new in lots.py) to the output Lots of that row's recipe. Uncosted-reagent crafts are skipped and counted (#130 is the later fix). Rows are frozen in a new grades.toml section, and the backfill reworks only Scans with a named Purchase that matched no Flip to Sell row. Triage: #112 narrowed to consumables, needs-info (For Use count). #113 needs-info. #115 needs-info (the stale-Brain hint already exists, #104). #116 needs-info, with step 1 split out as #131 (ready-for-agent: per-stage timings in brain watch).
+
+Next, in order: PC items as in later 62 item 2, then date items. Off the PC: #114 (/tdd, big: lots.py lineage first, then freezing, then grading/reporting; split into slices if it runs long), then #131.
+
+- Gotchas: same as later 68. `addon/AzerothQuant/Recommendations.lua` shows as modified in git: that's the Brain's generated output, so don't commit it.
+
 2026-10-03 (later 68): #127 done (6656323, CI green, issue closed). The Brain sends `X-Scan-Realm` and `X-Scan-Faction` as percent-encoded UTF-8 (`urllib.parse.quote(safe="")`), and the Worker decodes them with `decodeURIComponent` before validating them. A malformed escape is a 400. The Worker is redeployed (version fd7388ef). Test helper: `upload` encodes like the Brain, and `uploadRaw` sends headers as given.
 
 Next, in order: PC items as in later 62 item 2, then date items. Off the PC: grill #114 (needs-info, Grade Flips to Craft), then triage #112, #113, #115, #116.
