@@ -1,3 +1,9 @@
+2026-10-03 (later 68): #127 done (6656323, CI green, issue closed). The Brain sends `X-Scan-Realm` and `X-Scan-Faction` as percent-encoded UTF-8 (`urllib.parse.quote(safe="")`), and the Worker decodes them with `decodeURIComponent` before validating them. A malformed escape is a 400. The Worker is redeployed (version fd7388ef). Test helper: `upload` encodes like the Brain, and `uploadRaw` sends headers as given.
+
+Next, in order: PC items as in later 62 item 2, then date items. Off the PC: grill #114 (needs-info, Grade Flips to Craft), then triage #112, #113, #115, #116.
+
+- Gotchas: same as later 62. The `brain rebuild` from later 67 (it cleans up own flags that already spread) still hasn't been run. A space now goes on the wire as `%20`. The Worker decodes an old unencoded header to itself, so nothing already stored moves.
+
 2026-10-03 (later 67): #125 done (61880e1). Listing matching keeps own in the type key and charges 1 per own row that continues a not-own Listing; units sold are weighted by len(current group) + 1, so the tiebreak never changes the pair count or units sold. A Listing only turns own when no own one is left to pair with (#119 unchanged). ADR-0002 amendment updated.
 
 Next, in order: PC items as in later 62 item 2, then #127 (/tdd; Brain + Worker in one commit, then `wrangler deploy`), then date items.
