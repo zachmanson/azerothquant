@@ -27,7 +27,15 @@ from brain.cli import (
 )
 from brain.config import Config, Era, Install
 from brain.fair_value import FairValueCache
-from brain.grades_file import freeze_named
+from brain.grades_file import (
+    FlipGrade,
+    NamedBuy,
+    NamedCraft,
+    craft_flip_name,
+    freeze_craft_flip_grade,
+    freeze_named,
+    freeze_shown_crafts,
+)
 from brain.history import (
     Holding,
     KnownRecipe,
@@ -1256,6 +1264,77 @@ def test_flips_counts_the_crafts_recorded_and_those_with_a_costed_output(tmp_pat
         import_character_reads(conn, [read], Era.BETA, config)
 
     assert "Crafts recorded: 2 (1 with a costed output)" in run_flips(config)
+
+
+def _linen_flips_to_craft(tmp_path) -> Config:
+    """`_two_linen_flips`, where T0 + 1 h and T0 + 2 h also named a Flip to Craft of Bolts
+    buying Linen at up to 200, frozen. The first's is graded and frozen: 2 Bolts, 1 sold at
+    999 and 1 open at 500, for 400. The second's Linen make a Bolt, then another from the
+    last Linen and a looted one, so it's not gradable once a Scan prices it."""
+    config = _two_linen_flips(tmp_path)
+    t0, hour = 1_790_000_000, 3600
+    for at in (t0 + hour, t0 + 2 * hour):
+        bolt = NamedCraft(
+            "2996",
+            2963,
+            "Kash-Patel",
+            3,
+            (NamedBuy("2589", 6, 200.0),),
+            999.0,
+            1500.0,
+            None,
+            3 * hour,
+        )
+        freeze_shown_crafts(config.grades_path, MARKET, at, 3 * hour, [bolt])
+    grade = FlipGrade(t0 + 4 * hour + 600, 2, 400, 1, 999.0, 949.05, 500.0, (0.5,), None, 0, 600)
+    freeze_craft_flip_grade(config.grades_path, MARKET, craft_flip_name(2963, t0 + hour), grade)
+    recipe = {
+        "recipeID": 2963,
+        "outputItemID": 2996,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": 2589, "quantity": 2, "reagentType": 1}],
+    }
+    read = {
+        "readAt": t0 + 4 * hour,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 10_000,
+        "bags": [],
+        "professions": {197: {"readAt": t0 + 3 * hour, "professionID": 197, "recipes": [recipe]}},
+        "crafts": [
+            {"recipeID": 2963, "at": t0 + 3 * hour + 60, "quantity": 1},
+            {"recipeID": 2963, "at": t0 + 3 * hour + 120, "quantity": 1},
+        ],
+    }
+    later = {"requestedAt": t0 + 6 * hour, "realm": MARKET.realm, "faction": "Alliance"}
+    with closing(open_history(config.history_path)) as conn:
+        import_character_reads(conn, [read], Era.BETA, config)
+        import_scans(conn, [later | {"character": "Kash-Patel", "listings": []}], Era.BETA, config)
+    return config
+
+
+def test_flips_prints_the_flips_to_craft_apart_with_their_record_and_those_not_gradable(tmp_path):
+    text = run_flips(_linen_flips_to_craft(tmp_path))
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    bought = datetime.fromtimestamp(1_790_000_000 + 3600 + 600).strftime("%Y-%m-%d %H:%M")
+    # 949.05 + 500 - 400.
+    assert ["2996", "2963", bought, "2", "9s 99c", "9s 99c", "0.50", "10s 49c"] in lines
+    assert any(line[:2] == ["2996", "2963"] and line[-1] == "not gradable" for line in lines)
+    assert "Graded Flips to Craft: 1 graded, 1 paid off" in text
+    assert "1 Flip to Craft not gradable: uncosted reagents" in text
+
+
+def test_recommend_shows_the_record_of_graded_flips_to_craft_apart(tmp_path):
+    text = run_recommend(_linen_flips_to_craft(tmp_path))
+
+    # Expected 1500 for 3 Bolts, so 1000 for the 2 graded.
+    assert "Graded Flips to Craft: 1 graded, 1 paid off, realized/expected Profit 104.9%" in text
+    # The later Scan grades both Flips to Sell, on their own line.
+    assert "Graded Flips: 2 graded" in text
 
 
 def test_replay_counts_the_purchases_in_its_range_the_brain_didnt_name(tmp_path):

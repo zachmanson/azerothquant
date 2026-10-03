@@ -1,6 +1,6 @@
 """grades.toml: Grades and held-at-writing costs, frozen once computed (#66, ADR-0006),
-the Flips to Sell each Scan named and their Flip Grades (#60, ADR-0023), and what each
-Scan named to buy (#55, ADR-0025).
+the Flips to Sell each Scan named and their Flip Grades (#60, ADR-0023), its Flips to
+Craft and theirs (#114, ADR-0027), and what each Scan named to buy (#55, ADR-0025).
 
 They are worked out from history, so a later change to how Best Exit Value is priced
 would silently rewrite them. The history DB is rebuildable (ADR-0005), so they live in
@@ -62,6 +62,32 @@ class Named:
 
 
 @dataclass(frozen=True)
+class NamedBuy:
+    """A Flip to Craft row's Auction House buys of one reagent: `quantity` at up to
+    `max_unit_price` each."""
+
+    item_key: str
+    quantity: int
+    max_unit_price: float
+
+
+@dataclass(frozen=True)
+class NamedCraft:
+    """A Flip to Craft row as the Shopping List showed it at one Scan (#114): what the
+    Brain named. Only its Auction House buys: a merchant reagent's Purchase is no Flip."""
+
+    item_key: str  # the output's
+    recipe_id: int
+    character: str
+    units: int  # output units
+    buys: tuple[NamedBuy, ...]
+    post_at: float | None  # None when it all goes to Vendor
+    profit: float  # expected, for all `units`
+    days: float | None
+    sale_horizon: int  # seconds, in force then
+
+
+@dataclass(frozen=True)
 class FlipGrade:
     """A Flip's realized result a Sale Horizon after its first Purchase (#60): its units
     Sold by then after the Auction House cut, plus its units still open at their Best Exit
@@ -80,6 +106,9 @@ class FlipGrade:
     listed_after: int | None
     # The Item Key's Expired Outcomes within the horizon, which may not be this Flip's.
     expired: int
+    # A Flip to Craft's (#114): seconds from the first Purchase to the first craft that
+    # used its units. Its `units` and `cost` are then its output Lots'.
+    crafted_after: int | None = None
 
     @property
     def open_units(self) -> int:
@@ -108,11 +137,20 @@ class Frozen:
     flips: dict[str, FlipGrade] = field(default_factory=dict)
     # By the requested_at of each Scan worked out again, what it named to buy.
     named: dict[int, NamedSet] = field(default_factory=dict)
+    # By the requested_at of each Scan worked out for crafts, its Flip to Craft rows.
+    shown_crafts: dict[int, tuple[NamedCraft, ...]] = field(default_factory=dict)
+    # By `craft_flip_name`.
+    craft_flips: dict[str, FlipGrade] = field(default_factory=dict)
 
 
 def flip_name(item_key: str, scan_at: int) -> str:
     """A Flip's name in grades.toml: its Item Key and the Scan whose row it matched."""
     return f"{item_key}@{scan_at}"
+
+
+def craft_flip_name(recipe_id: int, scan_at: int) -> str:
+    """A Flip to Craft's name in grades.toml: its recipe and the Scan whose row it matched."""
+    return f"{recipe_id}@{scan_at}"
 
 
 def load_frozen(path: Path | None, market: Market) -> Frozen:
@@ -148,20 +186,15 @@ def load_frozen(path: Path | None, market: Market) -> Frozen:
             }
             for scan_at, entry in _entries(raw, "shown", market).items()
         }
-        flips = {
-            name: FlipGrade(
-                _typed(entry["graded_at"], int),
-                _typed(entry["units"], int),
-                _typed(entry["cost"], int),
-                _typed(entry["sold_units"], int),
-                float(_typed(entry["gross"], int | float)),
-                float(_typed(entry["proceeds"], int | float)),
-                float(_typed(entry["open_value"], int | float)),
-                tuple(float(_typed(d, int | float)) for d in entry["sale_days"]),
-                None if "listed_after" not in entry else _typed(entry["listed_after"], int),
-                _typed(entry["expired"], int),
+        flips = {name: _flip_grade(e) for name, e in _entries(raw, "flips", market).items()}
+        shown_crafts = {
+            int(scan_at): tuple(
+                _named_craft(r, _typed(entry["sale_horizon"], int)) for r in entry["rows"]
             )
-            for name, entry in _entries(raw, "flips", market).items()
+            for scan_at, entry in _entries(raw, "shown_crafts", market).items()
+        }
+        craft_flips = {
+            name: _flip_grade(e) for name, e in _entries(raw, "craft_flips", market).items()
         }
         named = {
             int(scan_at): NamedSet(
@@ -183,7 +216,51 @@ def load_frozen(path: Path | None, market: Market) -> Frozen:
         }
     except (KeyError, TypeError, AttributeError, ValueError) as e:
         raise GradesError(f"{path}: an entry is malformed ({e!r}); delete it to redo it") from None
-    return Frozen(held, grades, shown, flips, named)
+    return Frozen(held, grades, shown, flips, named, shown_crafts, craft_flips)
+
+
+def _flip_grade(entry: dict) -> FlipGrade:
+    return FlipGrade(
+        _typed(entry["graded_at"], int),
+        _typed(entry["units"], int),
+        _typed(entry["cost"], int),
+        _typed(entry["sold_units"], int),
+        float(_typed(entry["gross"], int | float)),
+        float(_typed(entry["proceeds"], int | float)),
+        float(_typed(entry["open_value"], int | float)),
+        tuple(float(_typed(d, int | float)) for d in entry["sale_days"]),
+        _optional(entry, "listed_after", int),
+        _typed(entry["expired"], int),
+        _optional(entry, "crafted_after", int),
+    )
+
+
+def _named_craft(row: dict, sale_horizon: int) -> NamedCraft:
+    post_at = row.get("post_at")
+    days = row.get("days")
+    return NamedCraft(
+        _typed(row["item_key"], str),
+        _typed(row["recipe_id"], int),
+        _typed(row["character"], str),
+        _typed(row["units"], int),
+        tuple(
+            NamedBuy(
+                _typed(b["item_key"], str),
+                _typed(b["quantity"], int),
+                float(_typed(b["max_unit_price"], int | float)),
+            )
+            for b in row["buys"]
+        ),
+        None if post_at is None else float(_typed(post_at, int | float)),
+        float(_typed(row["profit"], int | float)),
+        None if days is None else float(_typed(days, int | float)),
+        sale_horizon,
+    )
+
+
+def _optional[T](entry: dict, key: str, kind: type[T]) -> T | None:
+    # TOML has no null: a None is written as a missing key.
+    return None if key not in entry else _typed(entry[key], kind)
 
 
 def _named(row: dict, sale_horizon: int) -> Named:
@@ -249,14 +326,42 @@ def freeze_named(path: Path, market: Market, scan_at: int, named: NamedSet) -> N
     _append(path, "named", market, str(scan_at), f"items = [{items}]\ngroups = [{groups}]\n")
 
 
+def freeze_shown_crafts(
+    path: Path, market: Market, scan_at: int, sale_horizon: int, named: Sequence[NamedCraft]
+) -> None:
+    """Append the Flip to Craft rows a Scan named, which may be none."""
+    rows = ", ".join(
+        f"{{ item_key = {_string(n.item_key)}, recipe_id = {n.recipe_id}, "
+        f"character = {_string(n.character)}, units = {n.units}, buys = ["
+        + ", ".join(
+            f"{{ item_key = {_string(b.item_key)}, quantity = {b.quantity}, "
+            f"max_unit_price = {float(b.max_unit_price)!r} }}"
+            for b in n.buys
+        )
+        + "]"
+        + ("" if n.post_at is None else f", post_at = {float(n.post_at)!r}")
+        + f", profit = {float(n.profit)!r}"
+        + ("" if n.days is None else f", days = {float(n.days)!r}")
+        + " }"
+        for n in named
+    )
+    body = f"sale_horizon = {sale_horizon}\nrows = [{rows}]\n"
+    _append(path, "shown_crafts", market, str(scan_at), body)
+
+
 def freeze_flip_grade(path: Path, market: Market, name: str, grade: FlipGrade) -> None:
     """Append a Flip's Grade under its `flip_name`."""
+    _append(path, "flips", market, name, _flip_grade_body(grade))
+
+
+def freeze_craft_flip_grade(path: Path, market: Market, name: str, grade: FlipGrade) -> None:
+    """Append a Flip to Craft's Grade under its `craft_flip_name`."""
+    _append(path, "craft_flips", market, name, _flip_grade_body(grade))
+
+
+def _flip_grade_body(grade: FlipGrade) -> str:
     days = ", ".join(repr(float(d)) for d in grade.sale_days)
-    _append(
-        path,
-        "flips",
-        market,
-        name,
+    return (
         f"graded_at = {grade.graded_at}\n"
         f"units = {grade.units}\n"
         f"cost = {grade.cost}\n"
@@ -266,7 +371,8 @@ def freeze_flip_grade(path: Path, market: Market, name: str, grade: FlipGrade) -
         f"open_value = {float(grade.open_value)!r}\n"
         f"sale_days = [{days}]\n"
         + ("" if grade.listed_after is None else f"listed_after = {grade.listed_after}\n")
-        + f"expired = {grade.expired}\n",
+        + f"expired = {grade.expired}\n"
+        + ("" if grade.crafted_after is None else f"crafted_after = {grade.crafted_after}\n")
     )
 
 

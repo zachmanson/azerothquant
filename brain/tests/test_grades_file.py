@@ -6,12 +6,17 @@ from brain.grades_file import (
     Grade,
     GradesError,
     Named,
+    NamedBuy,
+    NamedCraft,
+    craft_flip_name,
     flip_name,
+    freeze_craft_flip_grade,
     freeze_flip_grade,
     freeze_grade,
     freeze_held,
     freeze_named,
     freeze_shown,
+    freeze_shown_crafts,
     load_frozen,
 )
 from brain.history import Market
@@ -62,6 +67,34 @@ def test_frozen_flip_entries_come_back_as_written(tmp_path):
         flip_name("2589", 1_790_003_600): sold,
         flip_name("2770", 1_790_003_600): unsold,
     }
+
+
+def test_frozen_flip_to_craft_entries_come_back_as_written(tmp_path):
+    # #114: what two Scans named to craft, one of them nothing, and a Flip to Craft's Grade.
+    path = tmp_path / "grades.toml"
+    bolt = NamedCraft(
+        "2996",
+        2963,
+        ACCENTED,
+        3,
+        (NamedBuy("2589", 6, 0.1 + 0.2), NamedBuy("2592", 1, 45.0)),
+        999.0,
+        3745.25,
+        1.5,
+        10_800,
+    )
+    vendored = NamedCraft(
+        "2997", 2964, "Kash", 1, (NamedBuy("2589", 2, 40.0),), None, 12.0, None, 10_800
+    )
+    grade = FlipGrade(1_790_015_000, 3, 400, 1, 999.0, 949.05, 20.0, (0.5,), 3000, 0, 600)
+    freeze_shown_crafts(path, MARKET, 1_790_003_600, 10_800, [bolt, vendored])
+    freeze_shown_crafts(path, MARKET, 1_790_007_200, 10_800, [])
+    freeze_craft_flip_grade(path, MARKET, craft_flip_name(2963, 1_790_003_600), grade)
+
+    frozen = load_frozen(path, MARKET)
+
+    assert frozen.shown_crafts == {1_790_003_600: (bolt, vendored), 1_790_007_200: ()}
+    assert frozen.craft_flips == {craft_flip_name(2963, 1_790_003_600): grade}
 
 
 def test_what_scans_named_to_buy_comes_back_as_written(tmp_path):

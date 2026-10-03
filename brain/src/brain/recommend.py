@@ -26,10 +26,13 @@ from brain.fair_value import FairValueCache, Supply, fair_value
 from brain.grades_file import (
     Grade,
     Named,
+    NamedBuy,
+    NamedCraft,
     freeze_grade,
     freeze_held,
     freeze_named,
     freeze_shown,
+    freeze_shown_crafts,
     load_frozen,
 )
 from brain.history import (
@@ -62,6 +65,7 @@ from brain.lots import (
     Held,
     Lot,
     LotCraftResult,
+    LotsWithCrafts,
     NamedSet,
     bought_under,
     deposits,
@@ -71,6 +75,7 @@ from brain.lots import (
     item_names,
     link_sales,
     lots,
+    lots_with_crafts,
     scan_before,
     settle,
     start_of,
@@ -327,6 +332,7 @@ class Row:
     # Recommendations.lua, nor compared.
     merchant_gold: float = field(default=0.0, compare=False)
     made: CraftOutput | None = field(default=None, compare=False)
+    recipe_id: int | None = field(default=None, compare=False)  # a Craft's, for #114
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
     # Lots (a Purchase's or a craft's output, #44) cover cost, and how many units that is.
     # Split rows share it.
@@ -1256,12 +1262,23 @@ def market_lots(
 ) -> list[Lot]:
     """The Market's Lots, For Use Purchases starting none (ADR-0025). `seen` is the
     Market's `listings`, when the caller has them already (#105)."""
+    return market_lots_with_crafts(conn, config, market, predictions, seen).lots
+
+
+def market_lots_with_crafts(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    seen: Sequence[Listing] | None = None,
+) -> LotsWithCrafts:
+    """`market_lots`, and the crafts that opened no Lot for uncosted reagents (#114)."""
     seen = listings(conn, market) if seen is None else seen
     market_purchases = purchases(conn, market)
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
     held = held_at_writing(conn, config, market, predictions)
     kept = split_purchases(conn, config, market, predictions, market_purchases).kept
-    return lots(kept, linked, predictions, held, lot_craft_results(conn, market))
+    return lots_with_crafts(kept, linked, predictions, held, lot_craft_results(conn, market))
 
 
 def lot_craft_results(conn: sqlite3.Connection, market: Market) -> list[LotCraftResult]:
@@ -1290,6 +1307,7 @@ def lot_craft_results(conn: sqlite3.Connection, market: Market) -> list[LotCraft
                 None if craft.output_item_id is None else str(craft.output_item_id),
                 craft.quantity or craft.quantity_min or 0,
                 {k: merchant[int(k)] for k in used if int(k) in merchant},
+                craft.recipe_id,
             )
         )
     return result
@@ -1367,6 +1385,7 @@ class Reworked(NamedTuple):
 
     shown: dict[str, Named]  # its Flip to Sell rows by Item Key (#60)
     named: NamedSet  # what it named to buy (#55)
+    flips_to_craft: tuple[NamedCraft, ...]  # its Flip to Craft rows (#114)
 
 
 def rework(
@@ -1377,9 +1396,9 @@ def rework(
     scan_at: int,
 ) -> Reworked:
     """What the Scan requested at `scan_at` showed, worked out again the way the replay
-    does (#80): its Flip to Sell rows by Item Key (#60), and what it named to buy (#55).
-    Worked out once for both, and frozen in grades.toml when there is one, where the
-    caller reads them from later."""
+    does (#80): its Flip to Sell rows by Item Key (#60), what it named to buy (#55), and
+    its Flip to Craft rows (#114). Worked out once for all three, and frozen in grades.toml
+    when there is one, where the caller reads them from later."""
     m = recommend_market(
         # Working out a past Scan never freezes a Prediction's Grade.
         conn,
@@ -1404,13 +1423,30 @@ def rework(
         for r in m.shopping_list
         if r.action is Action.SELL
     }
+    flips_to_craft = tuple(
+        NamedCraft(
+            r.item_key,
+            r.recipe_id,
+            r.character,
+            r.made.units,
+            tuple(
+                NamedBuy(b.item_key, b.quantity, b.max_unit_price) for b in r.buys if not b.merchant
+            ),
+            r.post_at,
+            r.profit,
+            r.days,
+            config.sale_horizon_seconds,
+        )
+        for r in m.shopping_list
+        if r.action is Action.CRAFT and r.made is not None and r.recipe_id is not None
+    )
     named = named_set(m)
     if config.grades_path is not None:
-        freeze_shown(
-            config.grades_path, market, scan_at, config.sale_horizon_seconds, list(shown.values())
-        )
+        horizon = config.sale_horizon_seconds
+        freeze_shown(config.grades_path, market, scan_at, horizon, list(shown.values()))
         freeze_named(config.grades_path, market, scan_at, named)
-    return Reworked(shown, named)
+        freeze_shown_crafts(config.grades_path, market, scan_at, horizon, flips_to_craft)
+    return Reworked(shown, named, flips_to_craft)
 
 
 def _lot_costs(
@@ -2275,6 +2311,7 @@ class _Plan:
             via=via,
             chain=self.chain(),
             merchant_gold=self.gold,
+            recipe_id=self.recipe.recipe_id,
         )
 
     def chain(self) -> tuple[ChainNode, ...]:

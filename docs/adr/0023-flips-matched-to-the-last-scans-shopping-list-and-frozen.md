@@ -21,6 +21,6 @@ The Brain names Flips to Sell but never learned whether the ones the player made
 
 ## Consequences
 
-- Flip to Vendor (sells at once) and Flip to Craft (#114: crafts are recorded since #44, grading them isn't built) aren't graded.
+- Flip to Vendor (sells at once) isn't graded. Flips to Craft are graded since #114, matched by their reagent Purchases and traced through craft lineage (ADR-0027).
 - Beta Markets are graded too, labelled provisional as in `brain replay`.
 - To regrade, delete the entry from `grades.toml` by hand, as with a Prediction.

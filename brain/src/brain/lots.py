@@ -4,6 +4,7 @@ import bisect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from typing import NamedTuple
 
 from brain.history import Listing, Outcome, Purchase
 from brain.mailbox import MailKind
@@ -34,6 +35,9 @@ class Lot:
     folded_at: int | None = None
     used: int = 0  # units crafts used up as reagents (#44)
     crafted: bool = False  # opened by a craft, as its output
+    recipe_id: int | None = None  # a crafted Lot's recipe
+    # A crafted Lot's lineage (#114): the Lots its craft used up, as they stood then.
+    lineage: tuple["LotUse", ...] = field(default=(), compare=False)
 
     @property
     def open_units(self) -> int:
@@ -41,6 +45,23 @@ class Lot:
         if self.folded_at is not None:
             return 0
         return self.units - sum(sale.units for sale in self.sales) - self.used
+
+
+@dataclass(frozen=True)
+class LotUse:
+    """Some units of a Lot that a craft used up, the Lot as it stood just before (#114)."""
+
+    lot: Lot
+    units: int
+
+
+def bought_from(lineage: Sequence[LotUse]) -> list[Lot]:
+    """The Lots up a craft's `lineage` that no craft opened, through the output Lots of
+    the Sub-crafts it used up, as they stood when used up (#114)."""
+    result = []
+    for use in lineage:
+        result += bought_from(use.lot.lineage) if use.lot.crafted else [use.lot]
+    return result
 
 
 @dataclass(frozen=True)
@@ -54,6 +75,7 @@ class LotCraftResult:
     # Per unit, the lowest latest-seen Merchant Cost as of the craft of each reagent that
     # has one.
     merchant: Mapping[str, float] = field(default_factory=dict)
+    recipe_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +89,23 @@ class Held:
     cost: int  # copper for all its units
 
 
+@dataclass(frozen=True)
+class UncostedCraft:
+    """A craft that opened no output Lot because some of its reagent units were looted or
+    bought For Use (#44), with the Lots it did use up (#114)."""
+
+    at: int
+    recipe_id: int | None
+    lineage: tuple[LotUse, ...]
+
+
+class LotsWithCrafts(NamedTuple):
+    """A realm and faction's Lots, and the crafts that opened none for uncosted reagents."""
+
+    lots: list[Lot]  # oldest first
+    uncosted: list[UncostedCraft]  # in the order they happened
+
+
 def lots(
     purchases: list[Purchase],
     outcomes: list[Outcome],
@@ -75,6 +114,17 @@ def lots(
     craft_results: Sequence[LotCraftResult] = (),
 ) -> list[Lot]:
     """One realm and faction's Lots, oldest first."""
+    return lots_with_crafts(purchases, outcomes, predictions, held, craft_results).lots
+
+
+def lots_with_crafts(
+    purchases: list[Purchase],
+    outcomes: list[Outcome],
+    predictions: Sequence[Prediction] = (),
+    held: Sequence[Held] = (),
+    craft_results: Sequence[LotCraftResult] = (),
+) -> LotsWithCrafts:
+    """One realm and faction's Lots, and the crafts that opened none for uncosted reagents."""
     written = {p.name: start_of(p.written) for p in predictions}
     result = sorted(
         [
@@ -94,14 +144,15 @@ def lots(
         + [(c.at, 1, c) for c in craft_results],
         key=lambda event: event[:2],
     )
+    uncosted: list[UncostedCraft] = []
     for at, _, event in events:
         if isinstance(event, Prediction):
             _fold(result, event, at)
         elif isinstance(event, LotCraftResult):
-            _use_up(result, event, predictions)
+            _use_up(result, event, predictions, uncosted)
         else:
             _close(result, event, at)
-    return result
+    return LotsWithCrafts(result, uncosted)
 
 
 # A Disenchant source group by what names it: quality, kind, and lowest and highest item
@@ -183,13 +234,19 @@ def _fold(result: list[Lot], prediction: Prediction, written_at: int) -> None:
             result[i] = replace(lot, folded_at=written_at)
 
 
-def _use_up(result: list[Lot], craft: LotCraftResult, predictions: Sequence[Prediction]) -> None:
+def _use_up(
+    result: list[Lot],
+    craft: LotCraftResult,
+    predictions: Sequence[Prediction],
+    uncosted: list[UncostedCraft],
+) -> None:
     """Use up the craft's reagent units, oldest open Lot of each first, and open a Lot of
-    its output at what they cost, only when every one of them is costed. A Prediction's
-    units are its own (ADR-0009): no craft uses them up, nor opens a Lot of an Item Key
-    under a Prediction standing then."""
+    its output at what they cost, only when every one of them is costed; else add it to
+    `uncosted`. A Prediction's units are its own (ADR-0009): no craft uses them up, nor
+    opens a Lot of an Item Key under a Prediction standing then."""
     cost = 0.0
     costed = True
+    lineage: list[LotUse] = []
     for item_key, units in craft.reagents.items():
         for i, lot in enumerate(result):
             if units == 0 or lot.acquired_at > craft.at:
@@ -197,6 +254,7 @@ def _use_up(result: list[Lot], craft: LotCraftResult, predictions: Sequence[Pred
             if lot.item_key != item_key or lot.prediction is not None or not lot.open_units:
                 continue
             taken = min(units, lot.open_units)
+            lineage.append(LotUse(lot, taken))
             result[i] = replace(lot, used=lot.used + taken)
             cost += taken * lot.cost / lot.units
             units -= taken
@@ -204,9 +262,21 @@ def _use_up(result: list[Lot], craft: LotCraftResult, predictions: Sequence[Pred
             cost += units * craft.merchant[item_key]
         elif units:
             costed = False  # some were looted, or bought For Use
-    if not costed or craft.output is None or _under(craft.output, craft.at, predictions):
+    if not costed:
+        uncosted.append(UncostedCraft(craft.at, craft.recipe_id, tuple(lineage)))
         return
-    output = Lot(craft.output, craft.at, craft.units, round(cost), (), crafted=True)
+    if craft.output is None or _under(craft.output, craft.at, predictions):
+        return
+    output = Lot(
+        craft.output,
+        craft.at,
+        craft.units,
+        round(cost),
+        (),
+        crafted=True,
+        recipe_id=craft.recipe_id,
+        lineage=tuple(lineage),
+    )
     bisect.insort(result, output, key=lambda lot: lot.acquired_at)
 
 

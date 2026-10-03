@@ -5,7 +5,7 @@
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
     brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
-    brain flips      grade the Flips to Sell made: did they sell at the Post at named
+    brain flips      grade the Flips to Sell and to Craft made: did they sell as named
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
     brain pool push  upload the player's Scans the Scan Pool doesn't have yet
     brain pool pull [--since DATE]  download and import other members' Scans
@@ -26,6 +26,7 @@ import os
 import sqlite3
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ from brain.config import Config, ConfigError, Era, load_config
 from brain.disenchant import Group, load_table
 from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
 from brain.fair_value import FairValueCache
-from brain.flips import Flip, flip_record, flips
+from brain.flips import CraftFlip, Flip, craft_flips, flip_record, flips
 from brain.grades_file import GradesError
 from brain.history import (
     ImportFileError,
@@ -542,16 +543,24 @@ def run_recommend(
         # Now, not the Scan: a Purchase after the latest Scan is matched to it (#60).
         now = int(time.time())
         made = {m.market: flips(conn, config, m.market, predictions, now) for m in markets}
+        to_craft = {
+            m.market: craft_flips(conn, config, m.market, predictions, now) for m in markets
+        }
     range_days = config.sell_rate_range_seconds // 86400
     weight = config.beta_sell_rate_weight
     return "\n".join(
-        _render_market(m, range_days, made[m.market])
+        _render_market(m, range_days, made[m.market], to_craft[m.market])
         + (_render_beta_ratios(m, weight) if weight or beta_ratios else "")
         for m in markets
     )
 
 
-def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Flip]) -> str:
+def _render_market(
+    m: MarketRecommendations,
+    range_days: int,
+    made: Sequence[Flip],
+    to_craft: Sequence[CraftFlip],
+) -> str:
     as_of = datetime.fromtimestamp(m.as_of).strftime("%Y-%m-%d %H:%M")
     held = held_units(m.holdings)
     holdings = _table(
@@ -665,6 +674,7 @@ def _render_market(m: MarketRecommendations, range_days: int, made: Sequence[Fli
         f"{record}\n"
         f"{graded}"
         f"{_flip_record(made)}\n"
+        f"{_flip_record(to_craft, 'Flips to Craft')}\n"
     )
 
 
@@ -681,14 +691,14 @@ def _render_beta_ratios(m: MarketRecommendations, weight: float) -> str:
     return f"Beta/Live Fair Value of the Predictions' Item Keys (Beta Sell Rate {on})\n{table}"
 
 
-def _flip_record(made: Sequence[Flip]) -> str:
-    """The graded Flips' record line (#60)."""
+def _flip_record(made: Sequence[Flip] | Sequence[CraftFlip], kind: str = "Flips") -> str:
+    """The graded Flips' record line (#60), of one `kind`: Flips to Sell or to Craft (#114)."""
     r = flip_record(made)
     if r is None:
-        return "Graded Flips: none yet"
+        return f"Graded {kind}: none yet"
     days = "" if r.median_days is None else f"{r.median_days:.2f}"
     return (
-        f"Graded Flips: {r.graded} graded, {r.paid_off} paid off, "
+        f"Graded {kind}: {r.graded} graded, {r.paid_off} paid off, "
         f"realized/expected Profit {_percent(r.realized_over_expected)}, "
         f"price/Post at {_percent(r.price_over_post_at)} (median), "
         f"sold within horizon {_percent(r.sold_within)}, median days to sell {days}"
@@ -696,18 +706,21 @@ def _flip_record(made: Sequence[Flip]) -> str:
 
 
 def run_flips(config: Config) -> str:
-    """Each Market's Flips to Sell made (#60), graded or pending, as text. Working out
-    what a past Scan named is slow, so each is worked out once and frozen in grades.toml."""
+    """Each Market's Flips to Sell (#60) and Flips to Craft (#114) made, graded or
+    pending, as text. Working out what a past Scan named is slow, so each is worked out
+    once and frozen in grades.toml."""
     predictions = load_predictions(config.predictions_path)
     now = int(time.time())
     with closing(open_history(config.history_path)) as conn:
         made = {}
+        to_craft = {}
         for_use = {}
         crafted = {}
         for market in character_markets(conn):
             times = scan_times(conn, market)
             if times:
                 made[market] = flips(conn, config, market, predictions, now)
+                to_craft[market] = craft_flips(conn, config, market, predictions, now)
                 bought = [p for p in purchases(conn, market) if happened_at(p) <= now]
                 for_use[market] = split_purchases(conn, config, market, predictions, bought).for_use
                 costed = sum(lot.crafted for lot in market_lots(conn, config, market, predictions))
@@ -715,7 +728,9 @@ def run_flips(config: Config) -> str:
     if not made:
         return "No Character has a Market with a Scan yet.\n"
     return "\n".join(
-        _render_flips(market, f, for_use[market], crafted[market]) for market, f in made.items()
+        _render_flips(market, f, for_use[market], crafted[market])
+        + _render_craft_flips(to_craft[market])
+        for market, f in made.items()
     )
 
 
@@ -750,7 +765,40 @@ def _render_flips(
     return f"{title}\n{table}{_flip_record(made)}\n{_for_use_line(for_use)}{_crafts_line(*crafted)}"
 
 
-def _last_sale(f: Flip) -> str:
+def _render_craft_flips(made: Sequence[CraftFlip]) -> str:
+    """The Flips to Craft section (#114), apart from the Flips to Sell: by its output, its
+    output units graded, and what they sold at against the row's Post at."""
+    table = _table(
+        ["Item", "Recipe", "Bought", "Units", "Post at", "Sold at", "Days", "Grade"],
+        [
+            [
+                f.named.item_key,
+                str(f.recipe_id),
+                datetime.fromtimestamp(f.bought_at).strftime("%Y-%m-%d %H:%M"),
+                "" if f.grade is None else str(f.grade.units),
+                _money(f.named.post_at),
+                _money(f.realized_price),
+                _last_sale(f),
+                _craft_grade(f),
+            ]
+            for f in made
+        ],
+    )
+    skipped = Counter(f.not_gradable for f in made if f.not_gradable is not None)
+    lines = "".join(
+        f"{n} Flip{'s' if n != 1 else ''} to Craft not gradable: {why.value}\n"
+        for why, n in sorted(skipped.items())
+    )
+    return f"\nFlips to Craft\n{table}{_flip_record(made, 'Flips to Craft')}\n{lines}"
+
+
+def _craft_grade(f: CraftFlip) -> str:
+    if f.not_gradable is not None:
+        return "not gradable"
+    return "pending" if f.grade is None else _money(f.grade.realized)
+
+
+def _last_sale(f: Flip | CraftFlip) -> str:
     """Days from the Purchase to the last sale within the horizon, if any."""
     if f.grade is None or not f.grade.sale_days:
         return ""
@@ -1183,7 +1231,7 @@ def main(argv: list[str] | None = None) -> int:
     replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
     replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
     commands.add_parser(
-        "flips", help="grade the Flips to Sell made: did they sell at the Post at named"
+        "flips", help="grade the Flips to Sell and to Craft made: did they sell as named"
     )
     commands.add_parser(
         "disenchants", help="check the Disenchant tables against your Disenchant Results"

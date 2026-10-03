@@ -11,9 +11,11 @@ from brain.lots import (
     LotSale,
     NamedSet,
     Settlement,
+    bought_from,
     is_for_use,
     link_sales,
     lots,
+    lots_with_crafts,
     settle,
 )
 from brain.mailbox import MailKind
@@ -290,8 +292,8 @@ BOLT = "2996"  # Bolt of Linen Cloth: 2 Linen Cloth each
 THREAD = "2320"  # Coarse Thread, a merchant reagent
 
 
-def _craft(at, reagents, output=BOLT, units=1, merchant=None):
-    return LotCraftResult(at, reagents, output, units, merchant or {})
+def _craft(at, reagents, output=BOLT, units=1, merchant=None, recipe_id=None):
+    return LotCraftResult(at, reagents, output, units, merchant or {}, recipe_id)
 
 
 def test_a_craft_uses_up_reagent_units_oldest_lot_first_and_opens_an_output_lot_at_their_cost():
@@ -372,3 +374,45 @@ def test_a_sub_crafts_output_lot_is_used_up_by_the_next_craft_and_the_last_outpu
     )
     assert bolt.open_units == 0
     assert (shirt_lot.cost, shirt_lot.sales) == (200, (LotSale(1, 1000, 500),))
+
+
+def test_a_crafted_lot_records_the_lots_it_used_up_and_how_many_units_of_each():
+    *_, bolt = lots(
+        [_purchase(LINEN, 10, 1000, arrived_at=200), _purchase(LINEN, 4, 200, arrived_at=100)],
+        [],
+        craft_results=[_craft(300, {LINEN: 6}, units=3, recipe_id=2963)],
+    )
+    assert bolt.recipe_id == 2963
+    assert [(use.lot.acquired_at, use.units) for use in bolt.lineage] == [(100, 4), (200, 2)]
+
+
+def test_a_crafted_lot_is_bought_from_the_lots_up_its_lineage_through_a_sub_crafts_output():
+    shirt = "2577"
+    *_, shirt_lot = lots(
+        [_purchase(LINEN, 4, 200, arrived_at=100), _purchase(WOOL, 1, 50, arrived_at=150)],
+        [],
+        craft_results=[
+            _craft(300, {LINEN: 4}, BOLT, units=2),
+            _craft(400, {BOLT: 2, WOOL: 1}, shirt),
+        ],
+    )
+    assert [(lot.item_key, lot.acquired_at) for lot in bought_from(shirt_lot.lineage)] == [
+        (LINEN, 100),
+        (WOOL, 150),
+    ]
+
+
+def test_a_craft_that_opens_no_output_lot_for_uncosted_reagents_is_reported_with_its_lineage():
+    # 6 Linen used, only 4 bought: the other 2 were looted. The no-item craft is costed.
+    result = lots_with_crafts(
+        [_purchase(LINEN, 6, 300, arrived_at=100)],
+        [],
+        craft_results=[
+            _craft(200, {LINEN: 2}, None),
+            _craft(300, {LINEN: 6}, units=3, recipe_id=2963),
+        ],
+    )
+    assert [lot.item_key for lot in result.lots] == [LINEN]
+    [uncosted] = result.uncosted
+    assert (uncosted.at, uncosted.recipe_id) == (300, 2963)
+    assert [(use.lot.acquired_at, use.units) for use in uncosted.lineage] == [(100, 4)]
