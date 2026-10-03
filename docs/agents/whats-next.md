@@ -1,3 +1,9 @@
+2026-10-03 (later 72): #132 grilled, brief on the issue, ready-for-agent. A buy that removes the cheap run and posts above it (Flip to Sell, Hold buy Max Loss, `_why_not`) drops Sale Events and Observation Window hours from before the run's earliest first_seen. This only happens once the old rate (raw, no prior) expects at least `flip_min_sale_events` events in the hours since then. Snipes are unaffected. Not Flip to Craft, Buy Under, held units or Beta. ADR-0028 is to be written with it.
+
+Next, in order: #132 (/tdd, it makes the current Shopping List misleading), then PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent, /tdd).
+
+- Gotchas: same as later 70. `SellRate.sale_prices` drops `SaleEvent.seen_at`, so #132 has to carry event times and split window hours at the cutoff.
+
 2026-10-03 (later 71): Filed #132 (needs-triage): Flips to Sell count Sale Events from before a price drop as demand at the post price, so after a crash the Brain suggests buying the whole cheap wall and reposting at the old price (4807 LME at 47c, post 3.21s, "1.1 days"). Since the cheap Listings showed up, 0 units sold at the post price for 10938, 279965 or 248706. Proposed rule: only Sale Events after the cheap Listings the Flip buys first showed up count. Evidence and open questions are on the issue.
 
 Next, in order: grill #132 (it makes the current Shopping List misleading), then PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent, /tdd).
