@@ -1,3 +1,9 @@
+2026-10-03 (later 66): Triaged #14, #19, #10, #82, #125, #126, #127. #14, #19, #10 unchanged (ready-for-human, waiting on data or the PC). #82 stays needs-info; added ForeverForge Auction (CurseForge addon, walord3) as another price-only lead. #125 and #127 are ready-for-agent (briefs on the issues). #126 closed wontfix: only Scans use the server clock, Reads keep the PC clock the Brain shares (ADR-0026 line, `.out-of-scope/server-clock-for-all-addon-stamps.md`).
+
+Next, in order: PC items as in later 62 item 2, then #125 (/tdd), then #127 (/tdd; Brain + Worker in one commit, then `wrangler deploy`), then date items.
+
+- Gotchas: same as later 62. #127 needs a Worker redeploy after the commit (wrangler env vars in later 62). #125: after it lands, a `brain rebuild` cleans up own flags that already spread.
+
 2026-10-02 (later 65): #128 and #129 triaged and done (fc73a1a). `pool_url` alone now loads (pool off until `pool_key` is set too), so a fresh admin can run `brain pool key add`. Pooled Scans no longer write `vendor_price`/`item_info` (option B: only own Scans and Character Reads do), so a rollback has nothing to undo there; `strip_scan` is unchanged. Ran `brain rebuild` (52 Scans, 0 rejected; 0 vendor/item rows from Pooled Scans) and restarted `brain watch`.
 
 Next, in order: PC items as in later 62 item 2, then #14, #19, #10, #82, #125, #126, #127 (needs-triage), then date items.
