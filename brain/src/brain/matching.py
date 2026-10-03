@@ -4,8 +4,10 @@ There's no auction ID or seller, so Listings with the same Item Key and unit buy
 interchangeable (CONTEXT.md: Listing, ADR-0002). Own isn't part of that: a Pooled Scan
 shows my auctions as someone else's. Within each such group
 we pick the matching with the fewest new Listings, then the fewest units counted as
-Partial Sales. That is a min-cost maximum matching, solved here as a min-cost max-flow
-over (quantity, time-left) types, because identical Listings don't need their own nodes.
+Partial Sales, then the fewest own rows continuing a Listing that isn't own yet (#125:
+that would make someone else's Listing own). That is a min-cost maximum matching,
+solved here as a min-cost max-flow over (quantity, time-left, own) types, because
+identical Listings don't need their own nodes.
 """
 
 from collections import defaultdict
@@ -27,6 +29,8 @@ class Side(Protocol):
     def quantity(self) -> int: ...
     @property
     def time_left(self) -> int: ...
+    @property
+    def own(self) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -80,13 +84,16 @@ def _identity(listing: Side) -> tuple:
 
 def _match_group[P: Side, C: Side](ps: list[P], cs: list[C], can_match) -> list[tuple[P, C]]:
     """Min-cost max matching within one group of interchangeable Listings."""
-    # Collapse identical Listings into types; a type is (quantity, time_left).
-    p_types: dict[tuple[int, int], list[P]] = defaultdict(list)
+    # Collapse identical Listings into types; a type is (quantity, time_left, own).
+    p_types: dict[tuple[int, int, bool], list[P]] = defaultdict(list)
     for p in ps:
-        p_types[(p.quantity, p.time_left)].append(p)
-    c_types: dict[tuple[int, int], list[C]] = defaultdict(list)
+        p_types[(p.quantity, p.time_left, p.own)].append(p)
+    c_types: dict[tuple[int, int, bool], list[C]] = defaultdict(list)
     for c in cs:
-        c_types[(c.quantity, c.time_left)].append(c)
+        c_types[(c.quantity, c.time_left, c.own)].append(c)
+    # Each pair turning a Listing own costs 1, and there are fewer pairs than
+    # unit_sold_weight, so all of them together never outweigh one unit sold.
+    unit_sold_weight = len(cs) + 1
 
     p_keys, c_keys = list(p_types), list(c_types)
     graph = _FlowGraph(2 + len(p_keys) + len(c_keys))
@@ -103,7 +110,9 @@ def _match_group[P: Side, C: Side](ps: list[P], cs: list[C], can_match) -> list[
         for ck in c_keys:
             if can_match(p_types[pk][0], c_types[ck][0]):
                 units_sold = pk[0] - ck[0]
-                edge = graph.add_edge(p_node[pk], c_node[ck], len(p_types[pk]), units_sold)
+                turns_own = ck[2] and not pk[2]
+                cost = units_sold * unit_sold_weight + turns_own
+                edge = graph.add_edge(p_node[pk], c_node[ck], len(p_types[pk]), cost)
                 pair_edges.append((pk, ck, edge))
 
     graph.min_cost_max_flow(source, sink)

@@ -254,6 +254,38 @@ def test_a_listing_first_seen_as_not_own_becomes_own_when_a_scan_shows_it_as_own
     assert listings(db, MARKET) == [listing(T0, T0 + 20 * MINUTE, own=True)]
 
 
+def test_an_own_row_continues_my_identical_listing_rather_than_someone_elses(db):
+    # #125: the two Listings are interchangeable, so only own can tell them apart.
+    t1 = T0 + 20 * MINUTE
+    run(
+        db,
+        scan(T0, row(own=True), row(own=False)),
+        scan(t1, row(own=False), row(own=True)),
+    )
+
+    assert sorted(listings(db, MARKET)) == [
+        listing(T0, t1, own=False),
+        listing(T0, t1, own=True),
+    ]
+
+
+def test_preferring_my_own_listing_never_counts_more_units_as_sold(db):
+    # Continuing my 20-unit Listing would count 10 units sold; continuing the other
+    # 10-unit one counts none, so that one turns own (the #119 case) all the same.
+    t1 = T0 + 20 * MINUTE
+    run(
+        db,
+        scan(T0, row(quantity=20, own=True), row(quantity=10, own=False)),
+        scan(t1, row(quantity=10, own=True)),
+    )
+
+    assert sorted(listings(db, MARKET)) == [
+        listing(T0, t1, quantity=10, own=True),
+        listing(T0, T0, quantity=20, own=True),
+    ]
+    assert partial_sales(db, MARKET) == []
+
+
 def test_different_prices_or_item_keys_never_match(db):
     t1 = T0 + 20 * MINUTE
     run(db, scan(T0, row(unit=100)), scan(t1, row(unit=99), row(item="item:2592", unit=100)))
