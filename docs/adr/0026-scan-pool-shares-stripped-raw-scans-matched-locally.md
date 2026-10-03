@@ -21,6 +21,7 @@ It runs on Cloudflare R2 behind a small Worker, which holds the keys and the ind
 - `own` leaves a Listing's match key (ADR-0002 amendment). Otherwise every switch between the player's Scan and a Pooled Scan would look like a Disappearance plus a new Listing on the player's own auctions.
 - Pooled Scans are stored as downloaded, which is already stripped, not as the Addon wrote them (ADR-0005 amendment).
 - The Addon stamps Scans with the server clock (`GetServerTime()`), so everyone's Scans order on one clock.
+- Only Scans move to the server clock. Reads, Mailbox Reads, Known Recipes and Purchase marks keep the PC clock (`time()`), which the Brain shares, so Read vs Brain comparisons (cooldowns, Purchases before now) stay on one clock. A Scan vs Read comparison is off by the PC's clock skew. Windows syncs over NTP, and every such comparison has minutes of slack, so this is accepted (#126). If a skewed-clock bug ever shows up, stamp both clocks on Reads.
 - A truncated Scan is the likeliest poison, and it isn't malicious: a disconnect mid-Scan makes thousands of fake Disappearances. So a Pooled Scan with fewer Listings than `pool_min_completeness` (0.8) of its Market's recent median is rejected.
 - Cross-checks between uploaders are left until the pool opens beyond a trusted group: down-weighting a Disappearance only one uploader's Scan supports, and reputation.
 - A re-match costs time in the loop (#116). The pull-before-import order and the 48 h cap keep it rare and short.
