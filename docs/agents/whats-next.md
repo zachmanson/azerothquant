@@ -1,3 +1,9 @@
+2026-10-03 (later 73): #132 done (8f7c62b), ADR-0028. Flip to Sell, Hold buy Max Loss and why-not cut the Sale Events and Observation Window hours before the earliest other-player Listing under the post price was first seen, once the raw rate before expects `flip_min_sale_events` since. why-not's Sale Events line says "since cheaper Listings went up <time>". `SellRate.sale_prices` is now (price, units, seen_at) and SellRate carries `windows`.
+
+Next, in order: PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent, /tdd).
+
+- Gotchas: same as later 70. On the real data at 10-03 18:29, LME still made the list: only 0.83 Observation Window hours since the 20c Listings showed up (15:46), expecting 2.07 of the 3 Sale Events. It needs about 1.2 watched hours (Scans no more than 1 h apart) before the cut lands, so check after the next scans. Review notes left as is: the cutoff counts Listings under the post price, so a partly-taken Listing doesn't set it. The cut is only named on a Sale Events failure, not Room. No test pins Flip to Craft or Buy Under unchanged, since they never pass a cutoff.
+
 2026-10-03 (later 72): #132 grilled, brief on the issue, ready-for-agent. A buy that removes the cheap run and posts above it (Flip to Sell, Hold buy Max Loss, `_why_not`) drops Sale Events and Observation Window hours from before the run's earliest first_seen. This only happens once the old rate (raw, no prior) expects at least `flip_min_sale_events` events in the hours since then. Snipes are unaffected. Not Flip to Craft, Buy Under, held units or Beta. ADR-0028 is to be written with it.
 
 Next, in order: #132 (/tdd, it makes the current Shopping List misleading), then PC items as in later 62 item 2, then date items. Off the PC: #131 (ready-for-agent, /tdd).
