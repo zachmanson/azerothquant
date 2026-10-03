@@ -82,6 +82,7 @@ from brain.recommend import (
 from brain.recommendations import write_recommendations
 from brain.replay import MarketReplay, Policy, replay
 from brain.savedvariables import SavedVariablesError
+from brain.timings import Timings, timed
 from brain.watch import Watcher
 
 log = logging.getLogger("brain")
@@ -114,20 +115,25 @@ def savedvariables_files(config: Config) -> list[Path]:
 
 
 def run_import(
-    config: Config, paths: list[Path], fair_value_cache: FairValueCache | None = None
+    config: Config,
+    paths: list[Path],
+    fair_value_cache: FairValueCache | None = None,
+    timings: Timings | None = None,
 ) -> list[FileResult]:
     """Import each file into the history, in order.
 
     A file that can't be imported (say it was read while the client was still writing
     it) is reported and skipped; it doesn't stop the others. Importing is idempotent,
     so reading a file again later is always safe. `fair_value_cache` as in `recommend`.
+    Each stage is timed in `timings` (#131).
     """
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
     results = []
     with closing(open_history(config.history_path)) as conn:
         for path in paths:
             try:
-                report = import_file(conn, path, config)
+                with timed(timings, "history ingest"):
+                    report = import_file(conn, path, config, timings)
             except (
                 ImportFileError,
                 SavedVariablesError,
@@ -138,7 +144,7 @@ def run_import(
                 results.append(FileResult(path, error=str(e)))
             else:
                 results.append(FileResult(path, report=report))
-        _write_recommendations(conn, config, fair_value_cache=fair_value_cache)
+        _write_recommendations(conn, config, fair_value_cache=fair_value_cache, timings=timings)
     return results
 
 
@@ -216,7 +222,10 @@ def _add_report(total: ImportReport, report: ImportReport) -> None:
 
 
 def _write_recommendations(
-    conn: sqlite3.Connection, config: Config, fair_value_cache: FairValueCache | None = None
+    conn: sqlite3.Connection,
+    config: Config,
+    fair_value_cache: FairValueCache | None = None,
+    timings: Timings | None = None,
 ) -> None:
     """Rewrite every install's Recommendations.lua from the history.
 
@@ -229,24 +238,32 @@ def _write_recommendations(
     # One cache for the pass, so the Beta Prior reuses the Fair Values recommend computed.
     if fair_value_cache is None:
         fair_value_cache = FairValueCache()
+    fair_value_cache.timings = timings
     try:
-        predictions = load_predictions(config.predictions_path)
-        markets = recommend(conn, config, predictions, fair_value_cache=fair_value_cache)
-    except (PredictionsError, GradesError) as e:
-        log.error("No Recommendations written: %s", e)
-        markets = []
-    except Exception:
-        log.exception("No Recommendations written: the Decision Engine failed")
-        markets = []
-    beta_priors = _beta_priors(conn, config, markets, fair_value_cache)
-    for install in config.installs:
-        try:
-            path = write_recommendations(conn, install, markets, beta_priors)
-        except (OSError, sqlite3.Error) as e:
-            log.error("Couldn't write Recommendations for %s: %s", install.path, e)
-            continue
-        if path is None:
-            log.warning("The Addon isn't installed in %s; no Recommendations written", install.path)
+        with timed(timings, "Decision Engine"):
+            try:
+                predictions = load_predictions(config.predictions_path)
+                markets = recommend(conn, config, predictions, fair_value_cache=fair_value_cache)
+            except (PredictionsError, GradesError) as e:
+                log.error("No Recommendations written: %s", e)
+                markets = []
+            except Exception:
+                log.exception("No Recommendations written: the Decision Engine failed")
+                markets = []
+            beta_priors = _beta_priors(conn, config, markets, fair_value_cache)
+    finally:
+        fair_value_cache.timings = None
+    with timed(timings, "Recommendations.lua"):
+        for install in config.installs:
+            try:
+                path = write_recommendations(conn, install, markets, beta_priors)
+            except (OSError, sqlite3.Error) as e:
+                log.error("Couldn't write Recommendations for %s: %s", install.path, e)
+                continue
+            if path is None:
+                log.warning(
+                    "The Addon isn't installed in %s; no Recommendations written", install.path
+                )
 
 
 def _beta_priors(
@@ -299,13 +316,43 @@ def _log_results(results: list[FileResult]) -> None:
             )
 
 
+# The stages of an import, in the order they run (#131). The Scan Pool's are timed only
+# when it's on.
+IMPORT_STAGES = (
+    "SavedVariables",
+    "Archive",
+    "history ingest",
+    "Fair Values",
+    "Decision Engine",
+    "Recommendations.lua",
+)
+
+
+def _log_stages(config: Config, timings: Timings) -> None:
+    """Log how long each stage of an import took, and the Scans in the history, which is
+    what the stages grow with (#131)."""
+    with closing(open_history(config.history_path)) as conn:
+        [scans] = conn.execute("SELECT COUNT(*) FROM scan").fetchone()
+    pool_pull = ["pool pull"] if "pool pull" in timings.seconds else []
+    stages = ", ".join(
+        f"{name} {timings.seconds.get(name, 0.0):.1f}s" for name in [*pool_pull, *IMPORT_STAGES]
+    )
+    # The push comes after the Import took total, so it's kept apart from the stages in it.
+    if "pool push" in timings.seconds:
+        stages += f"; pool push {timings.seconds['pool push']:.1f}s after"
+    log.info("Import stages: %s; %d Scans in the history", stages, scans)
+
+
 def _import_once(config: Config) -> int:
     files = savedvariables_files(config)
     if not files:
         log.error("No %s found in any configured install folder", SAVEDVARIABLES_FILE)
         return 1
-    results = run_import(config, files)
+    timings = Timings()
+    results = run_import(config, files, timings=timings)
     _log_results(results)
+    if any(r.error is None for r in results):
+        _log_stages(config, timings)
     return 1 if any(r.error is not None for r in results) else 0
 
 
@@ -1180,17 +1227,24 @@ def watch_step(
             if pool_sync is not None:
                 pool_sync.tick()
             return
+        timings = Timings(clock)
         if pool_sync is not None:
-            pool_sync.before_import()
-        results = run_import(config, ready, fair_value_cache=fair_value_cache)
+            with timings.stage("pool pull"):
+                pool_sync.before_import()
+        results = run_import(config, ready, fair_value_cache=fair_value_cache, timings=timings)
         _log_results(results)
         failed = [r.path for r in results if r.error is not None]
-        if len(failed) < len(results):
+        imported = len(failed) < len(results)
+        if imported:
             # Up to Recommendations.lua written: what the Addon's RELOAD_READY_AFTER guesses
             # at (#71), less the settle time. Not logged when every file failed.
             log.info("Import took %.1fs", clock() - noticed)
         if pool_sync is not None:
-            pool_sync.after_import()
+            # After the total above, since the Addon doesn't wait on it.
+            with timings.stage("pool push"):
+                pool_sync.after_import()
+        if imported:
+            _log_stages(config, timings)
     except Exception:
         # A long-running watcher logs and carries on rather than exit on one bad pass.
         log.exception("Import failed; will try again")

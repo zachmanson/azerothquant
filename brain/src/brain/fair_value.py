@@ -10,6 +10,7 @@ from statistics import median
 
 from brain.config import Config
 from brain.history import Market, scan_times, supply_at
+from brain.timings import Timings, timed
 
 Supply = list[tuple[int, int]]  # (unit buyout, quantity), in any order
 
@@ -57,6 +58,9 @@ class FairValueCache:
     def __init__(self) -> None:
         self._last_pass: dict[_ScanKey, dict[str, float]] = {}
         self._this_pass: dict[_ScanKey, dict[str, float]] = {}
+        # Set by the caller for a pass: the Fair Values computed, not found here, are timed
+        # in it (#131).
+        self.timings: Timings | None = None
 
     def start_pass(self) -> None:
         self._last_pass, self._this_pass = self._this_pass, {}
@@ -71,7 +75,8 @@ class FairValueCache:
             if key in self._last_pass:
                 self._this_pass[key] = self._last_pass[key]
             else:
-                self._this_pass[key] = fair_values(conn, market, config, at=at)
+                with timed(self.timings, "Fair Values"):
+                    self._this_pass[key] = fair_values(conn, market, config, at=at)
         return self._this_pass[key]
 
 

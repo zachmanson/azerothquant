@@ -153,12 +153,80 @@ def test_watch_logs_how_long_an_import_took(tmp_path, caplog):
     config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
     watcher = Watcher(settle_seconds=0)
     caplog.set_level(logging.INFO)
-    clock = iter([100.0, 110.0, 114.2]).__next__
+    readings = iter([100.0, 110.0])
+    clock = lambda: next(readings, 114.2)  # noqa: E731  noticed at 110, done by 114.2
 
     watch_step(config, watcher, clock)  # sees the file for the first time
     watch_step(config, watcher, clock)  # it has settled: import
 
     assert "Import took 4.2s" in caplog.text
+
+
+IMPORT_STAGES = [
+    "SavedVariables",
+    "Archive",
+    "history ingest",
+    "Fair Values",
+    "Decision Engine",
+    "Recommendations.lua",
+]
+
+
+def logged_stages(text: str) -> tuple[dict[str, float], int]:
+    """The stages of the `Import stages` line in `text`, in order, and the Scans in the
+    history it gives."""
+    [line] = re.findall(r"Import stages: (.*)", text)
+    stages, scans = line.split("; ")[0], line.split("; ")[-1]
+    named = dict(stage.rsplit(" ", 1) for stage in stages.split(", "))
+    return {name: float(s.removesuffix("s")) for name, s in named.items()}, int(scans.split()[0])
+
+
+def test_watch_logs_how_long_each_stage_of_an_import_took(tmp_path, caplog):
+    # Where the Import took time went, so the slow part of the Scan to table loop shows (#131).
+    install_with_savedvariables(tmp_path / "wow")
+    install_addon(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    watcher = Watcher(settle_seconds=0)
+    caplog.set_level(logging.INFO)
+    ticks = iter(range(1000))
+    clock = lambda: float(next(ticks))  # noqa: E731  every reading a second on
+
+    watch_step(config, watcher, clock)  # sees the file for the first time
+    watch_step(config, watcher, clock)  # it has settled: import
+
+    stages, scans = logged_stages(caplog.text)
+    assert list(stages) == IMPORT_STAGES
+    assert all(seconds > 0 for seconds in stages.values())
+    [took] = re.findall(r"Import took (\d+\.\d)s", caplog.text)
+    assert sum(stages.values()) <= float(took)
+    assert scans == 2  # the fixture's
+
+
+def test_import_logs_how_long_each_stage_took(tmp_path, monkeypatch, caplog):
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    monkeypatch.setattr("brain.cli.load_config", lambda path: config)
+    caplog.set_level(logging.INFO)
+
+    assert main(["import"]) == 0
+
+    stages, scans = logged_stages(caplog.text)
+    assert list(stages) == IMPORT_STAGES
+    assert scans == 2
+
+
+def test_watch_logs_no_stages_when_every_file_failed(tmp_path, caplog):
+    file = install_with_savedvariables(tmp_path / "wow")
+    file.write_text("AzerothQuantDB = {", encoding="utf-8")  # half written
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    watcher = Watcher(settle_seconds=0)
+    caplog.set_level(logging.INFO)
+
+    watch_step(config, watcher)  # sees the file for the first time
+    watch_step(config, watcher)  # it has settled: import, which fails
+
+    assert "Couldn't import" in caplog.text
+    assert "Import stages" not in caplog.text
 
 
 def test_watch_keeps_its_fair_value_cache_from_one_pass_to_the_next(tmp_path, monkeypatch):
@@ -205,6 +273,26 @@ def test_watch_pulls_the_pool_before_an_import_and_pushes_right_after(tmp_path):
     assert pool.calls == ["list", "fetch", "list", "push", "push"]
     with closing(open_history(config.history_path)) as conn:
         assert scan_times(conn, MARKET) == [1790000000, FRIEND_SCAN_AT, 1790001200]
+
+
+def test_watch_times_the_pool_sync_before_and_after_an_import(tmp_path, caplog):
+    config, pool = _watching_with_a_pool(tmp_path)
+    syncer = PoolSyncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT + 3600)
+    watcher = Watcher(settle_seconds=0)
+    caplog.set_level(logging.INFO)
+    ticks = iter(range(1000))
+    clock = lambda: float(next(ticks))  # noqa: E731  every reading a second on
+
+    watch_step(config, watcher, clock, pool_sync=syncer)
+    watch_step(config, watcher, clock, pool_sync=syncer)
+
+    stages, scans = logged_stages(caplog.text)
+    assert list(stages) == ["pool pull", *IMPORT_STAGES]
+    [took] = re.findall(r"Import took (\d+\.\d)s", caplog.text)
+    assert sum(stages.values()) <= float(took)
+    # The push comes after the total, so it's named apart from the stages in it.
+    assert re.search(r"; pool push \d+\.\ds after; ", caplog.text)
+    assert scans == 3  # the fixture's two and the friend's
 
 
 def test_watch_pulls_every_pool_sync_minutes_and_retries_a_failed_push(tmp_path):

@@ -36,6 +36,7 @@ from brain.mailbox import (
 from brain.matching import match
 from brain.savedvariables import parse_savedvariables
 from brain.scan import ItemKey, ItemStringError, Scan, ScanFormatError, ScanSource
+from brain.timings import Timings, timed
 
 log = logging.getLogger(__name__)
 
@@ -487,14 +488,17 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, declaration: 
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
-def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportReport:
+def import_file(
+    conn: sqlite3.Connection, path: Path, config: Config, timings: Timings | None = None
+) -> ImportReport:
     """Import every Scan, Mailbox Read and Character Read in the Addon's SavedVariables file.
 
     The Era comes from which configured install folder the file is in, since the Scans
-    themselves don't say.
+    themselves don't say. Reading the file and writing the Archive are timed in `timings`.
     """
     era = _era_of(path, config)
-    data = parse_savedvariables(path.read_text(encoding="utf-8")).get("AzerothQuantDB")
+    with timed(timings, "SavedVariables"):
+        data = parse_savedvariables(path.read_text(encoding="utf-8")).get("AzerothQuantDB")
     if not isinstance(data, dict):
         raise ImportFileError(f"{path}: no AzerothQuantDB table")
     scans = data.get("scans", [])
@@ -506,9 +510,9 @@ def import_file(conn: sqlite3.Connection, path: Path, config: Config) -> ImportR
     character_reads = data.get("characterReads", [])
     if not isinstance(character_reads, list):
         raise ImportFileError(f"{path}: AzerothQuantDB.characterReads must be a sequence")
-    report = import_scans(conn, scans, era, config)
-    import_mailbox_reads(conn, reads, era, config, report)
-    import_character_reads(conn, character_reads, era, config, report)
+    report = import_scans(conn, scans, era, config, timings)
+    import_mailbox_reads(conn, reads, era, config, report, timings)
+    import_character_reads(conn, character_reads, era, config, report, timings)
     return report
 
 
@@ -525,7 +529,11 @@ def _era_of(path: Path, config: Config) -> Era:
 
 
 def import_scans(
-    conn: sqlite3.Connection, raw_scans: list[object], era: Era, config: Config
+    conn: sqlite3.Connection,
+    raw_scans: list[object],
+    era: Era,
+    config: Config,
+    timings: Timings | None = None,
 ) -> ImportReport:
     """Import the Addon's Scans (entries of AzerothQuantDB.scans), oldest first.
 
@@ -539,7 +547,8 @@ def import_scans(
     it is imported (ADR-0005). If that write fails the error propagates and the Scan
     stays out of the history, so the Addon doesn't prune it and it's retried later.
     """
-    return _import(conn, [ArchivedScan(raw) for raw in raw_scans], era, config, archived=False)
+    entries = [ArchivedScan(raw) for raw in raw_scans]
+    return _import(conn, entries, era, config, archived=False, timings=timings)
 
 
 def import_pooled_scans(
@@ -568,6 +577,7 @@ def _import(
     era: Era,
     config: Config,
     archived: bool,
+    timings: Timings | None = None,
 ) -> ImportReport:
     report = ImportReport()
     archive = Archive(config.archive_dir) if config.archive_dir is not None else None
@@ -584,10 +594,11 @@ def _import(
         scans, key=lambda s: (s[0].requested_at, s[1].source is ScanSource.POOL)
     ):
         if archive is not None and not archived:
-            if entry.source is ScanSource.POOL:
-                archive.write_pooled(era, entry.raw, entry.pool_id)
-            else:
-                archive.write(era, entry.raw)
+            with timed(timings, "Archive"):
+                if entry.source is ScanSource.POOL:
+                    archive.write_pooled(era, entry.raw, entry.pool_id)
+                else:
+                    archive.write(era, entry.raw)
         with conn:
             if entry.source is ScanSource.POOL:
                 conn.execute(
@@ -999,6 +1010,7 @@ def import_mailbox_reads(
     era: Era,
     config: Config,
     report: ImportReport | None = None,
+    timings: Timings | None = None,
 ) -> ImportReport:
     """Import the Addon's Mailbox Reads (entries of AzerothQuantDB.mailboxReads), oldest
     first, turning their mail into Outcomes and Purchases.
@@ -1020,7 +1032,8 @@ def import_mailbox_reads(
 
     for raw in sorted(reads, key=lambda r: r["readAt"]):
         if archive is not None:
-            archive.write_mailbox_read(era, raw)
+            with timed(timings, "Archive"):
+                archive.write_mailbox_read(era, raw)
         with conn:
             _import_mailbox_read(conn, raw, era, report)
     return report
@@ -1156,6 +1169,7 @@ def import_character_reads(
     era: Era,
     config: Config,
     report: ImportReport | None = None,
+    timings: Timings | None = None,
 ) -> ImportReport:
     """Import the Addon's Character Reads (entries of AzerothQuantDB.characterReads).
 
@@ -1171,7 +1185,8 @@ def import_character_reads(
             report.warn(f"Skipped a Character Read the Brain can't place: {raw!r:.200}")
             continue
         if archive is not None:
-            archive.write_character_read(era, raw)
+            with timed(timings, "Archive"):
+                archive.write_character_read(era, raw)
         with conn:
             _import_character_read(conn, raw, era, report)
             source = f"Character Read at {raw['readAt']} for {raw['character']}"
