@@ -30,7 +30,13 @@ export async function scanBody(h: Header = header()): Promise<Uint8Array> {
   return gzip(JSON.stringify({ era: h.era, scan: { realm: h.realm, faction: h.faction, requestedAt: Number(h.requestedAt) } }));
 }
 
+// Sends realm and faction percent-encoded, as the Brain does (pool/README.md).
 export function upload(token: string, h: Header, body: BodyInit): Promise<Response> {
+  return uploadRaw(token, { ...h, realm: encodeURIComponent(h.realm), faction: encodeURIComponent(h.faction) }, body);
+}
+
+// Sends the header as given, to test what the Worker does with a bad one.
+export function uploadRaw(token: string, h: Header, body: BodyInit): Promise<Response> {
   return call("/scans", {
     method: "POST",
     token,

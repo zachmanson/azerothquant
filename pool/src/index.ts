@@ -108,9 +108,11 @@ function readHeader(request: Request): ScanHeader | string {
   const h = request.headers;
   const era = h.get("X-Scan-Era") ?? "";
   if (!ERAS.includes(era)) return "X-Scan-Era must be one of " + ERAS.join(", ");
-  const realm = h.get("X-Scan-Realm") ?? "";
+  const realm = decodeHeader(h, "X-Scan-Realm");
+  if (realm === null) return "X-Scan-Realm must be percent-encoded UTF-8";
   if (!isShortText(realm)) return "X-Scan-Realm is required";
-  const faction = h.get("X-Scan-Faction") ?? "";
+  const faction = decodeHeader(h, "X-Scan-Faction");
+  if (faction === null) return "X-Scan-Faction must be percent-encoded UTF-8";
   if (!isShortText(faction)) return "X-Scan-Faction is required";
   const requestedAt = h.get("X-Scan-Requested-At") ?? "";
   if (!/^[0-9]{1,12}$/.test(requestedAt)) return "X-Scan-Requested-At must be an integer (Unix seconds)";
@@ -118,6 +120,16 @@ function readHeader(request: Request): ScanHeader | string {
     return `X-Scan-Requested-At is more than ${MAX_FUTURE_SECONDS / 60} minutes in the future`;
   }
   return { era, realm, faction, requestedAt: Number(requestedAt) };
+}
+
+// Realm and faction names can be outside ASCII, and header values are bytes, so the Brain
+// percent-encodes them as UTF-8 (#127). Null when the value isn't valid percent-encoding.
+function decodeHeader(h: Headers, name: string): string | null {
+  try {
+    return decodeURIComponent(h.get(name) ?? "");
+  } catch {
+    return null;
+  }
 }
 
 function isShortText(value: string): boolean {

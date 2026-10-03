@@ -11,7 +11,7 @@ secret for `/keys`.
 
 | Request | Does |
 | --- | --- |
-| `POST /scans` | Upload a Scan (body: gzipped JSON, ≤ 2 MB). Headers `X-Scan-Era` (`beta` or `live`), `X-Scan-Realm`, `X-Scan-Faction`, `X-Scan-Requested-At` (integer Unix seconds, at most 10 min in the future). Returns `{"id"}`: `201` when stored, `200` with the existing ID when that Market and `requestedAt` is already in the pool. `429` if this key uploaded this Market in the last 10 minutes (wall clock, so a backlog drains one Scan per Market per 10 min). |
+| `POST /scans` | Upload a Scan (body: gzipped JSON, ≤ 2 MB). Headers `X-Scan-Era` (`beta` or `live`), `X-Scan-Realm`, `X-Scan-Faction` (both percent-encoded UTF-8; a malformed escape is a `400`), `X-Scan-Requested-At` (integer Unix seconds, at most 10 min in the future). Returns `{"id"}`: `201` when stored, `200` with the existing ID when that Market and `requestedAt` is already in the pool. `429` if this key uploaded this Market in the last 10 minutes (wall clock, so a backlog drains one Scan per Market per 10 min). |
 | `GET /scans?since=<cursor>&limit=<n>` | `{"entries": [{"id", "era", "realm", "faction", "requestedAt", "mine"}], "rolledBack": [id], "cursor", "more"}`. Entries and rollbacks after the cursor, in order. Omit `since` for the whole pool. `limit` defaults to and is capped at 1000; keep calling with the new cursor while `more` is true. |
 | `GET /scans/<id>` | The stored gzipped Scan (`application/gzip`). `404` once rolled back. |
 | `POST /keys` | Body `{"name"}`. Returns `{"name", "key"}` (`201`). The key is shown once; only its hash is stored. `409` if the name is taken. |

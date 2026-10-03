@@ -112,12 +112,13 @@ class HttpPool:
         self.timeout = timeout
 
     def push(self, era: Era, scan: dict) -> str:
-        # The Worker never unzips a Scan, so its Market and requestedAt go in headers.
+        # The Worker never unzips a Scan, so its Market and requestedAt go in headers. Header
+        # values are bytes, so realm and faction go percent-encoded as UTF-8 (#127).
         headers = {
             "Content-Type": "application/gzip",
             "X-Scan-Era": era.value,
-            "X-Scan-Realm": scan["realm"],
-            "X-Scan-Faction": scan["faction"],
+            "X-Scan-Realm": urllib.parse.quote(scan["realm"], safe=""),
+            "X-Scan-Faction": urllib.parse.quote(scan["faction"], safe=""),
             "X-Scan-Requested-At": str(scan["requestedAt"]),
         }
         body = gzip.compress(json.dumps(scan, ensure_ascii=False).encode("utf-8"))
