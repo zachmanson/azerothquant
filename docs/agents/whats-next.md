@@ -1,3 +1,9 @@
+2026-10-03 (later 67): #125 done (61880e1). Listing matching keeps own in the type key and charges 1 per own row that continues a not-own Listing; units sold are weighted by len(current group) + 1, so the tiebreak never changes the pair count or units sold. A Listing only turns own when no own one is left to pair with (#119 unchanged). ADR-0002 amendment updated.
+
+Next, in order: PC items as in later 62 item 2, then #127 (/tdd; Brain + Worker in one commit, then `wrangler deploy`), then date items.
+
+- Gotchas: same as later 62. Run `brain rebuild` (then restart `brain watch`) to clean up own flags that had already spread; not done this session. #127 needs a Worker redeploy after the commit (wrangler env vars in later 62).
+
 2026-10-03 (later 66): Triaged #14, #19, #10, #82, #125, #126, #127. #14, #19, #10 unchanged (ready-for-human, waiting on data or the PC). #82 stays needs-info; added ForeverForge Auction (CurseForge addon, walord3) as another price-only lead. #125 and #127 are ready-for-agent (briefs on the issues). #126 closed wontfix: only Scans use the server clock, Reads keep the PC clock the Brain shares (ADR-0026 line, `.out-of-scope/server-clock-for-all-addon-stamps.md`).
 
 Next, in order: PC items as in later 62 item 2, then #125 (/tdd), then #127 (/tdd; Brain + Worker in one commit, then `wrangler deploy`), then date items.
