@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from functools import cache, cached_property
-from itertools import groupby
+from itertools import groupby, takewhile
 from types import MappingProxyType
 from typing import NamedTuple
 
@@ -225,9 +225,11 @@ class WhyNot:
     rank: int | None
     rows: int
     name: str | None = None  # only if the player has listed, bought or sold it
-    # The Scan the cheaper Listings were first seen in, when `sale_events` counts only the
-    # ones since (#132, ADR-0028). None if they all count.
+    # The Scan the stretch of cheaper Listings began in, when `sale_events` counts only the
+    # ones since (#132, #135, ADR-0029). None if they all count.
     cheap_since: int | None = None
+    # Whether any Observation Window hours came after `cheap_since` (#135).
+    watched_since: bool = True
 
 
 class BlockReason(StrEnum):
@@ -369,19 +371,25 @@ class _VendorBuy:
 
 @dataclass(frozen=True)
 class _Cheap:
-    """Other players' Listings of an Item Key in the Scan, as (unit buyout, first seen),
-    for a buy to Sell that takes the cheapest and posts above them (#132, ADR-0028): the
-    demand at its post price counts only since they showed up, once the Sale Events per
-    hour before it would have expected `least` of them since."""
+    """The cheapest other player's unit buyout of an Item Key in each Scan, as (Scan,
+    unit buyout), from the latest Scan back to the last one before it with none listed,
+    for a buy that takes the cheapest and posts above them (#132, #135, ADR-0029): the
+    demand at its post price counts only since the stretch of cheaper stock began."""
 
-    listed: tuple[tuple[int, int], ...]
-    least: int
+    lows: tuple[tuple[int, int], ...]
 
     def since(self, post_at: float) -> int | None:
-        """The Scan the earliest Listing under `post_at` was first seen in: the run a
-        buy posting there takes. None without one, as for a Sell posted under the
-        cheapest."""
-        return min((first for unit, first in self.listed if unit < post_at), default=None)
+        """The Scan the stretch began in: the earliest from which every Scan up to the
+        latest had another player's Listing under `post_at`. None if it's only the latest
+        Scan, a Listing too new to judge, or none is under `post_at`, as for a Sell posted
+        under the cheapest."""
+        stretch = list(takewhile(lambda low: low[1] < post_at, self.lows))
+        return stretch[-1][0] if len(stretch) > 1 else None
+
+    @property
+    def latest(self) -> int:
+        """The Scan the cheapest Listings are from, the latest: only for a `since`."""
+        return self.lows[0][0]
 
 
 @dataclass(frozen=True)
@@ -890,6 +898,7 @@ def _why_not(
                 rows=rows,
                 name=names.get(item_key),
                 cheap_since=cheap.since(post_at) if cut else None,
+                watched_since=not cut or demand.window_hours > 0,
             )
         )
     return result
@@ -1602,19 +1611,44 @@ def _valuer(
             enchanting_skills(conn, market, skills_as_of),
         ),
         pricer=pricer,
-        listed=_others_first_seen(seen, at) if scanned else {},
+        listed=_others_lows(seen, [t for t in scan_times(conn, market) if t <= at])
+        if scanned
+        else {},
     )
     return valuer.flips(under, unbound)
 
 
-def _others_first_seen(seen: Sequence[Listing], at: int) -> dict[str, tuple[tuple[int, int], ...]]:
-    """Other players' Listings in the Scan requested at `at`, as (unit buyout, the Scan
-    it was first seen in) per Item Key (#132)."""
-    listed: dict[str, list[tuple[int, int]]] = defaultdict(list)
+def _others_lows(
+    seen: Sequence[Listing], scans: Sequence[int]
+) -> dict[str, tuple[tuple[int, int], ...]]:
+    """The cheapest other player's unit buyout per Item Key in each of `scans` (oldest
+    first), as (Scan, unit buyout) from the latest back to the last before it with none
+    of that Item Key listed (#135)."""
+    # Each Listing as the range of `scans` it was up in, latest end first.
+    spans: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
     for x in seen:
-        if not x.own and x.first_seen <= at <= x.last_seen:
-            listed[x.item_key].append((x.unit_buyout, x.first_seen))
-    return {item_key: tuple(sorted(units)) for item_key, units in listed.items()}
+        first = bisect.bisect_left(scans, x.first_seen)
+        end = bisect.bisect_right(scans, x.last_seen)
+        if not x.own and first < end:
+            spans[x.item_key].append((end, first, x.unit_buyout))
+    stretches = {}
+    for item_key, ranges in spans.items():
+        ranges.sort(reverse=True)
+        # Walk back from the latest Scan while the Listings' ranges leave no Scan out.
+        start = len(scans)
+        for end, first, _ in ranges:
+            if end < start:
+                break
+            start = min(start, first)
+        unit_at: dict[int, int] = {}
+        for end, first, unit in ranges:
+            for i in range(max(first, start), end):
+                unit_at[i] = min(unit_at.get(i, unit), unit)
+        if start < len(scans):
+            stretches[item_key] = tuple(
+                (scans[i], unit_at[i]) for i in reversed(range(start, len(scans)))
+            )
+    return stretches
 
 
 def _by_item(rates: Mapping[str, SellRate]) -> dict[int, tuple[str, ...]]:
@@ -1727,9 +1761,9 @@ class _Valuer:
         )
 
     def cheap(self, item_key: str) -> _Cheap:
-        """Other players' Listings of an Item Key in the Scan with the Scan each was first
-        seen in, for a buy that takes the cheapest of them to Sell (#132)."""
-        return _Cheap(self.listed.get(item_key, ()), self._config.flip_min_sale_events)
+        """The cheapest other player's Listing of an Item Key in each Scan back from this
+        one, for a buy that takes the cheapest of them to Sell (#132, #135)."""
+        return _Cheap(self.listed.get(item_key, ()))
 
     def deposit(self, item_key: str) -> float:
         """What posting one unit of an Item Key costs (#78): as on its latest Sold invoice,
@@ -3496,13 +3530,14 @@ def _demand_at(
 ) -> SellRate | None:
     """The Sell Rate a unit bought to Sell counts on when posted at `post_at` (#107): only
     the Sale Events at or above it, and for a buy that takes the `cheap` Listings under
-    it, only since they showed up (#132), pooled with a Prediction buy's `beta` Sell Rate
-    (#110). None without a Sell Rate or a price."""
+    it, only since the stretch of cheaper stock began (#132, #135), pooled with a
+    Prediction buy's `beta` Sell Rate (#110). None without a Sell Rate or a price."""
     if post_at is None:
         return None
     demand = None if rate is None else rate.at_or_above(post_at)
-    if demand is not None and cheap is not None:
-        demand = demand.since_cheap(cheap.since(post_at), cheap.least)
+    cutoff = None if cheap is None else cheap.since(post_at)
+    if demand is not None and cutoff is not None:
+        demand = demand.since_cheap(cutoff, cheap.latest)
     return demand if beta is None else beta.pooled(demand, post_at)
 
 

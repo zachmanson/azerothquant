@@ -1569,9 +1569,18 @@ def test_recommend_why_not_an_item_key_shows_every_check(tmp_path):
     ]
 
 
-def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(tmp_path):
-    # #132: Linen sold 2 an hour at 10s for 10 h, then a 1s showed up and nothing sold for
-    # the 24 h since, so only the Sale Events since it count at 9s 99c.
+@pytest.mark.parametrize(
+    ("scan_gap", "note"),
+    [
+        (1, ""),  # #132: watched hourly since, nothing sold
+        (2, " (not watched since)"),  # #135: Scans too far apart to watch
+    ],
+)
+def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(
+    tmp_path, scan_gap, note
+):
+    # Linen sold 2 an hour at 10s for 10 h, then a 1s showed up and stayed, and nothing
+    # sold since, so only the Sale Events since it count at 9s 99c.
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
         flip_min_sale_events=3,
@@ -1596,7 +1605,7 @@ def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_sinc
         }
 
     scans = [scan(t0 + n * hour, (40 - 2 * n, 1000)) for n in range(10)]
-    scans += [scan(cheap_at + n * hour, (20, 1000), (1, 100)) for n in range(25)]
+    scans += [scan(cheap_at + n * scan_gap * hour, (20, 1000), (1, 100)) for n in range(25)]
     read = {
         "readAt": t0,
         "realm": MARKET.realm,
@@ -1613,9 +1622,8 @@ def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_sinc
 
     since = datetime.fromtimestamp(cheap_at).strftime("%Y-%m-%d %H:%M")
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
-    assert ["Sale Events", "fail", f"0/3 Sale Events since cheaper Listings went up {since}"] in (
-        lines
-    )
+    expected = f"0/3 Sale Events since cheaper Listings went up {since}{note}"
+    assert ["Sale Events", "fail", expected] in lines
 
 
 def test_recommend_why_not_an_item_key_on_the_shopping_list_shows_its_row(tmp_path):

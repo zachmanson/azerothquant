@@ -1162,6 +1162,100 @@ def test_a_prediction_buys_max_loss_counts_only_the_sales_since_its_cheap_run(db
     assert result[MARKET].prediction_buys == []
 
 
+# --- The stretch the cheap stock has been up (#135, ADR-0029) ---
+
+
+def walls(*cheap_scans, gap=12 * HOUR):
+    """The 1000s sell 2 an hour for 10 h, one Sale Event each, then Scans `gap` apart
+    from CHEAP_AT, too far apart to watch, each with the cheap Listings given for it."""
+    scans = [scan(T0 + n * HOUR, row(quantity=40 - 2 * n, unit=1000)) for n in range(10)]
+    for n, cheap in enumerate(cheap_scans):
+        scans.append(scan(CHEAP_AT + n * gap, row(quantity=20, unit=1000), *cheap))
+    return scans
+
+
+def test_a_flip_on_a_fresh_wall_counts_only_since_the_cheap_stock_before_it_went_up(db):
+    # Each Scan's cheap wall is gone by the next and a new one is up: the one bought is
+    # new this Scan, but cheap stock has been up a day since CHEAP_AT, nothing watched.
+    result = run(
+        db,
+        walls([row(unit=100)], [row(unit=110)], [row(unit=120)]),
+        [character_read(money=GOLD)],
+        config=FLIPS_NEED_3,
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_on_cheap_stock_up_under_a_day_and_never_watched_counts_the_sales_before(db):
+    # Up 4 h in Scans 2 h apart: too new to judge with nothing watched since.
+    result = run(
+        db,
+        walls([row(unit=100)], [row(unit=100)], [row(unit=100)], gap=2 * HOUR),
+        [character_read(money=GOLD)],
+        config=FLIPS_NEED_3,
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at, flip.sale_events) == (1, 999, 10)
+
+
+def test_a_flip_on_cheap_stock_up_two_scans_is_cut_however_little_was_watched_since(db):
+    # 10 Sale Events in 10 h would expect only 1 in the hour since, too few to tell a
+    # crash from a quiet hour, but the 100 sat unbought: only the Sale Events since count.
+    result = run(db, crashed(hours_since=1), [character_read(money=GOLD)], config=FLIPS_NEED_3)
+
+    assert result[MARKET].shopping_list == []
+
+
+@pytest.mark.parametrize(("hours_up", "flips"), [(0, 1), (1, 0)])
+def test_a_thin_item_keys_flip_is_cut_once_its_cheap_stock_sat_through_a_watched_hour(
+    db, hours_up, flips
+):
+    # Watched hourly for 6 days, a 1000 sold once a day: 6 Sale Events in 144 h would
+    # expect almost none in the hour since the 100 showed up, but it sat unbought.
+    scans = [scan(T0 + h * HOUR, row(quantity=20 - h // 24, unit=1000)) for h in range(145)]
+    cheap_at = T0 + 145 * HOUR
+    scans += [
+        scan(cheap_at + h * HOUR, row(quantity=14, unit=1000), row(unit=100))
+        for h in range(hours_up + 1)
+    ]
+
+    week = replace(FLIPS_NEED_3, sale_horizon_seconds=7 * DAY)
+    result = run(db, scans, [character_read(money=GOLD)], config=week)
+
+    assert len(result[MARKET].shopping_list) == flips
+
+
+def test_a_scan_with_no_cheap_stock_ends_the_stretch_before_it(db):
+    # The 100 was bought out by the second Scan: the stretch starts at the third.
+    _, why = why_not(
+        db,
+        walls([row(unit=100)], [], [row(unit=110)], [row(unit=120)], [row(unit=130)]),
+        [character_read(money=GOLD)],
+        FLIPS_NEED_3,
+    )
+
+    linen = why[LINEN_KEY]
+    assert (linen.failed, linen.sale_events, linen.cheap_since) == (
+        Check.SALE_EVENTS,
+        0,
+        CHEAP_AT + 24 * HOUR,
+    )
+
+
+def test_a_prediction_buys_max_loss_counts_only_since_the_cheap_stock_before_its_wall(db):
+    result = run(
+        db,
+        walls([row(unit=100)], [row(unit=110)], [row(unit=120)]),
+        [character_read(money=GOLD)],
+        config=FLIPS_NEED_3,
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert result[MARKET].prediction_buys == []
+
+
 # --- Days to Sell (#109, ADR-0020) ---
 
 

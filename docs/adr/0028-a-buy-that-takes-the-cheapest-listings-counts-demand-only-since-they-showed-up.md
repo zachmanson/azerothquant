@@ -1,5 +1,7 @@
 # A buy that takes the cheapest Listings counts demand only since they showed up
 
+Amended by ADR-0029 (#135): the cutoff is the start of the stretch of cheap stock, and the expected-sales test is gone.
+
 A Flip to Sell's Sell Rate at its post price counts every Sale Event at or above that price in the 14-day range (ADR-0004, #107). After a crash, nearly all of those Sale Events are from before the cheap supply showed up. Once it did, nobody paid the old price any more, but the Brain still suggested buying the whole cheap wall and reposting at the old price: 4807 Lesser Magic Essence at 47c, posted at 3.21s, "sells in 1.1 days" (#132). Buying the wall doesn't bring the old price back either. The sellers who posted at 20c will just post more at 20c.
 
 So a buy that **takes the cheapest other players' Listings and posts above them** stops counting demand from before those Listings showed up, once enough time has passed to judge.

@@ -12,6 +12,10 @@ from brain.fair_value import FairValueCache
 from brain.history import Listing, Market, listings
 from brain.observation import observation_windows_between, sell_rate_evidence, window_hours
 
+# How long a stretch of cheaper Listings with no Observation Window hours since can stay
+# up before a buy to Sell stops counting the demand from before it (#135, ADR-0029).
+UNWATCHED_STRETCH_SECONDS = 24 * 3600
+
 
 @dataclass(frozen=True)
 class SellRate:
@@ -53,24 +57,21 @@ class SellRate:
             sale_prices=kept,
         )
 
-    def since_cheap(self, cutoff: int | None, least: float) -> "SellRate":
+    def since_cheap(self, cutoff: int | None, now: int) -> "SellRate":
         """This Sell Rate from only the Sale Events and Observation Window hours after
-        `cutoff`, the Scan cheaper Listings than a buy to Sell would post at were first
-        seen in (#132, ADR-0028). Only once the Sale Events per hour before it, raw, would
-        have expected at least `least` of them in the hours since: until then there's too
-        little watching since to tell a crash from a quiet spell, and it's left whole."""
+        `cutoff`, the Scan the stretch of cheaper Listings than a buy to Sell would post at
+        began in (#132, #135, ADR-0029), as of the Scan at `now`. With no hours watched
+        since, it's left whole until the stretch is a day old, and then nothing sells."""
         if cutoff is None:
             return self
-        before = sum(1 for _, _, at in self.sale_prices if at <= cutoff)
-        hours_before = sum(end - start for start, end in self.windows if end <= cutoff) / 3600
-        hours_after = self.window_hours - hours_before
-        if not before or before / hours_before * hours_after < least:
+        hours_after = sum(end - start for start, end in self.windows if end > cutoff) / 3600
+        if not hours_after and now - cutoff < UNWATCHED_STRETCH_SECONDS:
             return self
         kept = tuple(sale for sale in self.sale_prices if sale[2] > cutoff)
         units = sum(n for _, n, _ in kept)
         return replace(
             self,
-            units_per_day=units / hours_after * 24,
+            units_per_day=units / hours_after * 24 if hours_after else 0.0,
             sale_events=len(kept),
             window_hours=hours_after,
             sale_units=units,

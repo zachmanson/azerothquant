@@ -196,66 +196,62 @@ def hourly(before_events, after_hours, after_events=()):
     )
 
 
-@pytest.mark.parametrize(
-    "after_hours",
-    [
-        2,  # 6 events in 10 h expects 1.2 in the 2 h since
-        4,  # 2.4 Sale Events: their 4.8 units don't count, Sale Events do
-    ],
-)
-def test_too_few_hours_since_the_cutoff_to_judge_leave_the_sell_rate_whole(after_hours):
-    rate = hourly(before_events=6, after_hours=after_hours)
+@pytest.mark.parametrize("after_hours", [2, 4])
+def test_a_cutoff_drops_the_events_and_hours_before_it_however_few_hours_since(after_hours):
+    # #135: 6 events in 10 h would expect only 1.2 or 2.4 since, but the cut applies anyway.
+    rate = hourly(before_events=6, after_hours=after_hours, after_events=(CUTOFF + HOUR,))
 
-    assert rate.since_cheap(CUTOFF, least=3) == rate
-
-
-def test_a_cutoff_that_expected_enough_sales_drops_the_events_and_hours_before_it():
-    # 6 events in 10 h expects 3 in the 5 h since: they're cut, leaving the one after.
-    rate = hourly(before_events=6, after_hours=5, after_events=(CUTOFF + 2 * HOUR,))
-
-    assert rate.since_cheap(CUTOFF, least=3) == replace(
+    assert rate.since_cheap(CUTOFF, now=CUTOFF + 30 * HOUR) == replace(
         rate,
-        units_per_day=2 / 5 * 24,
+        units_per_day=2 / after_hours * 24,
         sale_events=1,
-        window_hours=5,
+        window_hours=after_hours,
         sale_units=2,
-        sale_prices=((100, 2, CUTOFF + 2 * HOUR),),
-        windows=tuple((CUTOFF + h * HOUR, CUTOFF + (h + 1) * HOUR) for h in range(5)),
+        sale_prices=((100, 2, CUTOFF + HOUR),),
+        windows=tuple((CUTOFF + h * HOUR, CUTOFF + (h + 1) * HOUR) for h in range(after_hours)),
     )
 
 
 def test_a_cut_with_nothing_sold_since_sells_zero_a_day():
     rate = hourly(before_events=10, after_hours=24)
 
-    cut = rate.since_cheap(CUTOFF, least=3)
+    cut = rate.since_cheap(CUTOFF, now=CUTOFF + 30 * HOUR)
 
     assert (cut.units_per_day, cut.sale_events, cut.window_hours) == (0, 0, 24)
 
 
-@pytest.mark.parametrize(("days_since", "cut"), [(1, False), (8, True)])
-def test_a_thin_item_key_takes_days_since_the_cutoff_to_judge(days_since, cut):
-    # 6 Sale Events in the 13 days before expect 0.46 in 1 day since, 3.7 in 8.
-    hours_before = 13 * 24
-    cutoff = T0 + hours_before * HOUR
-    hours = hours_before + days_since * 24
-    rate = SellRate(
-        units_per_day=6 / hours * 24,
-        sale_events=6,
-        window_hours=hours,
-        reposts=0,
-        coincidences=0,
-        sale_units=6,
-        sale_prices=tuple((100, 1, T0 + d * DAY) for d in range(1, 7)),
-        windows=tuple((T0 + h * HOUR, T0 + (h + 1) * HOUR) for h in range(hours)),
-    )
+@pytest.mark.parametrize(
+    ("hours_up", "cut"),
+    [
+        (23, False),  # too new to judge with nothing watched since: left whole
+        (24, True),  # a day up unbought: nothing sells
+    ],
+)
+def test_a_cutoff_with_no_hours_watched_since_waits_a_day(hours_up, cut):
+    # #135: the cheap stock went up after the last Observation Window.
+    rate = hourly(before_events=10, after_hours=0)
 
-    assert (rate.since_cheap(cutoff, least=3).sale_events == 0) == cut
+    result = rate.since_cheap(CUTOFF, now=CUTOFF + hours_up * HOUR)
+
+    assert result == (
+        replace(
+            rate,
+            units_per_day=0,
+            sale_events=0,
+            window_hours=0,
+            sale_units=0,
+            sale_prices=(),
+            windows=(),
+        )
+        if cut
+        else rate
+    )
 
 
 def test_no_cutoff_leaves_the_sell_rate_whole():
     rate = hourly(before_events=10, after_hours=24)
 
-    assert rate.since_cheap(None, least=3) == rate
+    assert rate.since_cheap(None, now=CUTOFF) == rate
 
 
 @pytest.mark.parametrize(("ended_ago", "counted"), [(14 * DAY - 1, True), (14 * DAY, False)])

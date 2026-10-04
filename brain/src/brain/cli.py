@@ -979,7 +979,8 @@ def _numbers(w: WhyNot, check: Check) -> str:
             if w.cheap_since is None:
                 return counted
             since = datetime.fromtimestamp(w.cheap_since).strftime("%Y-%m-%d %H:%M")
-            return f"{counted} since cheaper Listings went up {since}"
+            note = "" if w.watched_since else " (not watched since)"
+            return f"{counted} since cheaper Listings went up {since}{note}"
         case Check.ROOM:
             at = "" if w.post_at is None else f" at {_money(w.post_at)}"
             return f"room for {w.room}{at}, needs {w.held} held + {w.needs}"
