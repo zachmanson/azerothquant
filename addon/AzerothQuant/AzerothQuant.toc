@@ -32,6 +32,7 @@ TooltipLines.lua
 BuyUnderMatch.lua
 LootAlert.lua
 PostButton.lua
+SearchButton.lua
 
 # WoW glue (thin; not unit tested)
 DataAddon.lua

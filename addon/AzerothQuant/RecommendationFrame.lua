@@ -8,7 +8,9 @@
 --
 -- Hover shows a tooltip, a click selects the row and shift-click links the item
 -- (ADR-0016). With the AH open, the Post button posts the selected Sell row (#81): one
--- protected call per click, made only in onPostClick (spec/protected_calls_spec.lua).
+-- protected call per click, made only in onPostClick (spec/protected_calls_spec.lua). On a
+-- Shopping List, Prediction buys or single-item Buy Under row not yet in the bags, the Search button takes its slot (#39): a click
+-- searches the AH for the row's Item Key and a line under it shows the cheapest Listing.
 -- Selecting a Craft row opens its Craft Chain panel on the left (#77). A right-click on a
 -- buy-side row toggles its Bought mark (#97), saved per Market in AzerothQuantDB.bought:
 -- it greys out and the Budget fold runs on the gold left.
@@ -25,6 +27,7 @@ local Scanner = ns.Scanner
 local DataAddon = ns.DataAddon
 local Chat = ns.Chat
 local PostButton = ns.PostButton
+local SearchButton = ns.SearchButton
 local Character = ns.Character
 local TooltipLines = ns.TooltipLines
 
@@ -81,12 +84,14 @@ local redrawQueued = false
 -- The selected row's id (RecommendationTable.find). It survives a redraw while a row with
 -- the same Item Key and action is on show, and clears otherwise.
 local selectedId
--- That row as the last redraw built it, from whichever tab has it.
+-- That row as the last redraw built it, from whichever tab has it, and that tab's title.
 local selectedRow
+local selectedSection
 
 -- C_Item on newer clients (the Beta has no global GetItemInfo), the old globals otherwise.
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local getItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+local getDetailedItemLevelInfo = C_Item and C_Item.GetDetailedItemLevelInfo or GetDetailedItemLevelInfo
 
 -- The logged-in Character's Market's key in AzerothQuantDB.budgets and .daysToSell.
 local function marketKey()
@@ -613,9 +618,12 @@ function redraw()
   if not kept then
     selectedId = nil
   end
-  selectedRow = nil
+  selectedRow, selectedSection = nil, nil
   for _, section in ipairs(view.sections or {}) do
-    selectedRow = selectedRow or (selectedId and RecommendationTable.find(section, selectedId))
+    if not selectedRow then
+      selectedRow = selectedId and RecommendationTable.find(section, selectedId)
+      selectedSection = selectedRow and section.title
+    end
   end
   local row = shown and selectedId and RecommendationTable.find(shown, selectedId)
   drawChain(row and row.record.action == "Craft" and row.record or nil)
@@ -867,7 +875,12 @@ local pending -- true while a post waits for the AH to confirm it
 -- unrelated UI error ended the wait, so the same units can't be posted twice.
 local lastPost
 local postError -- { id, text }: why the last post of that row failed, for the tooltip
-local search -- { id, itemID, key, commodity, lowest }: the selected row's undercut search
+-- { id, itemID, queryKey, itemKey, results, lowest }: the last search sent, for Post's undercut
+-- line or Search's live line. itemKey is set only by Search (#39); results are nil until
+-- they land.
+local search
+local searchButton
+local searchState -- SearchButton.state for the selected row, or nil when the slot is Post's
 
 -- This Character's unbound units of the Item Key in its bags, and the first slot of them
 -- that isn't locked (being moved), as an ItemLocation.
@@ -898,19 +911,43 @@ local function isCommodity(location)
   return nil
 end
 
--- One search for the selected row, for the undercut line. Gear needs its full Item Key
--- (item level, suffix) from the item itself, a commodity only its itemID (#39).
-local function sendSearch(row, location, commodity)
-  local itemID = C_Item.GetItemID(location)
-  local key = commodity and C_AuctionHouse.MakeItemKey(itemID) or C_AuctionHouse.GetItemKeyFromItem(location)
-  search = { id = row.id, itemID = itemID, key = key, commodity = commodity }
-  C_AuctionHouse.SendSearchQuery(key, {}, false)
+-- One search for the selected row. itemKey, given by Search, keeps only that Item Key's
+-- Listings of gear (searchResults).
+local function sendSearch(row, itemID, queryKey, itemKey)
+  search = { id = row.id, itemID = itemID, queryKey = queryKey, itemKey = itemKey }
+  C_AuctionHouse.SendSearchQuery(queryKey, {}, false)
 end
 
--- The search's results as PostButton.lowestOther takes them.
-local function searchResults()
+-- The search key for an item in the bags. Gear needs its full key (item level, suffix)
+-- from the item itself, a commodity only its itemID (#39).
+local function bagKey(location, commodity)
+  local itemID = C_Item.GetItemID(location)
+  return itemID, commodity and C_AuctionHouse.MakeItemKey(itemID) or C_AuctionHouse.GetItemKeyFromItem(location)
+end
+
+-- The search key for a row's Item Key when none is in the bags, or nil until the client
+-- has the item. Only an item in the bags gives a suffixed key, so gear searches by itemID
+-- and item level, and searchResults keeps the Listings of the row's exact Item Key. A
+-- stack of more than one is taken as a commodity, which searches by itemID alone.
+-- Unchecked in game for suffixed gear: see #39 slice 1's in-game check.
+local function buyKey(itemKey)
+  local itemString = RecommendationTable.itemString(itemKey)
+  local _, _, _, level, _, _, _, maxStack = getItemInfo(itemString)
+  if not maxStack then
+    return nil
+  end
+  local itemID = tonumber(itemKey:match("^(%d+)"))
+  if maxStack > 1 then
+    return itemID, C_AuctionHouse.MakeItemKey(itemID)
+  end
+  return itemID, C_AuctionHouse.MakeItemKey(itemID, getDetailedItemLevelInfo(itemString) or level)
+end
+
+-- The search's results as PostButton.lowestOther and SearchButton.liveLine take them.
+-- commodity says which results landed (the event that fired).
+local function searchResults(commodity)
   local results = {}
-  if search.commodity then
+  if commodity then
     for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(search.itemID) do
       local r = C_AuctionHouse.GetCommoditySearchResultInfo(search.itemID, i)
       if r then
@@ -918,10 +955,11 @@ local function searchResults()
       end
     end
   else
-    for i = 1, C_AuctionHouse.GetNumItemSearchResults(search.key) do
-      local r = C_AuctionHouse.GetItemSearchResultInfo(search.key, i)
-      -- A bid-only Listing has no buyout to undercut.
-      if r and r.buyoutAmount and r.quantity > 0 then
+    for i = 1, C_AuctionHouse.GetNumItemSearchResults(search.queryKey) do
+      local r = C_AuctionHouse.GetItemSearchResultInfo(search.queryKey, i)
+      -- A bid-only Listing has no buyout to undercut or buy at.
+      local wanted = r and (not search.itemKey or (r.itemLink and TooltipLines.itemKey(r.itemLink) == search.itemKey))
+      if wanted and r.buyoutAmount and r.quantity > 0 then
         results[#results + 1] = {
           unitPrice = r.buyoutAmount / r.quantity,
           quantity = r.quantity,
@@ -937,7 +975,6 @@ function refreshPost()
   if not postButton then
     return
   end
-  postButton:SetShown(ahOpen)
   -- A new import (a reload, or the Load button) starts the counts over.
   if AzerothQuantRecommendations ~= postedFor then
     posted, postedFor = {}, AzerothQuantRecommendations
@@ -946,6 +983,25 @@ function refreshPost()
   local units, location = 0, nil
   if ahOpen and row and row.record.itemKey then
     units, location = inBags(row.record.itemKey)
+  end
+  -- Search or Post share the slot under the frame (#39).
+  searchState = SearchButton.state(row, {
+    section = selectedSection,
+    ahOpen = ahOpen,
+    throttled = ahOpen and not C_AuctionHouse.IsThrottledMessageSystemReady(),
+    bagUnits = units,
+    loaded = ahOpen and row and row.record.itemKey and buyKey(row.record.itemKey) ~= nil,
+  })
+  searchButton:SetShown(ahOpen and searchState ~= nil)
+  postButton:SetShown(ahOpen and searchState == nil)
+  if searchState then
+    postState = nil
+    searchButton:SetText(searchState.label)
+    searchButton:SetEnabled(searchState.enabled)
+    local mine = search and search.id == row.id and search.itemKey
+    local line = mine and (search.results and SearchButton.liveLine(search.results, row.record.price) or "Searching...")
+    searchButton.live:SetText(line or "")
+    return
   end
   local commodity
   if location then
@@ -964,9 +1020,25 @@ function refreshPost()
   postButton:SetWidth(math.max(90, postButton:GetTextWidth() + 30))
   postButton:SetEnabled(postState.enabled)
   postButton.undercut:SetText(postState.undercut or "")
-  if postState.call and not (search and search.id == row.id) then
-    sendSearch(row, location, commodity)
+  -- A Search's results predate the buy that made the row postable, so Post searches again.
+  if postState.call and not (search and search.id == row.id and not search.itemKey) then
+    sendSearch(row, bagKey(location, commodity))
   end
+end
+
+-- Searches the Auction House for the selected row's item, only when clicked (ADR-0016). A
+-- search is a read: nothing here is protected.
+local function onSearchClick()
+  local call = searchState and searchState.call
+  if not call then
+    return
+  end
+  local itemID, key = buyKey(call.itemKey)
+  if not key then
+    return
+  end
+  sendSearch(selectedRow, itemID, key, call.itemKey)
+  refreshPost()
 end
 
 local function onPostClick(self)
@@ -1007,6 +1079,24 @@ local function createPostButton()
   postButton.undercut:SetPoint("TOPRIGHT", postButton, "BOTTOMRIGHT", 0, -4)
   postButton.undercut:SetTextColor(1, 0.5, 0.25)
   postButton:Hide()
+
+  -- Search takes the same slot on a buy-side row (#39).
+  searchButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  searchButton:SetSize(90, 22)
+  searchButton:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -6, -2)
+  searchButton:SetText("Search")
+  searchButton:SetScript("OnClick", onSearchClick)
+  searchButton:SetMotionScriptsWhileDisabled(true)
+  searchButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    local tip = searchState and searchState.reason or "Search the Auction House for the selected row's item."
+    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  searchButton:SetScript("OnLeave", GameTooltip_Hide)
+  searchButton.live = searchButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  searchButton.live:SetPoint("TOPRIGHT", searchButton, "BOTTOMRIGHT", 0, -4)
+  searchButton:Hide()
 end
 
 local function createFrame()
@@ -1099,6 +1189,8 @@ events:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
 events:RegisterEvent("UI_ERROR_MESSAGE")
 events:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
 events:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+-- Search waits for the AH to take another search (#39).
+events:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 pcall(events.RegisterEvent, events, "AUCTION_HOUSE_POST_ERROR") -- not on every client
 events:SetScript("OnEvent", function(_, event, arg1, arg2)
   if event == "ADDON_LOADED" then
@@ -1141,10 +1233,16 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
     postError = { id = lastPost.id, text = "The post failed: " .. why }
     refreshPost()
   elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
-    if search then
-      search.lowest = PostButton.lowestOther(searchResults())
+    -- arg1 is the itemID (commodity) or the item key searched. Another item's results
+    -- (Blizzard's own searches) aren't ours.
+    local itemID = type(arg1) == "table" and arg1.itemID or arg1
+    if search and (itemID == nil or itemID == search.itemID) then
+      search.results = searchResults(event == "COMMODITY_SEARCH_RESULTS_UPDATED")
+      search.lowest = PostButton.lowestOther(search.results)
       refreshPost()
     end
+  elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+    refreshPost()
   end
 end)
 
