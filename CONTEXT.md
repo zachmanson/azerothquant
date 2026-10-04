@@ -5,7 +5,7 @@ A personal Auction House trading system for World of Warcraft: Forever. An in-ga
 ## Components
 
 **Addon**:
-The in-game half. It records market and personal data and shows the Recommendation Table. It acts only on the row the player selected, one protected action per click (post or cancel), and never buys, bids or takes mail (ADR-0016).
+The in-game half. It records market and personal data and shows the Recommendation Table. It acts only on the row the player selected, one protected action per click (post or cancel), and never buys, bids or takes mail (ADR-0016). Cancel waits on #134.
 _Avoid_: bot, automation
 
 **Brain**:
@@ -238,7 +238,7 @@ The best Action for one Candidate Item, with quantity, price ceiling, the full A
 _Avoid_: signal, tip
 
 **Recommendation Table**:
-The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). It shows the Market of the Character's own faction, the only one the Brain recommends for.
+The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). Only Post exists so far; Cancel waits on #134. It shows the Market of the Character's own faction, the only one the Brain recommends for.
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:

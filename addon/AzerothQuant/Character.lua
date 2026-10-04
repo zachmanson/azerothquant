@@ -104,6 +104,9 @@ local function bankIds()
   return ContainerIds.bank(CONTAINER_CONSTANTS)
 end
 
+-- The Post button finds what it posts in the same bags (#81).
+ns.Character = { bagIds = bagIds }
+
 local function readBank()
   timer = nil
   -- The main bank reports no slots once it can't be read; keep the last good read then.

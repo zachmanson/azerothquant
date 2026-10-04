@@ -6,10 +6,12 @@
 -- last picked and each Market's Budget and Days to Sell are saved in AzerothQuantDB;
 -- open/closed is not.
 --
--- Read-only: hover shows a tooltip, a click selects the row and shift-click links the item
--- (ADR-0016). Selecting a Craft row opens its Craft Chain panel on the left (#77). A
--- right-click on a buy-side row toggles its Bought mark (#97), saved per Market in
--- AzerothQuantDB.bought: it greys out and the Budget fold runs on the gold left.
+-- Hover shows a tooltip, a click selects the row and shift-click links the item
+-- (ADR-0016). With the AH open, the Post button posts the selected Sell row (#81): one
+-- protected call per click, made only in onPostClick (spec/protected_calls_spec.lua).
+-- Selecting a Craft row opens its Craft Chain panel on the left (#77). A right-click on a
+-- buy-side row toggles its Bought mark (#97), saved per Market in AzerothQuantDB.bought:
+-- it greys out and the Budget fold runs on the gold left.
 -- The Budget box (#86) only saves what the player will spend: the table hides options over
 -- it at once, and Character.lua hands it to the Brain in the next Character Read. The Days
 -- to Sell box (#109) is saved and handed over the same way, and changes nothing until then.
@@ -22,6 +24,9 @@ local Scan = ns.Scan
 local Scanner = ns.Scanner
 local DataAddon = ns.DataAddon
 local Chat = ns.Chat
+local PostButton = ns.PostButton
+local Character = ns.Character
+local TooltipLines = ns.TooltipLines
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
@@ -76,6 +81,8 @@ local redrawQueued = false
 -- The selected row's id (RecommendationTable.find). It survives a redraw while a row with
 -- the same Item Key and action is on show, and clears otherwise.
 local selectedId
+-- That row as the last redraw built it, from whichever tab has it.
+local selectedRow
 
 -- C_Item on newer clients (the Beta has no global GetItemInfo), the old globals otherwise.
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
@@ -155,7 +162,7 @@ local function showTooltip(line)
   GameTooltip:Show()
 end
 
-local redraw
+local redraw, refreshPost
 
 local function linkInChat(line)
   local _, link = getItemInfo(line.itemString)
@@ -606,8 +613,13 @@ function redraw()
   if not kept then
     selectedId = nil
   end
+  selectedRow = nil
+  for _, section in ipairs(view.sections or {}) do
+    selectedRow = selectedRow or (selectedId and RecommendationTable.find(section, selectedId))
+  end
   local row = shown and selectedId and RecommendationTable.find(shown, selectedId)
   drawChain(row and row.record.action == "Craft" and row.record or nil)
+  refreshPost()
 end
 
 -- GET_ITEM_INFO_RECEIVED fires once per item, often dozens at a time: redraw once after.
@@ -842,6 +854,161 @@ local function createReloadButton()
   end)
 end
 
+-- The Post button (#81, ADR-0016). It posts the selected row only when clicked, and never
+-- moves on to the next row. Units posted are counted per row id for this session (until
+-- the next import or /reload): the next Scan shows the Listings as the player's own.
+local ahOpen = false
+local postButton
+local postState -- PostButton.state for the selected row; onPostClick makes its call
+local posted = {} -- units posted by row id
+local postedFor -- the AzerothQuantRecommendations the counts are against
+local pending -- true while a post waits for the AH to confirm it
+-- { id, quantity }: the last post sent. Counted when the AH confirms it, even after an
+-- unrelated UI error ended the wait, so the same units can't be posted twice.
+local lastPost
+local postError -- { id, text }: why the last post of that row failed, for the tooltip
+local search -- { id, itemID, key, commodity, lowest }: the selected row's undercut search
+
+-- This Character's unbound units of the Item Key in its bags, and the first slot of them
+-- that isn't locked (being moved), as an ItemLocation.
+local function inBags(itemKey)
+  local units, location = 0, nil
+  for _, bag in ipairs(Character.bagIds()) do
+    for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+      local info = C_Container.GetContainerItemInfo(bag, slot)
+      if info and not info.isBound and TooltipLines.itemKey(info.hyperlink) == itemKey then
+        units = units + info.stackCount
+        if not location and not info.isLocked then
+          location = ItemLocation:CreateFromBagAndSlot(bag, slot)
+        end
+      end
+    end
+  end
+  return units, location
+end
+
+-- true for a commodity, false for gear, nil until the client knows.
+local function isCommodity(location)
+  local status = C_AuctionHouse.GetItemCommodityStatus(location)
+  if status == Enum.ItemCommodityStatus.Commodity then
+    return true
+  elseif status == Enum.ItemCommodityStatus.Item then
+    return false
+  end
+  return nil
+end
+
+-- One search for the selected row, for the undercut line. Gear needs its full Item Key
+-- (item level, suffix) from the item itself, a commodity only its itemID (#39).
+local function sendSearch(row, location, commodity)
+  local itemID = C_Item.GetItemID(location)
+  local key = commodity and C_AuctionHouse.MakeItemKey(itemID) or C_AuctionHouse.GetItemKeyFromItem(location)
+  search = { id = row.id, itemID = itemID, key = key, commodity = commodity }
+  C_AuctionHouse.SendSearchQuery(key, {}, false)
+end
+
+-- The search's results as PostButton.lowestOther takes them.
+local function searchResults()
+  local results = {}
+  if search.commodity then
+    for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(search.itemID) do
+      local r = C_AuctionHouse.GetCommoditySearchResultInfo(search.itemID, i)
+      if r then
+        results[#results + 1] = { unitPrice = r.unitPrice, quantity = r.quantity, ownUnits = r.numOwnerItems }
+      end
+    end
+  else
+    for i = 1, C_AuctionHouse.GetNumItemSearchResults(search.key) do
+      local r = C_AuctionHouse.GetItemSearchResultInfo(search.key, i)
+      -- A bid-only Listing has no buyout to undercut.
+      if r and r.buyoutAmount and r.quantity > 0 then
+        results[#results + 1] = {
+          unitPrice = r.buyoutAmount / r.quantity,
+          quantity = r.quantity,
+          ownUnits = r.containsOwnerItem and r.quantity or 0,
+        }
+      end
+    end
+  end
+  return results
+end
+
+function refreshPost()
+  if not postButton then
+    return
+  end
+  postButton:SetShown(ahOpen)
+  -- A new import (a reload, or the Load button) starts the counts over.
+  if AzerothQuantRecommendations ~= postedFor then
+    posted, postedFor = {}, AzerothQuantRecommendations
+  end
+  local row = selectedRow
+  local units, location = 0, nil
+  if ahOpen and row and row.record.itemKey then
+    units, location = inBags(row.record.itemKey)
+  end
+  local commodity
+  if location then
+    commodity = isCommodity(location)
+  end
+  postState = PostButton.state(row, {
+    ahOpen = ahOpen,
+    bagUnits = units,
+    posted = row and posted[row.id] or 0,
+    pending = pending,
+    commodity = commodity,
+    durationHours = AzerothQuantRecommendations and AzerothQuantRecommendations.postDurationHours,
+    lowest = search and row and search.id == row.id and search.lowest or nil,
+  })
+  postButton:SetText(postState.label)
+  postButton:SetWidth(math.max(90, postButton:GetTextWidth() + 30))
+  postButton:SetEnabled(postState.enabled)
+  postButton.undercut:SetText(postState.undercut or "")
+  if postState.call and not (search and search.id == row.id) then
+    sendSearch(row, location, commodity)
+  end
+end
+
+local function onPostClick(self)
+  local call = postState and postState.call
+  if not call then
+    return
+  end
+  local _, location = inBags(selectedRow.record.itemKey)
+  if not location then
+    return
+  end
+  if call.kind == "commodity" then
+    C_AuctionHouse.PostCommodity(location, call.duration, call.quantity, call.price)
+  else
+    -- Returns false (retail would want a Confirm), but posts anyway on Forever.
+    C_AuctionHouse.PostItem(location, call.duration, call.quantity, nil, call.price)
+  end
+  pending, lastPost, postError = true, { id = selectedRow.id, quantity = call.quantity }, nil
+  refreshPost()
+end
+
+local function createPostButton()
+  postButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  postButton:SetSize(90, 22)
+  -- Hangs under the frame's bottom right, level with the tabs.
+  postButton:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -6, -2)
+  postButton:SetScript("OnClick", onPostClick)
+  postButton:SetMotionScriptsWhileDisabled(true)
+  postButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    local failed = postError and selectedRow and postError.id == selectedRow.id and postError.text
+    local tip = failed or (postState and postState.reason) or "Post the selected row at its Post at."
+    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  postButton:SetScript("OnLeave", GameTooltip_Hide)
+  postButton.undercut = postButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  postButton.undercut:SetPoint("TOPRIGHT", postButton, "BOTTOMRIGHT", 0, -4)
+  postButton.undercut:SetTextColor(1, 0.5, 0.25)
+  postButton:Hide()
+end
+
 local function createFrame()
   frame = CreateFrame("Frame", "AzerothQuantRecommendationFrame", UIParent, "ButtonFrameTemplate")
   frame:SetSize(WIDTH, HEIGHT)
@@ -885,6 +1052,7 @@ local function createFrame()
   scroll:SetScrollChild(content)
 
   createTabs()
+  createPostButton()
 
   -- After the boxes exist (the frame:Hide() above would otherwise fire it first).
   -- A box left focused while hidden would swallow the next Enter meant for chat.
@@ -925,7 +1093,14 @@ events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- The gold on hand caps the gold left the fold runs on once a row is marked Bought (#97).
 events:RegisterEvent("PLAYER_MONEY")
-events:SetScript("OnEvent", function(_, event, arg1)
+-- The Post button's bag counts, post confirmations and failures, and undercut search.
+events:RegisterEvent("BAG_UPDATE_DELAYED")
+events:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
+events:RegisterEvent("UI_ERROR_MESSAGE")
+events:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+events:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+pcall(events.RegisterEvent, events, "AUCTION_HOUSE_POST_ERROR") -- not on every client
+events:SetScript("OnEvent", function(_, event, arg1, arg2)
   if event == "ADDON_LOADED" then
     if arg1 == "AzerothQuant" then
       AzerothQuantDB = AzerothQuantDB or {}
@@ -936,6 +1111,8 @@ events:SetScript("OnEvent", function(_, event, arg1)
     if market == "Neutral" then
       return
     end
+    -- Not at a Neutral AH: its Market isn't the one the Brain priced the Post at for.
+    ahOpen = true
     -- Already open via /aq recs: switch to the Shopping List but leave it open after the AH.
     if not (frame and frame:IsShown()) then
       openedByAuctionHouse = true
@@ -947,8 +1124,27 @@ events:SetScript("OnEvent", function(_, event, arg1)
       frame:Hide()
     end
     openedByAuctionHouse = false
+    ahOpen, pending, lastPost, postError, search = false, false, nil, nil, nil
+    refreshPost()
   elseif event == "GET_ITEM_INFO_RECEIVED" or event == "PLAYER_MONEY" then
     queueRedraw()
+  elseif event == "BAG_UPDATE_DELAYED" then
+    refreshPost()
+  elseif event == "AUCTION_HOUSE_AUCTION_CREATED" and lastPost then
+    posted[lastPost.id] = (posted[lastPost.id] or 0) + lastPost.quantity
+    pending, lastPost, postError = false, nil, nil
+    refreshPost()
+  elseif (event == "AUCTION_HOUSE_POST_ERROR" or event == "UI_ERROR_MESSAGE") and pending then
+    pending = false
+    -- UI_ERROR_MESSAGE carries (errorType, message).
+    local why = event == "UI_ERROR_MESSAGE" and tostring(arg2) or "the Auction House refused it."
+    postError = { id = lastPost.id, text = "The post failed: " .. why }
+    refreshPost()
+  elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
+    if search then
+      search.lowest = PostButton.lowestOther(searchResults())
+      refreshPost()
+    end
   end
 end)
 

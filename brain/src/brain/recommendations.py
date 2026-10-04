@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from brain.beta_prior import BetaPrior
-from brain.config import Install
+from brain.config import DEFAULT_POST_DURATION_HOURS, Install
 from brain.disenchant import DisenchantTable, Group, load_table
 from brain.history import (
     Market,
@@ -101,6 +101,8 @@ _HEADER = (
     "-- each Item Key in the Scan whose one unit alone is worth at least the threshold.\n"
     "-- disenchantExcluded is what can't be Disenchanted, whatever its group: itemIDs and\n"
     "-- equipLocs, each a set.\n"
+    "-- postDurationHours is how long every post lasts (2, 8 or 24): the Brain charges\n"
+    "-- Deposits for that long, so the Addon's Post button posts for it too.\n"
 )
 
 
@@ -130,6 +132,7 @@ def render(
     last_character_read: dict[tuple[str, str], int] | None = None,
     markets: Sequence[MarketRecommendations] = (),
     beta_priors: Mapping[Market, BetaPrior] | None = None,
+    post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
@@ -142,6 +145,7 @@ def render(
             "lastCharacterRead": _by_realm(last_character_read or {}),
             "recommendations": _recommendations(markets, beta_priors or {}),
             "disenchantExcluded": _disenchant_excluded(load_table()),
+            "postDurationHours": post_duration_hours,
         },
     )
 
@@ -356,6 +360,7 @@ def write_recommendations(
     install: Install,
     markets: Sequence[MarketRecommendations] = (),
     beta_priors: Mapping[Market, BetaPrior] | None = None,
+    post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
 ) -> Path | None:
     """Write the install's Recommendations.lua from the history and the Recommendations of
     its Era's Markets, with their Beta Priors; None if the Addon isn't installed there."""
@@ -369,6 +374,7 @@ def write_recommendations(
         latest_character_read_times(conn, install.era),
         [m for m in markets if m.market.era is install.era],
         beta_priors,
+        post_duration_hours,
     )
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.

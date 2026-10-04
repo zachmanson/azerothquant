@@ -44,3 +44,4 @@ Nothing moves on to the next row by itself. The player picks each row, so the de
 - CONTEXT.md **Addon** and **Recommendation Table** now say the Addon acts only on the row the player selected, one click at a time.
 - The Addon gets its first protected-API code, and the test in guardrail 5 comes with it.
 - Before building, the in-game probe must settle whether Forever's post takes one step or two.
+- The probe (#81) settled it: one call posts, with no Confirm, for gear and commodities alike. #81 built Post only. Cancel waits on #134, since the Brain doesn't yet name an own Listing to pull; until then `CancelAuction` is forbidden like the buy calls.

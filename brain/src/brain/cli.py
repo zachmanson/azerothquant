@@ -256,7 +256,9 @@ def _write_recommendations(
     with timed(timings, "Recommendations.lua"):
         for install in config.installs:
             try:
-                path = write_recommendations(conn, install, markets, beta_priors)
+                path = write_recommendations(
+                    conn, install, markets, beta_priors, config.post_duration_hours
+                )
             except (OSError, sqlite3.Error) as e:
                 log.error("Couldn't write Recommendations for %s: %s", install.path, e)
                 continue

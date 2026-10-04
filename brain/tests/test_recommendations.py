@@ -703,6 +703,27 @@ def test_a_market_without_a_beta_prior_has_no_beta(tmp_path, lua):
     assert out == "nil"
 
 
+def test_a_real_lua_reads_how_long_every_post_lasts(tmp_path, lua):
+    # Deposits are charged as if every post lasts this long, so the Addon's Post button
+    # (#81) must post for the same time.
+    file = tmp_path / FILE_NAME
+    file.write_text(render({}, post_duration_hours=8), encoding="utf-8")
+
+    assert _run_in_lua(lua, file, "print(r.postDurationHours)") == "8"
+
+
+def test_write_recommendations_passes_on_the_post_duration(tmp_path, lua):
+    install = _addon_install(tmp_path)
+
+    conn = open_history(tmp_path / "history.db")
+    try:
+        written = write_recommendations(conn, install, post_duration_hours=2)
+    finally:
+        conn.close()
+
+    assert _run_in_lua(lua, written, "print(r.postDurationHours)") == "2"
+
+
 def _addon_install(tmp_path: Path) -> Install:
     """An install with the Addon and its TOC in it."""
     install = Install(tmp_path / "wow", Era.BETA)
