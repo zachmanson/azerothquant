@@ -1,3 +1,16 @@
+2026-10-04 (later 75): PC session. Ran every parked probe from later 62 item 2. Results on the issues:
+- #81 Post/Cancel: an addon Button's OnClick can PostItem, PostCommodity and CancelAuction, one call each, no Confirm step. Timers and `/run` are blocked (`/run` is ForceTaint_Strong). Duration 1 = 2h. A commodity's AUCTION_CANCELED arg isn't the auctionID. Results comment on #81; the build spec isn't written yet.
+- #44 slice 1: one row per craft and recipe_id match PASS. quantity NULL on every row FAIL, because outputs land in the Reagent Bag (container 5), which `Character.lua` `bagIds()` never reads. Filed #133 (needs-triage). It also hides Reagent Bag contents from Holdings, held, uses and Lots.
+- #54 Loot Alert: the text and chat line show, and Disenchant loot doesn't alert. PASS. The sound wasn't confirmed.
+- #39 search probe: SendSearchQuery works from click or timer, but Blizzard's frame doesn't follow. Gear needs the full Item Key (GetItemKeyFromItem). A search during a Scan is fine. Results comment on #39.
+
+Next, in order: #133 (triage then /tdd, small; the PC is needed to verify, then re-run the #44 batch check). Off the PC: write #81's build spec from its results comment, then relabel ready-for-agent. Grill #39's one open decision (own results frame vs driving Blizzard's AuctionHouseFrame). #116 warm-pass numbers (brain watch is running again). Then date items.
+
+- Gotchas: same as later 74, plus:
+  - `brain watch` loads config.toml once at start. For a config-driven in-game test, stop it, edit, run `python -m brain.cli import`, test, restore, import again, then restart `scripts/brain-watch.bat`.
+  - The AQProbe addon (outside the repo, in the game's AddOns folder, enabled on Kash-Patel) is now the read-only #39 search probe. The #81 Post/Cancel buttons were removed after one cancelled a real Listing. The original spike #1 file is gone with the session scratchpad. Disable AQProbe when you no longer need it.
+  - WoW screenshots are in `Z:\Battle.net\World of Warcraft\_classic_beta_\Screenshots`, so "screenshot" is enough for the agent to read the newest one.
+
 2026-10-03 (later 74): #131 done (e2d088b, CI green, issue closed). `brain watch` and `brain import` log an `Import stages:` line after an import: SavedVariables, Archive, history ingest, Fair Values, Decision Engine, Recommendations.lua (plus `pool pull` first and `pool push ... after` when the pool is on), and the Scans in the history. `brain/src/brain/timings.py` `Timings` is passed down and filled (run_import -> import_file -> archive writes; `FairValueCache.timings` set for the pass by `_write_recommendations`). A stage nested in another counts only toward itself, so "history ingest" excludes parsing and Archive writes, and "Decision Engine" excludes Fair Values. Fair Values only counts cache misses, so warm `brain watch` passes look cheaper than a one-shot import. First real number, one-shot (cold cache) on 56 Scans: SavedVariables 0.3s, Fair Values 20.7s, Decision Engine 63.5s, everything else ~0.
 
 Next, in order: PC items as in later 62 item 2, then date items. Off the PC: #116 now has numbers to work from. Run `brain watch` for a few Scans to get warm-pass stage lines, post the cold and warm numbers on #116, then re-triage it (needs-info -> grill).
