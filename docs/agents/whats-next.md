@@ -1,3 +1,11 @@
+2026-10-04 (later 76): #133 done (1a6260c, issue closed). `ContainerIds.lua` (pure, specced) works out the bag and bank container IDs. Character.lua passes in the client constants. The Beta has the Reagent Bag (container 5, 6 slots) but no `REAGENTBAG_CONTAINER` global, so the glue falls back to `Enum.BagIndex.ReagentBag`. Bank bags start after every equipped bag. Checked in game: Read 249 has 4305 x8 and 2997 x9 in `bags`. #44 batch check re-run: PASS, 4 rows for 4 crafts, quantity 1/NULL/1/1 (results on #44).
+
+Next, in order: off the PC, write #81's build spec from its results comment, then relabel ready-for-agent. Grill #39's one open decision (own results frame vs driving Blizzard's AuctionHouseFrame). #116 warm-pass numbers (brain watch is running). Then date items.
+
+- Gotchas: same as later 75, plus:
+  - The Beta's `Enum.BagIndex` has CharacterBankTab_n = 5+n and AccountBankTab_n = 14+n (account tab = -3?). The bank read still uses BANK_CONTAINER plus bags 6..(6+NUM_BANKBAGSLOTS-1). A bank read after the #133 change hasn't been checked against bank tabs yet. If bank items go missing, look there first.
+  - A long `/dump` line breaks when pasted into chat. Use short lines.
+
 2026-10-04 (later 75): PC session. Ran every parked probe from later 62 item 2. Results on the issues:
 - #81 Post/Cancel: an addon Button's OnClick can PostItem, PostCommodity and CancelAuction, one call each, no Confirm step. Timers and `/run` are blocked (`/run` is ForceTaint_Strong). Duration 1 = 2h. A commodity's AUCTION_CANCELED arg isn't the auctionID. Results comment on #81; the build spec isn't written yet.
 - #44 slice 1: one row per craft and recipe_id match PASS. quantity NULL on every row FAIL, because outputs land in the Reagent Bag (container 5), which `Character.lua` `bagIds()` never reads. Filed #133 (needs-triage). It also hides Reagent Bag contents from Holdings, held, uses and Lots.
