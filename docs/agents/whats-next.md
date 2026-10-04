@@ -1,3 +1,10 @@
+2026-10-04 (later 77): #81 build spec written (comment on #81), relabelled ready-for-agent and retitled to Post only. The Brain never names an own Listing to pull, so Cancel moved to #134 (needs-triage, later): the Brain names Listings to pull, then the Cancel button. Spec in short: a pure, specced `PostButton.lua` (state + lowestOther), glue in RecommendationFrame.lua with the one protected call in `local function onPostClick`, the Brain writes `postDurationHours` (2/8/24 -> 1/2/3), commodity = one PostCommodity for the units in bags, gear = one unit per click, undercut line from one SendSearchQuery on select, and `protected_calls_spec.lua` as the guardrail (CancelAuction forbidden until #134).
+
+Next, in order: #81 (/tdd, then an in-game check at the PC per its Acceptance list). Grill #39's one open decision (own results frame vs driving Blizzard's AuctionHouseFrame). Triage #134 (grill when it comes up). #116 warm-pass numbers (brain watch is running). Then date items.
+
+- Gotchas: same as later 76, plus:
+  - #81's in-game check has three unknowns written into its Acceptance: duration 3 = 24h, a PostCommodity quantity spanning stacks, and whether Forever takes copper in a post price. Each has a fallback written down.
+
 2026-10-04 (later 76): #133 done (1a6260c, issue closed). `ContainerIds.lua` (pure, specced) works out the bag and bank container IDs. Character.lua passes in the client constants. The Beta has the Reagent Bag (container 5, 6 slots) but no `REAGENTBAG_CONTAINER` global, so the glue falls back to `Enum.BagIndex.ReagentBag`. Bank bags start after every equipped bag. Checked in game: Read 249 has 4305 x8 and 2997 x9 in `bags`. #44 batch check re-run: PASS, 4 rows for 4 crafts, quantity 1/NULL/1/1 (results on #44).
 
 Next, in order: off the PC, write #81's build spec from its results comment, then relabel ready-for-agent. Grill #39's one open decision (own results frame vs driving Blizzard's AuctionHouseFrame). #116 warm-pass numbers (brain watch is running). Then date items.
