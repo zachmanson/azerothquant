@@ -29,6 +29,7 @@ local Merchant = ns.Merchant
 local DisenchantCapture = ns.DisenchantCapture
 local CraftCapture = ns.CraftCapture
 local LootAlert = ns.LootAlert
+local ContainerIds = ns.ContainerIds
 
 local DISENCHANT_SPELL = 13262
 
@@ -36,11 +37,19 @@ local DISENCHANT_SPELL = 13262
 -- touched), so read once they have been quiet this long.
 local QUIET_SECONDS = 0.5
 
--- Container IDs, from the client's constants where it defines them.
+-- Container IDs, from the client's constants where it defines them (ContainerIds.lua).
 local BACKPACK = BACKPACK_CONTAINER or 0
-local BAG_SLOTS = NUM_BAG_SLOTS or 4
 local BANK = BANK_CONTAINER or -1
-local BANK_BAG_SLOTS = NUM_BANKBAGSLOTS or 6
+local CONTAINER_CONSTANTS = {
+  BACKPACK_CONTAINER = BACKPACK_CONTAINER,
+  NUM_BAG_SLOTS = NUM_BAG_SLOTS,
+  -- The Classic Beta has the Reagent Bag but not this global, only the enum (#133).
+  REAGENTBAG_CONTAINER = REAGENTBAG_CONTAINER or (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag),
+  NUM_REAGENTBAG_SLOTS = NUM_REAGENTBAG_SLOTS,
+  NUM_TOTAL_EQUIPPED_BAG_SLOTS = NUM_TOTAL_EQUIPPED_BAG_SLOTS,
+  BANK_CONTAINER = BANK_CONTAINER,
+  NUM_BANKBAGSLOTS = NUM_BANKBAGSLOTS,
+}
 
 -- C_Container on newer clients, the old globals otherwise.
 local numSlots, itemInfo
@@ -88,19 +97,11 @@ local function readContainers(bags, into)
 end
 
 local function bagIds()
-  local ids = {}
-  for bag = BACKPACK, BACKPACK + BAG_SLOTS do
-    ids[#ids + 1] = bag
-  end
-  return ids
+  return ContainerIds.bags(CONTAINER_CONSTANTS)
 end
 
 local function bankIds()
-  local ids = { BANK }
-  for bag = BAG_SLOTS + 1, BAG_SLOTS + BANK_BAG_SLOTS do
-    ids[#ids + 1] = bag
-  end
-  return ids
+  return ContainerIds.bank(CONTAINER_CONSTANTS)
 end
 
 local function readBank()
