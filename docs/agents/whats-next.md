@@ -1,3 +1,15 @@
+2026-10-05 (later 87): #115 slice 1 built (2fe0042). The config lookup is `--config`, then `./config.toml`, then `%LOCALAPPDATA%\AzerothQuant\config.toml`. The config's folder is the data folder. `brain watch` holds an OS file lock there (`brain.lock`, which holds the PID), so a second watcher exits "already running". Every command logs to `brain.log` there, rotated at 1 MB. The dev setup still works, and both files are gitignored in `brain/`. Comment on #115 that slice 1 is done.
+
+Next, in order: #115 slice 2 (setup/update/uninstall behind a thin tkinter layer). Then slices 3 and 4. PC items as before (#81, #39, #85). #136 whenever. #138 last.
+
+- Gotchas: same as later 86, plus:
+  - The "AzerothQuant Brain is already running." popup isn't built yet. Slice 1 only logs it, and slice 2's tkinter layer should show it.
+  - The lock file's PID can be stale after a crash. To tell whether a Brain is running, try `instance_lock`; don't trust the PID. Windows also frees a killed process's lock asynchronously, so update's "stop, then restart" should retry the lock for a second or two.
+  - Windows file locks are mandatory, so the lock sits on byte 1 TiB to keep the PID readable. Don't move it near the start of the file.
+  - The log only opens once a config is found. Setup (slice 2) owns the "no config yet" case. With `--noconsole` (slice 4), `sys.stderr` can be None, so check that `logging.basicConfig` still works in the frozen exe.
+  - The lock covers the config's folder, not `history_path`. Two configs pointing at one history file aren't guarded. That's fine for guildies, who only get one config.
+  - Review leftovers I chose not to act on: "data folder" isn't in CONTEXT.md, and the lock design has no ADR.
+
 2026-10-05 (later 86): #115 grilled, spec on the issue, now ready-for-agent. One frozen `AzerothQuantBrain.exe` (PyInstaller, built by CI on a `v*` tag, handed out in the guild Discord since the repo stays private). First run is a couple of tkinter popups (confirm WoW folder, paste pool key), then it copies itself to `%LOCALAPPDATA%\AzerothQuant\` (config + data live there too), installs the Addon and `AzerothQuant_Data`, adds Startup + Start menu shortcuts, and watches hidden. Guildies never see a console: Brain problems reach them as in-game chat lines from a `brain = {version, problem}` status in Recommendations, plus a reworded "Brain behind" line and a "never run" line. Rerunning a newer exe updates. Single-instance lock. `--uninstall`. Windows only. Four slices are suggested on the issue.
 
 Next, in order: build #115 slice 1 (config lookup in %LOCALAPPDATA%, single-instance lock, log file), then slices 2-4. PC items as before (#81 in-game check, #39 slice 1 check and slice 2 taint probe, the #85 list). #136 whenever. #138 last, once #115 ships.
