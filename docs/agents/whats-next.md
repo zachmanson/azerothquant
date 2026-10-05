@@ -1,3 +1,12 @@
+2026-10-05 (later 91): `v0.1.0` tagged and released. The release job's first real run worked: https://github.com/zachmanson/azerothquant/releases/tag/v0.1.0 has `AzerothQuantBrain.exe` (13.4 MB, a 64-bit windowless exe). The first two attempts failed because of a GitHub Actions outage ("job was not acquired by Runner" after 15 min of queueing, and jobs cancelled), not because of our code. "Re-run failed jobs" fixed it once githubstatus.com showed Actions as operational.
+
+Next, in order: the #115 Acceptance on a clean Windows account, using the Release exe (setup popups, reboot, kill, update), then close #115. PC items as before (#81, #39, #85). #136 whenever. #138 after #115 closes.
+
+- Gotchas: same as later 90, plus:
+  - Still not run: the setup popups, uninstall and its ~5 s self-delete, and update's 10 s exe-copy retry against a running Brain. The Acceptance covers them.
+  - If CI fails with "not acquired by Runner", check githubstatus.com. Don't debug the workflow, and don't re-run while Actions is degraded.
+  - The working tree's modified `addon/AzerothQuant/Recommendations.lua` is the dev PC's written copy. Never commit it.
+
 2026-10-05 (later 90): #115 slice 4 built (e358766), commented on #115. `brain/AzerothQuantBrain.spec` freezes `brain.app` into one windowless exe. It bundles the Addon from `git archive HEAD` (so the stub ships, not the dev PC's written Recommendations.lua) plus `brain/data/*.toml`. The `brain-exe` job in ci.yml runs on a `v*` tag after the brain and addon jobs pass. It checks the tag matches `brain.__version__`, builds on windows-latest and attaches the exe to a GitHub Release. In a sandbox (LOCALAPPDATA/APPDATA pointed at a scratchpad), the frozen exe watched, imported, logged and wrote the `brain` table. An update run installed the bundled Addon, made the 4 shortcuts and restarted the Brain, and a second launch showed the popup. A fix along the way: the installed Brain now watches without starting Tk, because the hidden root showed as Not Responding, which can hold up a Windows shutdown.
 
 Next, in order: tag `v0.1.0` and push it, which is the first real run of the release job, then download the exe from the Release. Then the #115 Acceptance on a clean Windows account (setup popups, reboot, kill, update), and close #115. PC items as before (#81, #39, #85). #136 whenever. #138 after #115 closes.
