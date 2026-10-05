@@ -1,4 +1,4 @@
-2026-10-05 (later 87): #115 slice 1 built (2fe0042). The config lookup is `--config`, then `./config.toml`, then `%LOCALAPPDATA%\AzerothQuant\config.toml`. The config's folder is the data folder. `brain watch` holds an OS file lock there (`brain.lock`, which holds the PID), so a second watcher exits "already running". Every command logs to `brain.log` there, rotated at 1 MB. The dev setup still works, and both files are gitignored in `brain/`. Comment on #115 that slice 1 is done.
+2026-10-05 (later 87): #115 slice 1 built (2fe0042). The config lookup is `--config`, then `./config.toml`, then `%LOCALAPPDATA%\AzerothQuant\config.toml`. The config's folder is the data folder. `brain watch` holds an OS file lock there (`brain.lock`, which holds the PID), so a second watcher exits "already running". Every command logs to `brain.log` there, rotated at 1 MB. The dev setup still works, and both files are gitignored in `brain/`. Commented on #115.
 
 Next, in order: #115 slice 2 (setup/update/uninstall behind a thin tkinter layer). Then slices 3 and 4. PC items as before (#81, #39, #85). #136 whenever. #138 last.
 
