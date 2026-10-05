@@ -1,3 +1,13 @@
+2026-10-05 (later 89): #115 slice 3 built (9613f90), commented on #115. Every Recommendations write carries `brain = { version, problem }`. There are three problems: the pool is unreachable (`PoolSyncer.problem`, cleared by the next pull that gets through), no Recommendations (`cli.NO_RECOMMENDATIONS`), and watch crashed (`cli.CRASHED`, written in `_watch`'s `except Exception`). They're joined into one line. The Addon side is `Nudge.atLogin` (called in Scanner.lua's ADDON_LOADED), which prints the never-run line or the problem plus the log tail. `BRAIN_BEHIND_LINE` is reworded. "Can't find your WoW folder." is skipped (nowhere to write it).
+
+Next, in order: #115 slice 4 (PyInstaller + the CI release on a `v*` tag; see the later-88 gotchas). PC items as before (#81, #39, #85). #136 whenever. #138 last.
+
+- Gotchas: same as later 88, plus:
+  - Restart `brain watch` after this commit. Until it writes once, the dev PC's Recommendations.lua has no `brain` table, so the Addon prints the never-run line.
+  - The lines print at every load, `/reload` included, not "once per login". Limiting them to the first login would hide a problem until the next login, because problems only arrive after a reload. The Load button (Data addon) doesn't re-check. `rebuild` and `pool pull` by hand write no problem (dev only).
+  - Real-Lua pytest on this PC: the shim is `lua.bat` -> `lua_shim.py` (lupa.lua51, tab-joined print), with LUA pointing at the .bat. Rebuild it in the scratchpad each session.
+  - Review items not taken: `problem: str` threaded through 4 signatures (a `BrainStatus` type is overkill for one field), and the duplicated `markets = []` in `_write_recommendations`'s two excepts.
+
 2026-10-05 (later 88): #115 slice 2 built (0fe6b55), commented on #115. The logic is in `brain/installer.py` (20 pytest tests, temp folders). The tkinter glue is in `brain/app.py`, entry `brain.app:main`, which slice 4 freezes. Two decisions from the user: only `_classic_` is Live (`_classic_beta_` is beta, and Classic Era/PTR/retail are left out), and an update looks for game folders again in the same WoW folder and keeps the pool key. Reinstalling keeps the Brain's latest Recommendations.lua, and a linked-in (dev) Addon folder is never touched. The version now lives in `brain/__init__.py` (`__version__`), and pyproject reads it.
 
 Next, in order: #115 slice 3 (`brain` status in Recommendations, and the Addon's problem/never-run/behind lines). Then slice 4 (PyInstaller + CI release). PC items as before (#81, #39, #85). #136 whenever. #138 last.
