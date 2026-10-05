@@ -18,6 +18,10 @@ brain/history.sqlite
 brain/brain.log*
 brain/brain.lock
 
+# PyInstaller output (brain/AzerothQuantBrain.spec)
+brain/build/
+brain/dist/
+
 # The Scan Archive (default location)
 brain/archive/
 

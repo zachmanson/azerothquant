@@ -43,19 +43,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="AzerothQuantBrain")
     parser.add_argument("--uninstall", action="store_true")
     args = parser.parse_args(argv)
+    frozen = getattr(sys, "frozen", False)
+    places = _places()
+    action = None if args.uninstall else launch_action(Path(sys.executable), places)
+    if frozen and action is Launch.WATCH and not brain_running(places.app_dir):
+        # No Tk while watching: a Tk window nothing services shows as Not Responding, and
+        # can hold up a Windows shutdown.
+        return cli.main(["--config", str(places.app_dir / CONFIG_FILE), "watch"])
 
     tkinter.Tk().withdraw()  # the popups' parent, never shown itself
-    if not getattr(sys, "frozen", False):
+    if not frozen:
         # From source, sys.executable is python.exe, which setup would copy in as the Brain.
         messagebox.showerror(TITLE, "Run the built AzerothQuantBrain.exe, not the source.")
         return 2
-    places = _places()
     try:
-        if args.uninstall:
+        if action is None:
             return _uninstall(places)
-        action = launch_action(Path(sys.executable), places)
         if action is Launch.WATCH:
-            return _watch(places)
+            messagebox.showinfo(TITLE, "AzerothQuant Brain is already running.")
+            return 1
         return _setup(places) if action is Launch.SETUP else _update(places)
     except Exception as e:  # there's no console to show a traceback in
         messagebox.showerror(
@@ -64,13 +70,6 @@ def main(argv: list[str] | None = None) -> int:
             f"\n\n{type(e).__name__}: {e}",
         )
         return 1
-
-
-def _watch(places: Places) -> int:
-    if brain_running(places.app_dir):
-        messagebox.showinfo(TITLE, "AzerothQuant Brain is already running.")
-        return 1
-    return cli.main(["--config", str(places.app_dir / CONFIG_FILE), "watch"])
 
 
 def _setup(places: Places) -> int:
@@ -140,7 +139,7 @@ def _places() -> Places:
 
 
 def _bundled_addon() -> Path:
-    """The Addon the exe carries (slice 4 bundles it)."""
+    """The Addon the exe carries (AzerothQuantBrain.spec bundles it)."""
     return Path(sys._MEIPASS) / "AzerothQuant"
 
 

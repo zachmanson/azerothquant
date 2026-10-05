@@ -59,6 +59,17 @@ It also writes the same file into `Interface\AddOns\AzerothQuant_Data\`, a load-
 
 Before importing a Scan, Mailbox Read or Character Read, the Brain saves it exactly as recorded to the Archive (`brain\archive\` by default, or `archive_dir` in the config), one gzipped JSON file each. The archive is the source of truth: `history.sqlite` can always be rebuilt from it, but the archive itself can't be recreated, so it's worth pointing `archive_dir` at a backed-up or synced folder. See ADR-0005.
 
+### Releasing AzerothQuantBrain.exe
+
+Guildies get one `AzerothQuantBrain.exe` (#115). To release one, bump `__version__` in `brain/src/brain/__init__.py`, commit, then tag and push it:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Once the rest of CI passes, the `brain-exe` job in `.github/workflows/ci.yml` checks the tag matches `__version__`, builds the exe on Windows and attaches it to a GitHub Release. To build it locally: `pip install -e ".[build]"`, then `pyinstaller AzerothQuantBrain.spec` in `brain/`, and the exe lands in `brain\dist\`. The bundled Addon comes from the last commit, not the working tree, so commit Addon changes first.
+
 ### Addon (Lua)
 
 WoW runs Lua 5.1, and busted needs a few C modules, so the easiest route on Windows is to build a local Lua 5.1 + LuaRocks into `.lua/` (gitignored) with [hererocks](https://github.com/luarocks/hererocks), using the MSVC compiler.
