@@ -1,3 +1,9 @@
+2026-10-05 (later 85): Discussion only, no code. Filed #137 (needs-triage, later): monetization as a free Addon + local Brain with paid access to the pooled Scans, with a comment on handing out opportunities to beat alpha decay. Figure it out much later. Made the `guild-alpha` milestone: a guildie can install it, join the Scan Pool and use it without it breaking. On it: #115, #85, #81, #39, #136 and the new #138 (setup guide, written after #115). Everything else keeps shipping after guildies have it.
+
+Next, in order: grill #115 (it's needs-info and it's the real guild-alpha blocker; the setup guide #138 depends on it). PC items as before: the #81 in-game check, then #39 slice 1's check and slice 2's taint probe, and the #85 list. #136 is small, so do it whenever. #138 last.
+
+- Gotchas: same as later 84. Guildies on one realm get the same Buy Unders, so they'll compete with each other (the #137 problem at small scale). Watch for it and note it on #137.
+
 2026-10-04 (later 84): #135 closed, with the replay numbers on the issue. On the 17-Scan replay the Brain went from 20g 08s to 17g 53s. A Brain-only per-Flip grading on a newer DB copy (21 Scans) came out +12g 45s. The 17-Scan copy stopped just before the 5631 cut (−18g avoided). There are false alarms: 248689, 8365 and 6399 get cut on under half an hour of watching with no sale, then sell. The rule stays as is, because the 5631 cut looked the same when it was made. Restarted `brain watch` on the fixed code, and LME is off the live list.
 
 Next, in order: at the PC, the #81 in-game check (Acceptance on #81), then close #81. Then the #39 slice 1 in-game check (gotchas in later 80), then the slice 2 taint probe. #116 warm-pass numbers. Then date items. `later` builds once core is clear: #136 (small), then #134.
