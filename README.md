@@ -38,7 +38,7 @@ Predictions, your game-knowledge calls that some items will be worth much more a
 
 ### Running the Brain
 
-Installing the Brain (above) adds a `brain` command. Run it from `brain/` (or pass `--config <path>`):
+Installing the Brain (above) adds a `brain` command. Run it from `brain/` (or pass `--config <path>`). With neither, it falls back to `%LOCALAPPDATA%\AzerothQuant\config.toml`, where the packaged Brain keeps its config (#115). The config's folder is the data folder: the history, the Archive, `brain.log` (rotated at 1 MB) and `brain.lock` all live there. Only one `brain watch` runs per data folder; a second one exits with "already running".
 
 ```powershell
 cd brain

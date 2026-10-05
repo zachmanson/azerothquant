@@ -27,15 +27,25 @@ import sqlite3
 import sys
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
-from contextlib import closing
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from brain.archive import Archive, ArchivedScan
 from brain.beta_prior import BetaPrior, beta_prior
-from brain.config import Config, ConfigError, Era, load_config
+from brain.config import (
+    APP_FOLDER,
+    CONFIG_FILE,
+    Config,
+    ConfigError,
+    Era,
+    config_candidates,
+    find_config,
+    load_config,
+)
 from brain.disenchant import Group, load_table
 from brain.disenchant_check import DisenchantCheck, MatCheck, check_disenchants
 from brain.fair_value import FairValueCache
@@ -58,6 +68,7 @@ from brain.history import (
     purchases,
     scan_times,
 )
+from brain.instance_lock import instance_lock
 from brain.lots import happened_at, start_of
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
@@ -88,8 +99,10 @@ from brain.watch import Watcher
 log = logging.getLogger("brain")
 
 NEAR_MISSES = 20  # per Market in `brain recommend --why-not` (#108)
-DEFAULT_CONFIG = Path("config.toml")  # run from brain/, or pass --config
 SAVEDVARIABLES_FILE = "AzerothQuant.lua"
+LOG_FILE = "brain.log"
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUPS = 3
 # How long a SavedVariables file must go unchanged before it is read, and how often
 # the watcher checks. The client writes the whole file within a second or so.
 SETTLE_SECONDS = 3.0
@@ -1259,7 +1272,9 @@ def watch_step(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="brain", description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--config", type=Path, default=DEFAULT_CONFIG, help=f"default: {DEFAULT_CONFIG}"
+        "--config",
+        type=Path,
+        help=f"default: ./{CONFIG_FILE}, else %%LOCALAPPDATA%%\\{APP_FOLDER}\\{CONFIG_FILE}",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("import", help="import every SavedVariables file once")
@@ -1317,8 +1332,44 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    app_data = os.environ.get("LOCALAPPDATA")
+    local_app_data = Path(app_data) if app_data else None
+    config_path = find_config(args.config, Path.cwd(), local_app_data)
+    if config_path is None:
+        looked = config_candidates(Path.cwd(), local_app_data)
+        log.error("No config found; looked for %s", " and ".join(map(str, looked)))
+        return 2
+    with _log_file(config_path.parent):
+        return _run_command(args, config_path)
+
+
+@contextmanager
+def _log_file(data_dir: Path) -> Iterator[None]:
+    """Also log to a file in the data folder for the duration of the block, so a guildie
+    who never sees a console can still send what happened (#115). Rotated, so it can't
+    grow forever. Nothing to log to when `--config` names a folder that isn't there:
+    loading the config reports that."""
+    if not data_dir.is_dir():
+        yield
+        return
+    handler = RotatingFileHandler(
+        data_dir / LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    )
+    root = logging.getLogger()
+    root.addHandler(handler)
     try:
-        config = load_config(args.config)
+        yield
+    finally:
+        root.removeHandler(handler)
+        handler.close()
+
+
+def _run_command(args: argparse.Namespace, config_path: Path) -> int:
+    try:
+        config = load_config(config_path)
     except (ConfigError, OSError) as e:
         log.error("Can't load the config: %s", e)
         return 2
@@ -1339,7 +1390,13 @@ def main(argv: list[str] | None = None) -> int:
         return _disenchants(config)
     if args.command == "flips":
         return _flips(config)
-    return _watch(config)
+    # The data folder is the config's folder: the history, the Archive and grades.toml
+    # already default to living next to it.
+    with instance_lock(config_path.parent) as held:
+        if not held:
+            log.error("AzerothQuant Brain is already running.")
+            return 1
+        return _watch(config)
 
 
 if __name__ == "__main__":

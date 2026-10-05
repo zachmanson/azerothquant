@@ -13,6 +13,7 @@ from fake_pool import FakePool
 
 from brain.archive import Archive
 from brain.cli import (
+    LOG_MAX_BYTES,
     RebuildError,
     main,
     pool_syncer,
@@ -55,6 +56,7 @@ from brain.history import (
     scan_times,
     vendor_prices,
 )
+from brain.instance_lock import instance_lock
 from brain.lots import NamedSet
 from brain.pool import PoolError, strip_scan
 from brain.pool_sync import PoolSyncer, pull, push
@@ -208,7 +210,7 @@ def test_import_logs_how_long_each_stage_took(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr("brain.cli.load_config", lambda path: config)
     caplog.set_level(logging.INFO)
 
-    assert main(["import"]) == 0
+    assert main(["--config", str(tmp_path / "config.toml"), "import"]) == 0
 
     stages, scans = logged_stages(caplog.text)
     assert list(stages) == IMPORT_STAGES
@@ -364,8 +366,11 @@ def test_pool_commands_sync_by_hand(tmp_path, monkeypatch):
     monkeypatch.setattr("brain.cli.load_config", lambda path: config)
     monkeypatch.setattr("brain.cli.make_pool", lambda config: pool)
 
-    assert main(["pool", "push"]) == 0
-    assert main(["pool", "pull", "--since", "2026-09-01"]) == 0
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "push"]) == 0
+    assert (
+        main(["--config", str(tmp_path / "config.toml"), "pool", "pull", "--since", "2026-09-01"])
+        == 0
+    )
 
     assert len(pool.pushed()) == 2
     with closing(open_history(config.history_path)) as conn:
@@ -403,7 +408,7 @@ def test_pool_key_add_prints_the_new_member_s_key(tmp_path, monkeypatch, capsys)
         tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
     )
 
-    assert main(["pool", "key", "add", "alice"]) == 0
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "add", "alice"]) == 0
 
     assert capsys.readouterr().out.strip() == "key-for-alice-from-https://pool-with-s3"
 
@@ -413,7 +418,7 @@ def test_pool_key_revoke_revokes_by_name(tmp_path, monkeypatch):
         tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
     )
 
-    assert main(["pool", "key", "revoke", "bob"]) == 0
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "revoke", "bob"]) == 0
 
     assert _FakeAdmin.revoked == ["bob"]
 
@@ -423,8 +428,8 @@ def test_a_refused_key_command_fails_with_the_worker_s_reason(tmp_path, monkeypa
         tmp_path, monkeypatch, pool_url="https://pool", pool_key="k", pool_admin_secret="s3"
     )
 
-    assert main(["pool", "key", "add", "bob"]) == 1
-    assert main(["pool", "key", "revoke", "carol"]) == 1
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "add", "bob"]) == 1
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "revoke", "carol"]) == 1
 
     assert "name already taken" in caplog.text
     assert "no such key" in caplog.text
@@ -441,8 +446,8 @@ def test_the_key_commands_fail_clearly_without_the_admin_secret_and_url(
     _as_pool_admin(tmp_path, monkeypatch, **settings)
     missing = "pool_admin_secret" if "pool_url" in settings else "pool_url"
 
-    assert main(["pool", "key", "add", "alice"]) == 1
-    assert main(["pool", "key", "revoke", "bob"]) == 1
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "add", "alice"]) == 1
+    assert main(["--config", str(tmp_path / "config.toml"), "pool", "key", "revoke", "bob"]) == 1
 
     assert capsys.readouterr().out == ""
     assert missing in caplog.text
@@ -1875,3 +1880,64 @@ def test_recommend_why_not_a_prediction_buy_says_how_much_of_its_room_is_from_be
 
     assert "2589: Prediction buy of 6 under Linen spike" in text
     assert "room for 6 at 1s 19c, 6 of it from Beta" in text
+
+
+def _config_file(tmp_path: Path) -> Path:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[[installs]]\npath = '{tmp_path / 'wow'}'\nera = 'beta'\n", encoding="utf-8")
+    return path
+
+
+def test_watch_refuses_to_start_while_another_brain_runs(tmp_path, caplog):
+    config_file = _config_file(tmp_path)
+
+    with instance_lock(tmp_path):
+        assert main(["--config", str(config_file), "watch"]) == 1
+
+    assert "already running" in caplog.text
+
+
+def test_logs_to_a_file_next_to_the_config(tmp_path):
+    config_file = _config_file(tmp_path)
+
+    assert main(["--config", str(config_file), "import"]) == 1
+
+    assert "No AzerothQuant.lua found" in (tmp_path / "brain.log").read_text(encoding="utf-8")
+
+
+def test_the_log_file_rotates_once_it_reaches_its_size_cap(tmp_path):
+    config_file = _config_file(tmp_path)
+    full = "x" * LOG_MAX_BYTES
+    (tmp_path / "brain.log").write_text(full, encoding="utf-8")
+
+    main(["--config", str(config_file), "import"])
+
+    assert (tmp_path / "brain.log.1").read_text(encoding="utf-8") == full
+    assert "No AzerothQuant.lua found" in (tmp_path / "brain.log").read_text(encoding="utf-8")
+
+
+def test_without_a_config_option_uses_the_one_setup_wrote(tmp_path, monkeypatch):
+    app_folder = tmp_path / "LocalAppData" / "AzerothQuant"
+    app_folder.mkdir(parents=True)
+    _config_file(app_folder)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LocalAppData"))
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["import"]) == 1
+
+    assert "No AzerothQuant.lua found" in (app_folder / "brain.log").read_text(encoding="utf-8")
+
+
+def test_says_where_it_looked_when_there_is_no_config(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LocalAppData"))
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["import"]) == 2
+
+    assert str(tmp_path / "LocalAppData" / "AzerothQuant" / "config.toml") in caplog.text
+
+
+def test_a_config_option_in_a_missing_folder_is_a_clean_error(tmp_path, caplog):
+    assert main(["--config", str(tmp_path / "nowhere" / "config.toml"), "import"]) == 2
+
+    assert "Can't load the config" in caplog.text

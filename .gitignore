@@ -14,6 +14,10 @@ brain/config.toml
 # The Brain's history database (default location)
 brain/history.sqlite
 
+# The Brain's log and single-instance lock (next to the config, #115)
+brain/brain.log*
+brain/brain.lock
+
 # The Scan Archive (default location)
 brain/archive/
 

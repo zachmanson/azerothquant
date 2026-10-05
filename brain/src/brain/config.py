@@ -260,6 +260,29 @@ class Config:
         return min(self.days_to_sell_seconds, self.sale_horizon_seconds)
 
 
+CONFIG_FILE = "config.toml"
+APP_FOLDER = "AzerothQuant"
+
+
+def find_config(explicit: Path | None, cwd: Path, local_app_data: Path | None) -> Path | None:
+    """The config file to load: `--config` if given, else ./config.toml (the dev setup),
+    else the one setup wrote in %LOCALAPPDATA%/AzerothQuant (#115). None if there's none."""
+    if explicit is not None:
+        return explicit
+    for candidate in config_candidates(cwd, local_app_data):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def config_candidates(cwd: Path, local_app_data: Path | None) -> list[Path]:
+    """Where `find_config` looks without `--config`, in order."""
+    candidates = [cwd / CONFIG_FILE]
+    if local_app_data is not None:
+        candidates.append(local_app_data / APP_FOLDER / CONFIG_FILE)
+    return candidates
+
+
 def load_config(path: Path) -> Config:
     with open(path, "rb") as f:
         raw = tomllib.load(f)

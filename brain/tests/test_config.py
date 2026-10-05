@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from brain.cli import make_pool
-from brain.config import ConfigError, Era, load_config
+from brain.config import ConfigError, Era, find_config, load_config
 
 EXAMPLE_CONFIG = Path(__file__).parent.parent / "config.example.toml"
 
@@ -548,3 +548,34 @@ def test_rejects_bad_scan_pool_settings(tmp_path, setting):
 
     with pytest.raises(ConfigError, match="pool_"):
         load_config(path)
+
+
+def test_finds_the_config_in_the_working_folder_before_the_app_data_folder(tmp_path):
+    cwd = tmp_path / "repo"
+    app_data = tmp_path / "LocalAppData"
+    (cwd).mkdir()
+    (app_data / "AzerothQuant").mkdir(parents=True)
+    (cwd / "config.toml").write_text("", encoding="utf-8")
+    (app_data / "AzerothQuant" / "config.toml").write_text("", encoding="utf-8")
+
+    assert find_config(None, cwd, app_data) == cwd / "config.toml"
+
+
+def test_falls_back_to_the_config_setup_wrote_in_the_app_data_folder(tmp_path):
+    app_data = tmp_path / "LocalAppData"
+    (app_data / "AzerothQuant").mkdir(parents=True)
+    (app_data / "AzerothQuant" / "config.toml").write_text("", encoding="utf-8")
+
+    assert find_config(None, tmp_path, app_data) == app_data / "AzerothQuant" / "config.toml"
+
+
+def test_an_explicit_config_wins_even_over_the_working_folder(tmp_path):
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
+    explicit = tmp_path / "elsewhere.toml"
+
+    assert find_config(explicit, tmp_path, None) == explicit
+
+
+def test_finds_no_config_when_there_is_none_anywhere(tmp_path):
+    assert find_config(None, tmp_path, tmp_path / "LocalAppData") is None
+    assert find_config(None, tmp_path, None) is None
