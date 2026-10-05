@@ -1,3 +1,15 @@
+2026-10-05 (later 88): #115 slice 2 built (0fe6b55), commented on #115. The logic is in `brain/installer.py` (20 pytest tests, temp folders). The tkinter glue is in `brain/app.py`, entry `brain.app:main`, which slice 4 freezes. Two decisions from the user: only `_classic_` is Live (`_classic_beta_` is beta, and Classic Era/PTR/retail are left out), and an update looks for game folders again in the same WoW folder and keeps the pool key. Reinstalling keeps the Brain's latest Recommendations.lua, and a linked-in (dev) Addon folder is never touched. The version now lives in `brain/__init__.py` (`__version__`), and pyproject reads it.
+
+Next, in order: #115 slice 3 (`brain` status in Recommendations, and the Addon's problem/never-run/behind lines). Then slice 4 (PyInstaller + CI release). PC items as before (#81, #39, #85). #136 whenever. #138 last.
+
+- Gotchas: same as later 87, plus:
+  - `brain.app` refuses to run unfrozen (`sys.frozen`), because from source `sys.executable` is python.exe and setup would copy it in as the Brain. So none of the popup flow has run end to end yet. Slice 4's clean-account Acceptance is the first real run. Only the .lnk writer and the delayed delete were smoke-tested by hand.
+  - Slice 4 has to bundle the Addon at `sys._MEIPASS/AzerothQuant`, from a clean checkout. The repo's `addon/AzerothQuant/Recommendations.lua` is dirty on the dev PC (the Brain writes it), and the bundle must carry the stub.
+  - A onefile exe is two processes. The lock holds the inner PID, so update's exe copy retries for up to 10 s on PermissionError, and uninstall's self-delete waits ~5 s (`ping -n 6`). Check both on the frozen exe.
+  - `POOL_URL` is hard-coded in `brain/app.py`.
+  - Cancel on the pool-key popup quits setup. Leaving it empty skips the pool.
+  - Review items not taken: the test helpers repeat the 7-argument `install(...)` call, `install`/`update` take a lot of parameters, and watch mode builds a hidden Tk root it only needs for the "already running" popup.
+
 2026-10-05 (later 87): #115 slice 1 built (2fe0042). The config lookup is `--config`, then `./config.toml`, then `%LOCALAPPDATA%\AzerothQuant\config.toml`. The config's folder is the data folder. `brain watch` holds an OS file lock there (`brain.lock`, which holds the PID), so a second watcher exits "already running". Every command logs to `brain.log` there, rotated at 1 MB. The dev setup still works, and both files are gitignored in `brain/`. Commented on #115.
 
 Next, in order: #115 slice 2 (setup/update/uninstall behind a thin tkinter layer). Then slices 3 and 4. PC items as before (#81, #39, #85). #136 whenever. #138 last.
