@@ -379,11 +379,26 @@ def write_recommendations(
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.
     _write_atomically(path, text)
+    _write_atomically(_write_data_toc(install) / FILE_NAME, text)
+    return path
+
+
+def create_data_addon(install: Install) -> None:
+    """Create the install's Data addon from its Addon, keeping any Recommendations it already
+    has. Setup does this up front (#115), so the game finds it at its first start rather
+    than only after a restart once the Brain has run."""
+    data = _write_data_toc(install)
+    if not (data / FILE_NAME).exists():
+        stub = (addon_folder(install) / FILE_NAME).read_text(encoding="utf-8")
+        _write_atomically(data / FILE_NAME, stub)
+
+
+def _write_data_toc(install: Install) -> Path:
+    """Make the install's Data addon folder with its TOC, and return the folder."""
     data = data_addon_folder(install)
     data.mkdir(exist_ok=True)
-    _write_atomically(data / f"{DATA_ADDON}.toc", _data_toc(folder))
-    _write_atomically(data / FILE_NAME, text)
-    return path
+    _write_atomically(data / f"{DATA_ADDON}.toc", _data_toc(addon_folder(install)))
+    return data
 
 
 def _data_toc(addon: Path) -> str:
