@@ -227,6 +227,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       db.scans = db.scans or {}
       db.nextScanId = db.nextScanId or 1
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
+      Nudge.atLogin(AzerothQuantRecommendations, Chat.say)
       local pruned = Prune.importedScans(db.scans, AzerothQuantRecommendations)
       if pruned > 0 then
         Chat.debug(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))

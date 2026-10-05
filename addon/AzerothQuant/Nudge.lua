@@ -56,9 +56,9 @@ end
 -- A Scan saved this long ago that's still in SavedVariables after pruning means the
 -- Brain didn't import it: long enough for `brain watch` to have done it, with a margin.
 Nudge.BRAIN_BEHIND_AFTER = Nudge.RELOAD_READY_AFTER + 60
--- %d: the oldest behind Scan's age in whole minutes.
-Nudge.BRAIN_BEHIND_LINE = "The Brain hasn't imported Scans saved %d min ago. Is brain watch running?"
-  .. " (scripts\\play.bat)"
+-- %d: the oldest behind Scan's age in whole minutes. Plain words: guildies read it (#115).
+Nudge.BRAIN_BEHIND_LINE = "Your Scan from %d min ago hasn't reached the Brain. Is AzerothQuant Brain running?"
+  .. " Start it from the Start menu."
 
 -- scans: those left after Prune.importedScans at load. Returns how many seconds ago the
 -- oldest Scan the Brain should have imported by now was saved, or nil if there's none.
@@ -74,7 +74,7 @@ function Nudge.brainBehind(scans, now)
 end
 
 -- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
--- in chat and asks after brain watch. Otherwise, if any Scans are waiting, waits
+-- in chat and asks after the Brain app. Otherwise, if any Scans are waiting, waits
 -- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the button's pulse and
 -- returns which button that is: "Load", "Reload", or nil when Load was already clicked)
 -- and says so in chat once (#71, #106). "The Brain should be done" would be a false
@@ -96,6 +96,23 @@ function Nudge.afterLoad(scans, now, after, ready, say)
     end)
   end
   return false
+end
+
+-- The Brain's status rides along in Recommendations.lua as brain = { version, problem }
+-- (#115). The shipped stub has none, so with no brain table the Brain has never run.
+Nudge.NEVER_RUN_LINE = "AzerothQuant needs its Brain app to make recommendations. See the setup guide."
+Nudge.PROBLEM_TAIL = " If this keeps happening, send the Brain log (Start menu > AzerothQuant Brain log)"
+  .. " to whoever gave you the Brain."
+
+-- At login (and /reload), with AzerothQuantRecommendations (nil if it didn't load): says
+-- in chat that the Brain has never run, or the problem it wrote, or nothing.
+function Nudge.atLogin(recommendations, say)
+  local brain = recommendations and recommendations.brain
+  if not brain then
+    say(Nudge.NEVER_RUN_LINE)
+  elseif brain.problem then
+    say(brain.problem .. Nudge.PROBLEM_TAIL)
+  end
 end
 
 ns.Nudge = Nudge

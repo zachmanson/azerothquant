@@ -2,6 +2,7 @@ import subprocess
 from dataclasses import replace
 from pathlib import Path
 
+from brain import __version__
 from brain.beta_prior import BetaPrice, BetaPrior
 from brain.config import Config, Era, Install
 from brain.disenchant import Group
@@ -722,6 +723,33 @@ def test_write_recommendations_passes_on_the_post_duration(tmp_path, lua):
         conn.close()
 
     assert _run_in_lua(lua, written, "print(r.postDurationHours)") == "2"
+
+
+def test_every_write_tells_the_addon_the_brains_version_and_no_problem(tmp_path, lua):
+    # A file with a brain table means the Brain has run; the shipped stub has none (#115).
+    install = _addon_install(tmp_path)
+
+    conn = open_history(tmp_path / "history.db")
+    try:
+        written = write_recommendations(conn, install)
+    finally:
+        conn.close()
+
+    assert _run_in_lua(lua, written, "print(r.brain.version, r.brain.problem)") == (
+        f"{__version__}\tnil"
+    )
+
+
+def test_a_problem_reaches_the_addon_as_written(tmp_path, lua):
+    install = _addon_install(tmp_path)
+
+    conn = open_history(tmp_path / "history.db")
+    try:
+        written = write_recommendations(conn, install, problem='Couldn\'t reach "it".')
+    finally:
+        conn.close()
+
+    assert _run_in_lua(lua, written, "print(r.brain.problem)") == 'Couldn\'t reach "it".'
 
 
 def _addon_install(tmp_path: Path) -> Install:

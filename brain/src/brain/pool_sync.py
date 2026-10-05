@@ -151,6 +151,10 @@ def pull(
         return report
 
 
+# What the Addon tells the player while the pool can't be reached (#115).
+UNREACHABLE = "Couldn't reach the guild scan server. Using your own Scans for now."
+
+
 class PoolSyncer:
     """When `brain watch` syncs with the pool: a pull right before each import of the
     player's Scans, so they're matched against the freshest pool and late Scans stay rare,
@@ -172,6 +176,13 @@ class PoolSyncer:
         self.now = now
         # Due straight away, so a watcher that just started catches up.
         self.due_at = clock()
+        self.unreachable = False
+
+    @property
+    def problem(self) -> str | None:
+        """What to tell the player about the pool: that the last sync couldn't reach it,
+        until a pull gets through again. None when all is well."""
+        return UNREACHABLE if self.unreachable else None
 
     def tick(self) -> None:
         """Sync if pool_sync_minutes have passed since the last pull."""
@@ -201,6 +212,11 @@ class PoolSyncer:
         except Exception:
             log.exception("Syncing with the Scan Pool failed; will try again")
             return
+        # A push with nothing to push never calls the pool, so only a pull says it's back.
+        if report.failed:
+            self.unreachable = True
+        elif do_pull:
+            self.unreachable = False
         if any(
             (report.pushed, report.pulled, report.rejected, report.rematched, report.rolled_back)
         ):

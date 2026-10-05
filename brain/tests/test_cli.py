@@ -331,6 +331,30 @@ def test_watch_imports_even_when_the_pool_is_down(tmp_path, caplog):
         assert scan_times(conn, MARKET) == [1790000000, 1790001200]
 
 
+def test_the_addon_hears_the_pool_is_down_until_a_sync_works_again(tmp_path):
+    # A guildie never sees the log, so the problem rides along in Recommendations (#115).
+    config, pool = _watching_with_a_pool(tmp_path)
+    install_addon(tmp_path / "wow")
+    pool.fail = True
+    syncer = PoolSyncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT)
+    watcher = Watcher(settle_seconds=0)
+
+    watch_step(config, watcher, pool_sync=syncer)
+    watch_step(config, watcher, pool_sync=syncer)
+
+    assert read_recommendations(tmp_path / "wow")["brain"]["problem"] == (
+        "Couldn't reach the guild scan server. Using your own Scans for now."
+    )
+
+    pool.fail = False
+    [file] = savedvariables_files(config)
+    file.write_text(file.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    watch_step(config, watcher, pool_sync=syncer)  # sees the change
+    watch_step(config, watcher, pool_sync=syncer)  # it has settled: pull, import
+
+    assert "problem" not in read_recommendations(tmp_path / "wow")["brain"]
+
+
 def test_watch_logs_what_it_pushed_pulled_rejected_and_rematched(tmp_path, caplog):
     config, pool = _watching_with_a_pool(tmp_path)
     run_import(config, savedvariables_files(config))
@@ -375,6 +399,23 @@ def test_pool_commands_sync_by_hand(tmp_path, monkeypatch):
     assert len(pool.pushed()) == 2
     with closing(open_history(config.history_path)) as conn:
         assert FRIEND_SCAN_AT in scan_times(conn, MARKET)
+
+
+def test_a_watcher_that_crashes_tells_the_addon_before_it_exits(tmp_path, monkeypatch):
+    install_with_savedvariables(tmp_path / "wow")
+    install_addon(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    monkeypatch.setattr("brain.cli.load_config", lambda path: config)
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("a bug outside the per-pass guard")
+
+    monkeypatch.setattr("brain.cli.watch_step", crash)
+
+    assert main(["--config", str(tmp_path / "config.toml"), "watch"]) == 1
+    assert read_recommendations(tmp_path / "wow")["brain"]["problem"] == (
+        "The Brain stopped after an error. Start it again from the Start menu."
+    )
 
 
 class _FakeAdmin:
@@ -526,6 +567,24 @@ def test_a_broken_predictions_file_still_tells_the_addon_what_was_imported(tmp_p
     assert written["lastImported"] == {"Classic Beta PvP": {"Alliance": 1790001200}}
     assert written["recommendations"] == []
     assert "predictions.toml" in caplog.text
+    assert written["brain"]["problem"] == "Something went wrong making your recommendations."
+
+
+def test_a_failed_decision_engine_joins_the_pool_problem_in_one_line(tmp_path, monkeypatch):
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    install_addon(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("a Decision Engine bug")
+
+    monkeypatch.setattr("brain.cli.recommend", broken)
+    run_import(config, [file], problem="Couldn't reach the pool.")
+
+    assert read_recommendations(install)["brain"]["problem"] == (
+        "Couldn't reach the pool. Something went wrong making your recommendations."
+    )
 
 
 def test_an_install_without_the_addon_gets_no_file(tmp_path):

@@ -107,6 +107,10 @@ LOG_BACKUPS = 3
 # the watcher checks. The client writes the whole file within a second or so.
 SETTLE_SECONDS = 3.0
 POLL_SECONDS = 1.0
+# What the Addon tells the player when the Decision Engine wrote no Recommendations, and
+# when `brain watch` stopped after an error (#115).
+NO_RECOMMENDATIONS = "Something went wrong making your recommendations."
+CRASHED = "The Brain stopped after an error. Start it again from the Start menu."
 
 
 @dataclass(frozen=True)
@@ -132,13 +136,15 @@ def run_import(
     paths: list[Path],
     fair_value_cache: FairValueCache | None = None,
     timings: Timings | None = None,
+    problem: str | None = None,
 ) -> list[FileResult]:
     """Import each file into the history, in order.
 
     A file that can't be imported (say it was read while the client was still writing
     it) is reported and skipped; it doesn't stop the others. Importing is idempotent,
     so reading a file again later is always safe. `fair_value_cache` as in `recommend`.
-    Each stage is timed in `timings` (#131).
+    Each stage is timed in `timings` (#131). `problem` is passed on to the Addon, as in
+    `write_recommendations`.
     """
     config.history_path.parent.mkdir(parents=True, exist_ok=True)
     results = []
@@ -157,7 +163,9 @@ def run_import(
                 results.append(FileResult(path, error=str(e)))
             else:
                 results.append(FileResult(path, report=report))
-        _write_recommendations(conn, config, fair_value_cache=fair_value_cache, timings=timings)
+        _write_recommendations(
+            conn, config, fair_value_cache=fair_value_cache, timings=timings, problem=problem
+        )
     return results
 
 
@@ -239,8 +247,10 @@ def _write_recommendations(
     config: Config,
     fair_value_cache: FairValueCache | None = None,
     timings: Timings | None = None,
+    problem: str | None = None,
 ) -> None:
-    """Rewrite every install's Recommendations.lua from the history.
+    """Rewrite every install's Recommendations.lua from the history, with `problem` for
+    the Addon to tell the player.
 
     Every install, not only those just imported: it is cheap, and it also fixes a file
     a previous write couldn't replace (say the client had it open).
@@ -260,9 +270,11 @@ def _write_recommendations(
             except (PredictionsError, GradesError) as e:
                 log.error("No Recommendations written: %s", e)
                 markets = []
+                problem = _join_problems(problem, NO_RECOMMENDATIONS)
             except Exception:
                 log.exception("No Recommendations written: the Decision Engine failed")
                 markets = []
+                problem = _join_problems(problem, NO_RECOMMENDATIONS)
             beta_priors = _beta_priors(conn, config, markets, fair_value_cache)
     finally:
         fair_value_cache.timings = None
@@ -270,7 +282,7 @@ def _write_recommendations(
         for install in config.installs:
             try:
                 path = write_recommendations(
-                    conn, install, markets, beta_priors, config.post_duration_hours
+                    conn, install, markets, beta_priors, config.post_duration_hours, problem
                 )
             except (OSError, sqlite3.Error) as e:
                 log.error("Couldn't write Recommendations for %s: %s", install.path, e)
@@ -279,6 +291,11 @@ def _write_recommendations(
                 log.warning(
                     "The Addon isn't installed in %s; no Recommendations written", install.path
                 )
+
+
+def _join_problems(problem: str | None, more: str) -> str:
+    """Both problems in one line: the Addon has room for one."""
+    return f"{problem} {more}" if problem else more
 
 
 def _beta_priors(
@@ -1225,6 +1242,16 @@ def _watch(config: Config) -> int:
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         return 0
+    except Exception:
+        # watch_step carries on past a bad pass, so this is a bug. A guildie only learns
+        # the Brain stopped from the Addon (#115), so tell it, if the history still opens.
+        log.exception("The Brain stopped after an error")
+        try:
+            with closing(open_history(config.history_path)) as conn:
+                _write_recommendations(conn, config, problem=CRASHED)
+        except Exception:
+            log.exception("Couldn't tell the Addon the Brain stopped")
+        return 1
 
 
 def watch_step(
@@ -1247,7 +1274,13 @@ def watch_step(
         if pool_sync is not None:
             with timings.stage("pool pull"):
                 pool_sync.before_import()
-        results = run_import(config, ready, fair_value_cache=fair_value_cache, timings=timings)
+        results = run_import(
+            config,
+            ready,
+            fair_value_cache=fair_value_cache,
+            timings=timings,
+            problem=pool_sync.problem if pool_sync is not None else None,
+        )
         _log_results(results)
         failed = [r.path for r in results if r.error is not None]
         imported = len(failed) < len(results)

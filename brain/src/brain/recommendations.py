@@ -27,6 +27,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from brain import __version__
 from brain.beta_prior import BetaPrior
 from brain.config import DEFAULT_POST_DURATION_HOURS, Install
 from brain.disenchant import DisenchantTable, Group, load_table
@@ -103,6 +104,9 @@ _HEADER = (
     "-- equipLocs, each a set.\n"
     "-- postDurationHours is how long every post lasts (2, 8 or 24): the Brain charges\n"
     "-- Deposits for that long, so the Addon's Post button posts for it too.\n"
+    "-- brain is the Brain's status: { version, problem (a line for the player, nil when\n"
+    "-- all is well) }. The shipped stub has none, which tells the Addon the Brain has\n"
+    "-- never run.\n"
 )
 
 
@@ -133,10 +137,14 @@ def render(
     markets: Sequence[MarketRecommendations] = (),
     beta_priors: Mapping[Market, BetaPrior] | None = None,
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
+    problem: str | None = None,
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
         by_realm.setdefault(market.realm, {})[market.faction] = requested_at
+    brain: dict[str, str] = {"version": __version__}
+    if problem:  # a Lua table can't hold nil
+        brain["problem"] = problem
     return _HEADER + assignment(
         GLOBAL_NAME,
         {
@@ -146,6 +154,7 @@ def render(
             "recommendations": _recommendations(markets, beta_priors or {}),
             "disenchantExcluded": _disenchant_excluded(load_table()),
             "postDurationHours": post_duration_hours,
+            "brain": brain,
         },
     )
 
@@ -361,9 +370,11 @@ def write_recommendations(
     markets: Sequence[MarketRecommendations] = (),
     beta_priors: Mapping[Market, BetaPrior] | None = None,
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
+    problem: str | None = None,
 ) -> Path | None:
     """Write the install's Recommendations.lua from the history and the Recommendations of
-    its Era's Markets, with their Beta Priors; None if the Addon isn't installed there."""
+    its Era's Markets, with their Beta Priors and the Brain's status (its version, and the
+    problem to tell the player, if any); None if the Addon isn't installed there."""
     folder = addon_folder(install)
     if not folder.is_dir():
         return None
@@ -375,6 +386,7 @@ def write_recommendations(
         [m for m in markets if m.market.era is install.era],
         beta_priors,
         post_duration_hours,
+        problem,
     )
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.

@@ -102,15 +102,15 @@ describe("Nudge.afterLoad", function()
     assert.are.same({}, w.lines)
   end)
 
-  it("when the Brain is behind, asks whether brain watch is running instead of promising it's done", function()
+  it("when the Brain is behind, asks whether the Brain app is running instead of promising it's done", function()
     local w = world()
 
     local behind = Nudge.afterLoad({ { savedAt = NOW }, { savedAt = NOW - 7 * MIN - 59 } }, NOW, w.after, w.pulse, w.say)
 
     assert.is_true(behind)
     assert.are.same({}, w.timers)
-    assert.are.same({ "The Brain hasn't imported Scans saved 7 min ago. Is brain watch running? (scripts\\play.bat)" },
-      w.lines)
+    assert.are.same({ "Your Scan from 7 min ago hasn't reached the Brain. Is AzerothQuant Brain running?"
+      .. " Start it from the Start menu." }, w.lines)
   end)
 end)
 
@@ -148,5 +148,32 @@ describe("Nudge.brainBehind", function()
 
   it("ignores a Scan with no savedAt, saved by a build from before the stamp", function()
     assert.is_nil(Nudge.brainBehind({ { id = 1 } }, NOW))
+  end)
+end)
+
+describe("Nudge.atLogin", function()
+  local function said(recommendations)
+    local lines = {}
+    Nudge.atLogin(recommendations, function(line)
+      lines[#lines + 1] = line
+    end)
+    return lines
+  end
+
+  it("says the Brain app is needed when it has never run: the shipped stub has no brain status", function()
+    local never = { "AzerothQuant needs its Brain app to make recommendations. See the setup guide." }
+    assert.are.same(never, said({ lastImported = {}, recommendations = {} }))
+    assert.are.same(never, said(nil))
+  end)
+
+  it("passes on the Brain's problem, with where to send its log", function()
+    local recommendations = { brain = { version = "0.1.0", problem = "Couldn't reach the guild scan server." } }
+
+    assert.are.same({ "Couldn't reach the guild scan server. If this keeps happening, send the Brain log"
+      .. " (Start menu > AzerothQuant Brain log) to whoever gave you the Brain." }, said(recommendations))
+  end)
+
+  it("says nothing when the Brain has run and has no problem", function()
+    assert.are.same({}, said({ brain = { version = "0.1.0" } }))
   end)
 end)
