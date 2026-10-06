@@ -1,3 +1,23 @@
+2026-10-06 (later 94): #115 Acceptance run on the `aqtest` account; results commented on #115 (it was already closed, on 10-05). #116 moved to `core` with per-stage numbers. No code changed.
+
+- Passed on aqtest: SmartScreen ("unknown publisher"), setup popups (found Z: WoW from the registry, beta + live, no key), autostart after reboot, update to 0.1.1 with data kept, uninstall (shortcuts and both Addons gone).
+- Not shown on aqtest, left to the techy-guildie test (ask for `brain.log`): Scan → Load fills the table, and the "Brain isn't running" line. aqtest's one Scan never finished (`nextScanId` stayed 66). The beta client patched at 19:27, but a dev-account Scan on the new build saved and imported fine (#66 at 19:49), so it was a one-off (AH closed or reload too early).
+- Also unconfirmed: aqtest's app folder still existed when the uninstall check ran, maybe before the ~5 s delayed delete.
+- #116 finding: the Decision Engine takes 67-94 s on every import, even a reload with no new Scan. Fair Values are 28 s after a Brain restart, 0 s after that. SavedVariables parsing is 6-11 s with a Scan.
+- The user asked about dropping the `/reload` or using Blizzard's AH API. Answered no: addons can't write files or use the network, so SavedVariables on reload is the only way out of the game, and the web API is hourly (and probably has no beta). The fix is the ~80 s after the reload (#116).
+
+Next, in order: 1. #139 (ready-for-agent, option 1 decided on the issue). 2. #116: grill/spec first (budget, profile one Decision Engine run, skip or narrow work when no Scan changed). Then #138, PC items (#81, #39, #85), #136.
+
+- Gotchas:
+  - Windows accounts share the WoW folder (WTF and AddOns). A second-account test needs the dev junction and dev Brain moved aside first: setup skips linked Addons, and two Brains would write the same Recommendations.lua. Uninstall deletes the non-linked `AzerothQuant_Data`.
+  - The dev setup is restored (junction, Data addon, `brain-watch.bat` in Startup, Brain running). `Z:\vibing\aqtest-backup\` holds `RESTORE.txt` and the AQProbe addon, moved out of AddOns because its probe buttons were on screen. Bring AQProbe back only if a #39 probe needs it (it'll need new code anyway).
+  - The aqtest account and `C:\Users\Public\aqtest\` (both exes, helper .bat files, aqtest's saved log) are still there. Delete them when no longer needed (`net user aqtest /delete` in an admin shell).
+  - C: had 0.5 GB free, which stalled Battle.net's patch on aqtest (the game is on Z:, but Battle.net uses C:).
+  - `brain/src/brain/__init__.py` is back to `0.1.0`. The 0.1.1 was only for the test build.
+  - Never run the exe on the dev account: it sets up autostart and writes to %LOCALAPPDATA%.
+  - The dev Brain runs from `.venv` during play (`brain/brain.lock`). Diagnose on a copy: sqlite `backup()` into the scratchpad, plus a config there without the pool secrets (relative paths resolve next to the config).
+  - `brain recommend --why-not <name>` takes ~2 min on the real data, and it didn't match 'Waylaid Crate: Journeyman Curiosities' by name. Use the Item Key.
+
 2026-10-06 (later 93): #115 Acceptance steps 1 and 2 done; nothing run. Filed #139.
 
 - Step 1: the v0.1.0 Release exe's sha256 matches the Release, Defender finds no threats, it's NotSigned (expect SmartScreen). The bundle has `_tkinter.pyd`, tcl86t/tk86t DLLs, `_tcl_data` (832) and `_tk_data` (89), the Addon (34 files, Recommendations.lua is the 315-byte stub) and `brain\data\disenchant.toml`.
