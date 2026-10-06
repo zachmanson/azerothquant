@@ -1,3 +1,16 @@
+2026-10-06 (later 93): #115 Acceptance steps 1 and 2 done; nothing run. Filed #139.
+
+- Step 1: the v0.1.0 Release exe's sha256 matches the Release, Defender finds no threats, it's NotSigned (expect SmartScreen). The bundle has `_tkinter.pyd`, tcl86t/tk86t DLLs, `_tcl_data` (832) and `_tk_data` (89), the Addon (34 files, Recommendations.lua is the 315-byte stub) and `brain\data\disenchant.toml`.
+- Step 2: `brain/src/brain/__init__.py` says `0.1.1` (uncommitted, don't tag). Built with a throwaway venv in the session scratchpad, output there too (not `brain/dist`), so the exe may be gone by the next session. Rebuild with `pyinstaller --noconfirm --distpath <dir> --workpath <dir> AzerothQuantBrain.spec` from `brain/` in a venv with `pyinstaller>=6.10` (the dev `.venv` doesn't have it; leave it that way). Its bundle matches the Release except 4 api-ms-win-core-* shims the CI runner added (Windows 10 has them).
+- #139 (option 1 chosen): one dear Scan reset 248689's cheap stretch, and the 24 h unwatched grace kept week-old demand, so the Brain said buy 528 Waylaid Crates. Also open on it: the player says the crate doesn't stack, but ~300 Listings had 2+ units.
+
+Next, in order: 1. The user's step 3 on the `aqtest` account (copy both exes somewhere it can read, like `C:\Users\Public\aqtest\`), then step 4. 2. #139. Then #138, PC items (#81, #39, #85), #136.
+
+- Gotchas:
+  - Never run the exe on the dev account: it sets up autostart and writes to %LOCALAPPDATA%.
+  - The dev Brain runs from `.venv` during play (`brain/brain.lock`). Diagnose on a copy: sqlite `backup()` into the scratchpad, plus a config there without the pool secrets (relative paths resolve next to the config).
+  - `brain recommend --why-not <name>` takes ~2 min on the real data, and it didn't match 'Waylaid Crate: Journeyman Curiosities' by name. Use the Item Key.
+
 2026-10-06 (later 92): Planning only, no code. Plan for the #115 Acceptance, decided in session: don't hand it to a guildie first. The exe, the popups, autostart, update and uninstall have never run outside the dev box.
 
 Next, in order:
