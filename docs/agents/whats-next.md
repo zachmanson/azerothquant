@@ -1,3 +1,16 @@
+2026-10-06 (later 92): Planning only, no code. Plan for the #115 Acceptance, decided in session: don't hand it to a guildie first. The exe, the popups, autostart, update and uninstall have never run outside the dev box.
+
+Next, in order:
+1. Agent pre-flight: download the v0.1.0 Release exe, check the bundle has tkinter + Tcl/Tk data, Defender-scan it (`MpCmdRun -Scan -ScanType 3 -File <exe>`), check it's unsigned (expect a SmartScreen warning).
+2. Agent: bump `brain/src/brain/__init__.py` to `0.1.1` and build locally from `brain/AzerothQuantBrain.spec`. That's the update-test exe. Don't tag or release it without asking.
+3. User: make a local test account (`net user aqtest <pw> /add` in an admin shell). Log in, run steps 1 to 4 of the Acceptance (setup popups, WoW Scan/Reload/Load, reboot, kill), then the 0.1.1 exe for update, then uninstall.
+4. Agent: read `C:\Users\aqtest\AppData\Local\AzerothQuant\brain.log` and `/diagnosing-bugs` any failure. Otherwise close #115 and start #138.
+PC items as before (#81, #39, #85). #136 whenever.
+
+- Gotchas: same as later 91, plus:
+  - Windows Sandbox isn't enabled on the dev PC, and it can't run WoW anyway. Use the test account.
+  - Only after the test-account pass: a techy guildie on Discord is a fine second test. Ask them for `brain.log`.
+
 2026-10-05 (later 91): `v0.1.0` tagged and released. The release job's first real run worked: https://github.com/zachmanson/azerothquant/releases/tag/v0.1.0 has `AzerothQuantBrain.exe` (13.4 MB, a 64-bit windowless exe). The first two attempts failed because of a GitHub Actions outage ("job was not acquired by Runner" after 15 min of queueing, and jobs cancelled), not because of our code. "Re-run failed jobs" fixed it once githubstatus.com showed Actions as operational.
 
 Next, in order: the #115 Acceptance on a clean Windows account, using the Release exe (setup popups, reboot, kill, update), then close #115. PC items as before (#81, #39, #85). #136 whenever. #138 after #115 closes.
