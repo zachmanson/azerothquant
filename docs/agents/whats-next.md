@@ -1,3 +1,13 @@
+2026-10-06 (later 102): Grilled #149-#153 and #155 against the Oct 20 PoC. **Rule: before Oct 20 only what needs the game or would spoil the #146 PoC; Brain-only work goes in the Oct 21 to Nov 4 gap** (no game, but the Brain and the archive work; guildies reinstall for Live anyway). Decisions are commented on each issue. Facts found: all 66 own Scans have `dropped_rows > 0` (avg ~2.5k of ~74k), so #150's "skip windows next to dropped-row Scans" was impossible; it became (a) the Addon records dropped rows' itemIDs (`Scanner.lua:159` discards `GetReplicateItemInfo` return 17) + (c) a Brain resurrection check in the gap. Own Listings with mail (122 sold, 38 cancelled, 48 expired) are enough for #153 now. #146's speed check is now "record, don't block" (with the pool on, most passes are new-Scan passes at ~19 s), and #147's zero-history in-game check was added to it.
+
+Next, in order (target #146 by ~Oct 13):
+1. Addon batch: #150 part (a) (record dropped itemIDs, Brain skips those items' windows) + #144 packed rows. One in-game check, with what fits of #85. Cut #144 if not checked in game by ~Oct 11.
+2. #149 Brain-side Pooled body checks (build while waiting on the PC).
+3. #138 guide, then #146 PoC (rest of #85 rides along).
+4. Gap, Oct 21 to Nov 4: #147 offline part (grill first), #153, #151 (grill the design first), #155, #150 (c), #152. #150 (c) and #152 move past Nov 4 if #153 shows they're small (~5%).
+
+- Gotchas: same as later 101.
+
 2026-10-06 (later 101): #143 built and closed (d8213a1, slice C of #116). `FairValueCache.scan_only(conn, market, what, work)` keeps Scan-only results across passes, dropped when any of the Market's `scan_stamps` changes (`_check_scans`): `listings`, `supply_at` (all and others only), `sell_rates` (keyed on the whole Config and `now`), `_others_lows`, and the Buy Unders' `cheapest_seen`. Bench (three-pass script, numbers on #116): no new Scan 19.4 s -> 5.9 s (`brain bench` pass 2: 5.9 s), new Scan 22.1 s -> 19.3 s, byte-identical. **Neither budget is met.** Buy Unders and Flips are NOT reused: they read the Holdings (the post-Flips Valuer's `held`, in `_sell_way`) and Deposits, so the issue's "key on Known Recipes and skill" was not enough. The rest is filed as #155 (needs-triage): `SellRate.at_or_above` bisect (3.6 s of the profiled no-Scan pass, likely enough on its own), a per-Item Key Flips memo, and the new-Scan `listings`/`_others_lows` loads.
 
 Next, in order: 1. Grill #149-#153 together (see later 100), then decide where #155 goes against the Oct 20 deadline (a no-Scan pass at ~6 s may be fine for the PoC). Then #138, #146, #85 day-1 checks, #147.
