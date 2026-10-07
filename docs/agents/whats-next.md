@@ -1,3 +1,11 @@
+2026-10-06 (later 96): #116 grilled. The spec is a comment on #116 (ready-for-agent), with 4 sub-issues. It's pure optimization: Recommendations.lua must stay byte-identical. The budget is a new Scan under 15 s and no Scan under 5 s, from the reload being noticed to the file written. Profile (cProfile, DB copy): 103 s per pass. `_way_out` (no memo, 132k calls) is 51 s, `without()` in `_post_at` 17 s, `sell_rates` twice 26 s, `_others_lows` 6 s. About 80% is Scan-only. Slices in order: #141 A (memo within a pass + `brain bench`), #142 B (incremental Sell Rate evidence), #143 C (reuse Scan-only results when no Scan changed), #144 D (SavedVariables parser fast paths, moved off #10). #145 (`later`): Fair Values across a Brain restart. No code changed.
+
+Next, in order: 1. #141. After it, run `brain bench` and drop later slices if the budget is met. Then #142, #143, #144, then #138, PC items (#81, #39, #85, #140), #136.
+
+- Gotchas: same as later 95, plus:
+  - Profiling recipe: sqlite `backup()` copy plus a scratchpad config with one `[[installs]]` pointing at an empty folder ("The Addon isn't installed" just skips the write). Call `cli._write_recommendations(conn, cfg, fair_value_cache=cache, timings=t)` twice in one process under cProfile. That takes ~4 min.
+  - Bash heredocs with apostrophes failed in this shell; write issue bodies with the Write tool and `gh ... -F file`.
+
 2026-10-06 (later 95): #139 built and closed (c2207c4). A break of up to 2 Scans with nothing under the post price (`SHORT_BREAK_SCANS` in recommend.py) no longer ends the cheap stretch, when cheap stock was up again before it. `_Cheap.stretch` returns `_Stretch(since, breaks)`. `WhyNot.cheap_breaks` holds the skipped Scans, and `--why-not` adds "(none at ...)". ADR-0029 is amended and CONTEXT.md updated. The replay numbers are on #139: graded per Flip once per Item Key at Scans 40-63, 1 Scan nets +33g and 2 Scans +64g. On the 10-06 17:51 and 19:46 Scans, 248689 is off the list, plus 1121, 11177, 3182, 2879, 729, 12977 and 5637. The crate-stacking question is now #140 (ready-for-human, in game).
 
 Next, in order: 1. #116: grill/spec first (budget, profile one Decision Engine run, skip or narrow work when no Scan changed). Then #138, PC items (#81, #39, #85, #140), #136.
