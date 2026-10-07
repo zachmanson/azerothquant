@@ -21,3 +21,21 @@ The readers are ADR-0028's: Flip to Sell, a Hold buy's Max Loss, and `brain reco
 - Thin Item Keys lose ADR-0028's grace. A cheap Listing that sat through any watched hours with no Sale Event at or above the post price since loses its Flip until 3 come.
 - A crash seen only in Scans more than an hour apart is trusted for up to a day. That's the cost of not killing every Flip in a Market scanned every couple of hours.
 - On the 2026-10-04 17:54 Beta Scan, 10 Flips drop out (10938 among them), all with cheap stock up since 10-03 or earlier and nothing sold at or above the post price since. The rest of the list is unchanged.
+
+## Amendment: A short break doesn't end the stretch (#139)
+
+On the 2026-10-06 17:51 Beta Scan the Brain said to buy 528 Waylaid Crate: Journeyman Curiosities (248689) at up to 12s to post at 15s 98c. Every Sale Event at that price was from Sep 27–29. Cheap stock had been up in every Scan from 10-02 to 10-04, but the one Scan on 10-05 18:17 had nothing under 15s 98c, so the stretch started at the next Scan, 10-05 22:50. No Observation Window came after it, so the 24 h grace left the week-old demand whole.
+
+So walking back from the latest Scan, a break of up to 2 Scans with nothing under the post price (`SHORT_BREAK_SCANS`) doesn't end the stretch when the Scan before it had cheap stock again. The stretch starts at the earliest cheap Scan reached that way, and only longer breaks end it. Sale Events during the break are after the start, so they still count. A Scan with none of the Item Key listed at all still ends it. The trigger and the 24 h grace are unchanged, and a stretch that is only the latest Scan is still never cut. `--why-not` names the Scans it was kept through: "(none at 2026-10-05 18:17)".
+
+Why 2 Scans: on the Beta data, breaks of every length are common (of the breaks between two cheap Scans, about 3,600 last 1 Scan, 2,200 last 2 and 1,400 last 3), and Scans are 15 minutes to 22 hours apart, so a limit in hours would have to be over a day to cover 248689. Grading each Flip to Sell alone over the Scans from 09-29 to 10-05 (40–63), every Flip that 1 or 2 Scans changes, counted once per Item Key at its first Scan:
+
+- 1 Scan: 33 Item Keys change; of the Flips dropped, 19 lost money and 10 made it; net +32.77g.
+- 2 Scans: 46 Item Keys change; 29 lost, 14 made; net +63.83g.
+
+Scans from 10-04 on have under 3 days of Sale Horizon left in the data, so their grades lean on Best Exit Value at the end. Counted at every Scan instead of once, 1 Scan comes out −46g through 10-04 20:28. That's one false cut, 262888 at 39s 99c (dropped at four Scans in a row, and it sold), and 2 Scans has the same false cut and still comes out +14g there.
+
+- Not an hours limit: see above.
+- Not ignoring demand when every Sale Event at the post price is days old, and not a shorter grace: as in the issue, the grace is what keeps good Flips when Scans are 2 hours apart.
+
+On the 17:51 and 19:46 Scans of 10-06, 248689 drops off the Shopping List, and 1121, 11177, 3182, 2879, 729, 12977 and 5637 drop too. Nothing is added.

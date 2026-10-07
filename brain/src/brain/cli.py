@@ -1001,6 +1001,10 @@ def _shortfall(w: WhyNot) -> float:
             return (w.rank - w.rows) / w.rank
 
 
+def _minute(at: int) -> str:
+    return datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M")
+
+
 def _numbers(w: WhyNot, check: Check) -> str:
     """The numbers behind one Check of `w`."""
     match check:
@@ -1008,8 +1012,13 @@ def _numbers(w: WhyNot, check: Check) -> str:
             counted = f"{w.sale_events}/{w.min_sale_events} Sale Events"
             if w.cheap_since is None:
                 return counted
-            since = datetime.fromtimestamp(w.cheap_since).strftime("%Y-%m-%d %H:%M")
-            note = "" if w.watched_since else " (not watched since)"
+            since = _minute(w.cheap_since)
+            notes = []
+            if w.cheap_breaks:
+                notes.append("none at " + ", ".join(_minute(t) for t in w.cheap_breaks))
+            if not w.watched_since:
+                notes.append("not watched since")
+            note = f" ({'; '.join(notes)})" if notes else ""
             return f"{counted} since cheaper Listings went up {since}{note}"
         case Check.ROOM:
             at = "" if w.post_at is None else f" at {_money(w.post_at)}"

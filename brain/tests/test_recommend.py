@@ -1227,8 +1227,9 @@ def test_a_thin_item_keys_flip_is_cut_once_its_cheap_stock_sat_through_a_watched
     assert len(result[MARKET].shopping_list) == flips
 
 
-def test_a_scan_with_no_cheap_stock_ends_the_stretch_before_it(db):
-    # The 100 was bought out by the second Scan: the stretch starts at the third.
+def test_one_scan_with_no_cheap_stock_doesnt_end_the_stretch(db):
+    # The 100 was gone by the second Scan, but cheap stock was back by the third (#139):
+    # the stretch still starts at the first.
     _, why = why_not(
         db,
         walls([row(unit=100)], [], [row(unit=110)], [row(unit=120)], [row(unit=130)]),
@@ -1240,8 +1241,29 @@ def test_a_scan_with_no_cheap_stock_ends_the_stretch_before_it(db):
     assert (linen.failed, linen.sale_events, linen.cheap_since) == (
         Check.SALE_EVENTS,
         0,
-        CHEAP_AT + 24 * HOUR,
+        CHEAP_AT,
     )
+
+
+@pytest.mark.parametrize(
+    ("breaks", "since", "kept_through"),
+    [
+        # #139: two Scans is still a short break.
+        (2, CHEAP_AT, (CHEAP_AT + 12 * HOUR, CHEAP_AT + 24 * HOUR)),
+        # Three: buyers cleared it, and the stretch starts after.
+        (3, CHEAP_AT + 48 * HOUR, ()),
+    ],
+)
+def test_only_a_short_break_in_the_cheap_stock_doesnt_end_the_stretch(
+    db, breaks, since, kept_through
+):
+    # Scans 12 h apart, and cheap stock back for 36 h after the break.
+    back = [[row(unit=110)], [row(unit=120)], [row(unit=130)], [row(unit=140)]]
+    cheap = [[row(unit=100)]] + [[]] * breaks + back
+    _, why = why_not(db, walls(*cheap), [character_read(money=GOLD)], FLIPS_NEED_3)
+
+    linen = why[LINEN_KEY]
+    assert (linen.cheap_since, linen.cheap_breaks) == (since, kept_through)
 
 
 def test_a_prediction_buys_max_loss_counts_only_since_the_cheap_stock_before_its_wall(db):

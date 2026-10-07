@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from functools import cache, cached_property
-from itertools import groupby, takewhile
+from itertools import groupby
 from types import MappingProxyType
 from typing import NamedTuple
 
@@ -230,6 +230,8 @@ class WhyNot:
     cheap_since: int | None = None
     # Whether any Observation Window hours came after `cheap_since` (#135).
     watched_since: bool = True
+    # The Scans with no cheaper Listing the stretch was kept through (#139), oldest first.
+    cheap_breaks: tuple[int, ...] = ()
 
 
 class BlockReason(StrEnum):
@@ -369,6 +371,16 @@ class _VendorBuy:
         return self.unit_profit / self.unit_buyout
 
 
+# The most Scans in a row with no cheaper Listing that don't end a stretch of them, when
+# cheap stock is up again before them (#139).
+SHORT_BREAK_SCANS = 2
+
+
+class _Stretch(NamedTuple):
+    since: int | None  # the Scan it began in
+    breaks: tuple[int, ...]  # the Scans with none cheaper it was kept through, oldest first
+
+
 @dataclass(frozen=True)
 class _Cheap:
     """The cheapest other player's unit buyout of an Item Key in each Scan, as (Scan,
@@ -379,12 +391,31 @@ class _Cheap:
     lows: tuple[tuple[int, int], ...]
 
     def since(self, post_at: float) -> int | None:
-        """The Scan the stretch began in: the earliest from which every Scan up to the
-        latest had another player's Listing under `post_at`. None if it's only the latest
-        Scan, a Listing too new to judge, or none is under `post_at`, as for a Sell posted
-        under the cheapest."""
-        stretch = list(takewhile(lambda low: low[1] < post_at, self.lows))
-        return stretch[-1][0] if len(stretch) > 1 else None
+        """The Scan the stretch began in, as in `stretch`."""
+        return self.stretch(post_at).since
+
+    def stretch(self, post_at: float) -> _Stretch:
+        """The stretch of Scans with another player's Listing under `post_at`, walking
+        back from the latest, kept through breaks of up to SHORT_BREAK_SCANS with cheap
+        stock again before them (#139). Its `since` is None if it's only the latest Scan,
+        a Listing too new to judge, or none is under `post_at`, as for a Sell posted under
+        the cheapest."""
+        cheap = [low[1] < post_at for low in self.lows]
+        start = None  # index into `lows`, latest first, as are `i` and `gap`
+        skipped: list[int] = []
+        i = 0
+        while i < len(cheap) and cheap[i]:
+            start = i
+            i += 1
+            gap = i
+            while gap < len(cheap) and not cheap[gap] and gap - i < SHORT_BREAK_SCANS:
+                gap += 1
+            if gap > i and gap < len(cheap) and cheap[gap]:
+                skipped += range(i, gap)
+                i = gap
+        if start is None or start == 0:
+            return _Stretch(None, ())
+        return _Stretch(self.lows[start][0], tuple(self.lows[s][0] for s in reversed(skipped)))
 
     @property
     def latest(self) -> int:
@@ -861,6 +892,7 @@ def _why_not(
         demand = _demand_at(rate, post_at, cheap=cheap)
         sale_events = demand.sale_events if demand else 0
         cut = demand is not None and demand != rate.at_or_above(post_at)
+        stretch = cheap.stretch(post_at) if cut else _Stretch(None, ())
         room = _room_at(
             rate, post_at, 0, config, config.days_to_sell_or_horizon_seconds, cheap=cheap
         )
@@ -897,7 +929,8 @@ def _why_not(
                 rank=rank.get(item_key),
                 rows=rows,
                 name=names.get(item_key),
-                cheap_since=cheap.since(post_at) if cut else None,
+                cheap_since=stretch.since,
+                cheap_breaks=stretch.breaks,
                 watched_since=not cut or demand.window_hours > 0,
             )
         )
