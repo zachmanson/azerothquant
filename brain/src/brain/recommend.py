@@ -803,7 +803,9 @@ def recommend_market(
         grades=graded,
         pooled_return=pooled,
         held=_whose(by_character),
-        buy_under=_buy_unders(conn, config, market, now, valuer, plans) if buy_under else [],
+        buy_under=_buy_unders(conn, config, market, now, valuer, plans, fair_value_cache)
+        if buy_under
+        else [],
         why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
         beta_ratios=ratios,
         loot_alert=_loot_alert(gold, valuer, plans, config, with_items=loot_alert),
@@ -960,11 +962,13 @@ def _buy_unders(
     now: int,
     valuer: "_Valuer",
     plans: list["_Plan"],
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[BuyUnder]:
     """The Buy Unders as of the Scan requested at `now` (#88): every Item Key whose best
     way out leaves a price that enough distinct Scans in the window saw another player's
     Listing at or under. The Holdings don't move them: a Craft way's other reagents come
-    from their cheapest current source (ADR-0014's, with nothing held)."""
+    from their cheapest current source (ADR-0014's, with nothing held). `fair_value_cache`
+    as in `recommend`."""
     window = config.buy_under_window_days
     sources = _nothing_held(valuer, plans, config)
     result: list[tuple[float, BuyUnder]] = []
@@ -1002,7 +1006,14 @@ def _buy_unders(
         )
         result.append((net - price, buy))
 
-    seen_by_key = cheapest_seen(conn, market, now - window * 86400, now)
+    since = now - window * 86400
+    seen_by_key = _scan_only(
+        fair_value_cache,
+        conn,
+        market,
+        ("cheapest_seen", since, now),
+        lambda: cheapest_seen(conn, market, since, now),
+    )
     for item_key, cheapest in seen_by_key.items():
         add(
             item_key,
@@ -1635,15 +1646,30 @@ def _valuer(
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
     `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
     the latest, or as of `skills_as_of` (#103). `pricer` as in `recommend_market`."""
-    seen = listings(conn, market) if seen is None else seen
+    # With a cache, its Listings: what it keeps below is worked out from them (#143).
+    cache = fair_value_cache
+    if cache is not None:
+        seen = cache.listings(conn, market)
+    elif seen is None:
+        seen = listings(conn, market)
     scanned = at is not None
-    supply = supply_at(conn, market, at) if scanned else {}
-    others = supply_at(conn, market, at, others_only=True) if scanned else {}
-    rates = (
-        sell_rates(conn, market, config, at, seen, fair_value_cache=fair_value_cache)
+    supply = (
+        _scan_only(cache, conn, market, ("supply_at", at), lambda: supply_at(conn, market, at))
         if scanned
         else {}
     )
+    others = (
+        _scan_only(
+            cache,
+            conn,
+            market,
+            ("others_at", at),
+            lambda: supply_at(conn, market, at, others_only=True),
+        )
+        if scanned
+        else {}
+    )
+    rates = sell_rates(conn, market, config, at, seen, fair_value_cache=cache) if scanned else {}
     vendor = vendor_prices(conn, market.era)
     merchant = _merchant(conn, market)
     cut = auction_cut(market, config)
@@ -1666,11 +1692,28 @@ def _valuer(
             enchanting_skills(conn, market, skills_as_of),
         ),
         pricer=pricer,
-        listed=_others_lows(seen, [t for t in scan_times(conn, market) if t <= at])
+        listed=_scan_only(
+            cache,
+            conn,
+            market,
+            ("others_lows", at),
+            lambda: _others_lows(seen, [t for t in scan_times(conn, market) if t <= at]),
+        )
         if scanned
         else {},
     )
     return valuer.flips(under, unbound)
+
+
+def _scan_only[T](
+    cache: FairValueCache | None,
+    conn: sqlite3.Connection,
+    market: Market,
+    what: tuple,
+    work: Callable[[], T],
+) -> T:
+    """`work`, kept in the cache's `scan_only` if there's a cache."""
+    return work() if cache is None else cache.scan_only(conn, market, what, work)
 
 
 def _others_lows(

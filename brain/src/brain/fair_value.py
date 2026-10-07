@@ -6,6 +6,7 @@ ask what the Item Key is worth once the units it buys are gone (#23).
 
 import math
 import sqlite3
+from collections.abc import Callable
 from statistics import median
 
 from brain.config import Config
@@ -57,10 +58,10 @@ class FairValueCache:
     A re-match imports a Market's Scans again from the late one on (ADR-0026), so what
     was kept from those Scans goes (#142).
 
-    It also keeps each Market's `listings` for one pass, so the Valuer and the Beta Prior
-    load them once (#141). Those do change with a new Scan, so a pass never reuses the
-    last one's: a pass starts after the import that brought the Scan. `this_pass` holds
-    anything else worked out from them, for the rest of the pass.
+    It also keeps what's worked out from a Market's Scans alone (`scan_only`): its
+    `listings`, Sell Rates, supply and others' lows (#143). A reload with no new Scan
+    reuses them; any change to the Market's Scans drops them all. `this_pass` holds
+    anything else worked out from the Listings, for the rest of the pass only.
 
     And it keeps what Sell Rate takes from each Observation Window's two Scans
     (`kept_for_window`), so a new Scan only adds its own window to the tally (#142)."""
@@ -68,7 +69,8 @@ class FairValueCache:
     def __init__(self) -> None:
         self._last_pass: dict[_ScanKey, dict[str, float]] = {}
         self._this_pass: dict[_ScanKey, dict[str, float]] = {}
-        self._listings: dict[Market, list[Listing]] = {}
+        self._scan_only_last_pass: dict[tuple[Market, tuple], object] = {}
+        self._scan_only_this_pass: dict[tuple[Market, tuple], object] = {}
         # Keyed by (the type of what's kept, Market).
         self.this_pass: dict[tuple[type, Market], object] = {}
         self._windows_last_pass: dict[_WindowKey, object] = {}
@@ -83,7 +85,7 @@ class FairValueCache:
 
     def start_pass(self) -> None:
         self._last_pass, self._this_pass = self._this_pass, {}
-        self._listings = {}
+        self._scan_only_last_pass, self._scan_only_this_pass = self._scan_only_this_pass, {}
         self.this_pass = {}
         self._windows_last_pass, self._windows_this_pass = self._windows_this_pass, {}
         self._checked = set()
@@ -97,6 +99,10 @@ class FairValueCache:
         now = scan_stamps(conn, market)
         last = self._stamps.get(market, [])
         self._stamps[market] = now
+        if now != last:
+            for kept in (self._scan_only_last_pass, self._scan_only_this_pass):
+                for key in [k for k in kept if k[0] == market]:
+                    del kept[key]
         unchanged = 0
         while unchanged < min(len(last), len(now)) and last[unchanged] == now[unchanged]:
             unchanged += 1
@@ -112,11 +118,24 @@ class FairValueCache:
             for key in [k for k in windows if k[0] == market and k[2] >= stale_from]:
                 del windows[key]
 
+    def scan_only[T](
+        self, conn: sqlite3.Connection, market: Market, what: tuple, work: Callable[[], T]
+    ) -> T:
+        """What `work` works out from the Market's Scans alone, named by `what` (its kind
+        and arguments): kept across passes until any of the Market's Scans changes (#143).
+        Nobody may change what it returns."""
+        self._check_scans(conn, market)
+        key = (market, what)
+        if key not in self._scan_only_this_pass:
+            if key in self._scan_only_last_pass:
+                self._scan_only_this_pass[key] = self._scan_only_last_pass[key]
+            else:
+                self._scan_only_this_pass[key] = work()
+        return self._scan_only_this_pass[key]  # type: ignore[return-value]
+
     def listings(self, conn: sqlite3.Connection, market: Market) -> list[Listing]:
-        """The Market's `listings`, loaded once this pass."""
-        if market not in self._listings:
-            self._listings[market] = listings(conn, market)
-        return self._listings[market]
+        """The Market's `listings`, loaded again only once its Scans change."""
+        return self.scan_only(conn, market, ("listings",), lambda: listings(conn, market))
 
     def fair_values(
         self, conn: sqlite3.Connection, market: Market, config: Config, at: int

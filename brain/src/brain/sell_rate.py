@@ -91,8 +91,29 @@ def sell_rates(
     """Sell Rate of every Item Key the Market has seen, from the Observation Windows
     ending in the range before `now`. Empty when there are none: no data is not 0.
     `seen` is the Market's `listings`, when the caller has them already (#105), and
-    `fair_value_cache` as in `sell_rate_evidence`; without `seen`, the cache's for the
-    pass (#141)."""
+    `fair_value_cache` as in `sell_rate_evidence`; without `seen`, the cache's (#141).
+    With the cache, `seen` is always its `listings`, and the Sell Rates are kept until
+    the Market's Scans change (#143)."""
+    if fair_value_cache is None:
+        return _sell_rates(conn, market, config, now, seen, None)
+    cache = fair_value_cache
+    return cache.scan_only(
+        conn,
+        market,
+        ("sell_rates", config, now),
+        lambda: _sell_rates(conn, market, config, now, cache.listings(conn, market), cache),
+    )
+
+
+def _sell_rates(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    now: int,
+    seen: Sequence[Listing] | None,
+    fair_value_cache: FairValueCache | None,
+) -> dict[str, SellRate]:
+    """`sell_rates` worked out afresh."""
     if seen is None:
         seen = (
             fair_value_cache.listings(conn, market)
