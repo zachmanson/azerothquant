@@ -1771,6 +1771,27 @@ def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
     return [at for (at,) in rows]
 
 
+ScanStamp = tuple[int, int, str, str | None]  # requested_at, ID, source, pool ID if Pooled
+
+
+def scan_stamps(conn: sqlite3.Connection, market: Market) -> list[ScanStamp]:
+    """A `ScanStamp` for every Scan imported for the Market, oldest first. A re-match
+    deletes and imports again every Scan from the late one on (ADR-0026), and always
+    changes one of these from there: a Scan added or gone, an own one in place of a Pooled
+    one from the same second, or another Pooled one in place of one the pool rolled back
+    (IDs can come back, so not the ID alone). So what's kept from a Scan is only stale
+    from where its Market's stamps first differ. An own Scan's pool ID is left out: it's
+    set on upload, which changes nothing in the history."""
+    rows = conn.execute(
+        "SELECT s.requested_at, s.id, s.source,"
+        " CASE WHEN s.source = 'pool' THEN s.pool_id END"
+        " FROM scan s JOIN market m ON m.id = s.market_id"
+        f" WHERE {_MARKET_FILTER} ORDER BY s.requested_at",
+        _market_params(market),
+    )
+    return [(at, scan_id, source, pool_id) for at, scan_id, source, pool_id in rows]
+
+
 _MAIL_COLUMNS = (
     "a.character, a.kind, a.item_name, a.item_key, a.count, a.price, a.money, a.arrived_at,"
     " a.first_read_at"

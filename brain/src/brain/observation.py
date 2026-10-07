@@ -66,22 +66,24 @@ def disappearances(
         after = bisect_right(times, listing.last_seen)
         if after == len(times):
             continue  # still in the latest Scan
-        gone_at = times[after]
-        gap = gone_at - listing.last_seen
-        result.append(
-            Disappearance(
-                item_key=listing.item_key,
-                unit_buyout=listing.unit_buyout,
-                own=listing.own,
-                quantity=listing.quantity,
-                time_left=listing.time_left,
-                last_seen=listing.last_seen,
-                gone_at=gone_at,
-                in_window=gap <= config.observation_window_max_seconds,
-                expiry_possible=gap >= _least_time_left(listing.time_left, config),
-            )
-        )
+        result.append(_disappearance(listing, times[after], config))
     return result
+
+
+def _disappearance(listing: Listing, gone_at: int, config: Config) -> Disappearance:
+    """`listing` as a Disappearance, missing from the Scan at `gone_at`."""
+    gap = gone_at - listing.last_seen
+    return Disappearance(
+        item_key=listing.item_key,
+        unit_buyout=listing.unit_buyout,
+        own=listing.own,
+        quantity=listing.quantity,
+        time_left=listing.time_left,
+        last_seen=listing.last_seen,
+        gone_at=gone_at,
+        in_window=gap <= config.observation_window_max_seconds,
+        expiry_possible=gap >= _least_time_left(listing.time_left, config),
+    )
 
 
 def _least_time_left(bucket: int, config: Config) -> int:
@@ -186,30 +188,134 @@ def sell_rate_evidence(
     """What Sell Rate is built from over [since, until): the Observation Windows whose
     later Scan falls in the range. Windows aren't clipped at the edges, so the hours
     and the sales always cover the same windows. `seen` as in `disappearances`.
-    `fair_value_cache` is the past Scans' Fair Values, when the caller keeps them."""
+    `fair_value_cache` is the past Scans' Fair Values, when the caller keeps them, and
+    the tally of what each window adds (#142). Each window's evidence is its own: its
+    Disappearances can only pair with Listings new in it, and their Sale Events are its.
+    Reposts and coincidences come window by window, not ordered across them."""
     seen = listings(conn, market) if seen is None else seen
     cache = FairValueCache() if fair_value_cache is None else fair_value_cache
     windows = observation_windows_between(conn, market, config, since, until)
-    window_ends = {w.end for w in windows}
-    # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
-    sales = [
-        (p.item_key, p.seen_at, p.unit_buyout, p.units_sold)
-        for p in partial_sales(conn, market)
-        if p.seen_at in window_ends
-    ]
-    candidates = [
-        d
-        for d in disappearances(conn, market, config, seen)
-        if d.gone_at in window_ends and not d.expiry_possible
-    ]
-    new = [n for n in seen if n.first_seen in window_ends]
-    pairing = _pair_reposts(candidates, new)
+    ends = _ends_of_windows(conn, market, config, windows, seen, cache)
+    new = _new_listings(market, seen, cache)
+    evidence = [_window_evidence(conn, market, config, w, ends[w], new, cache) for w in windows]
+    return SellRateEvidence(
+        window_hours=window_hours(windows),
+        sale_events=[e for w in evidence for e in w.sale_events],
+        reposts=[d for w in evidence for d in w.reposts],
+        coincidences=[d for w in evidence for d in w.coincidences],
+        windows=windows,
+    )
+
+
+@dataclass(frozen=True)
+class _EndsOfWindow:
+    """What an Observation Window's evidence takes from the Listings as of its two Scans:
+    the Disappearances that could be sales, in the order of `listings`, and the Partial
+    Sales seen at its end, as (Item Key, window end, unit buyout, units). Each Scan is
+    matched only against the one before it, so these don't change until a re-match
+    imports those Scans again."""
+
+    candidates: list[Disappearance]
+    partial_sales: list[tuple[str, int, int, int]]
+
+
+def _ends_of_windows(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    windows: list[ObservationWindow],
+    seen: Sequence[Listing],
+    cache: FairValueCache,
+) -> dict[ObservationWindow, _EndsOfWindow]:
+    """Each window's `_EndsOfWindow`, from the cache when it kept them, and kept there."""
+    fields = (config.time_left_max_seconds,)
+    found = {w: cache.kept_for_window(conn, market, w.start, w.end, fields) for w in windows}
+    result = {w: ends for w, ends in found.items() if isinstance(ends, _EndsOfWindow)}
+    missing = {w.start: w for w in windows if w not in result}
+    if not missing:
+        return result
+    # A Listing last seen at a window's start is missing from the Scan at its end, the
+    # next one.
+    candidates: dict[ObservationWindow, list[Disappearance]] = defaultdict(list)
+    for listing in seen:
+        w = missing.get(listing.last_seen)
+        if w is not None:
+            d = _disappearance(listing, w.end, config)
+            if not d.expiry_possible:
+                candidates[w].append(d)
+    missing_ends = {w.end for w in missing.values()}
+    sales: dict[int, list[tuple[str, int, int, int]]] = defaultdict(list)
+    for p in partial_sales(conn, market):
+        if p.seen_at in missing_ends:
+            sales[p.seen_at].append((p.item_key, p.seen_at, p.unit_buyout, p.units_sold))
+    for w in missing.values():
+        result[w] = _EndsOfWindow(candidates[w], sales[w.end])
+        cache.keep_for_window(market, w.start, w.end, fields, result[w])
+    return result
+
+
+@dataclass(frozen=True)
+class _WindowEvidence:
+    sale_events: list[SaleEvent]
+    reposts: list[Disappearance]
+    coincidences: list[Disappearance]
+
+
+@dataclass(frozen=True)
+class _NewListings:
+    """This pass's Listings by the Scan they were first seen in, and each window's
+    evidence worked out from them. A Repost pairs with a new Listing's quantity as of
+    its last Scan, so a Partial Sale long after a window can change its Reposts: unlike
+    `_EndsOfWindow`, this is only good for the pass."""
+
+    seen: Sequence[Listing]
+    by_first_seen: dict[int, list[Listing]]
+    evidence: dict[tuple, _WindowEvidence] = field(default_factory=dict)
+
+
+def _new_listings(market: Market, seen: Sequence[Listing], cache: FairValueCache) -> _NewListings:
+    """`seen` by the Scan each was first seen in, worked out once a pass (again if a
+    caller brings other Listings)."""
+    key = (_NewListings, market)
+    new = cache.this_pass.get(key)
+    if not isinstance(new, _NewListings) or new.seen is not seen:
+        by_first_seen: dict[int, list[Listing]] = defaultdict(list)
+        for listing in seen:
+            by_first_seen[listing.first_seen].append(listing)
+        new = _NewListings(seen, by_first_seen)
+        cache.this_pass[key] = new
+    return new
+
+
+def _window_evidence(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    window: ObservationWindow,
+    ends: _EndsOfWindow,
+    new: _NewListings,
+    cache: FairValueCache,
+) -> _WindowEvidence:
+    """One Observation Window's Sale Events, Reposts and coincidences, once a pass."""
+    key = (
+        window,
+        config.time_left_max_seconds,
+        config.probable_sale_max_fair_value_multiple,
+        config.fair_value_slice_share,
+        config.fair_value_outlier_share,
+    )
+    if key in new.evidence:
+        return new.evidence[key]
+    pairing = _pair_reposts(ends.candidates, new.by_first_seen.get(window.end, []))
     # Priced by the Scans either side of the sale, not today's: a sale is judged against
     # the market it sold into. The lower Fair Value wins, since a buyer paying well over
     # what was up when it went missing is the unlikely story (#74). If it sold the Item
     # Key out, only the Scan it was last seen in has a Fair Value.
-    scans_either_side = {at for d in pairing.sales for at in (d.last_seen, d.gone_at)}
-    fair_value_in = {at: cache.fair_values(conn, market, config, at) for at in scans_either_side}
+    fair_value_in = (
+        {at: cache.fair_values(conn, market, config, at) for at in (window.start, window.end)}
+        if pairing.sales
+        else {}
+    )
 
     def priced_like_a_sale(d: Disappearance) -> bool:
         last_seen = fair_value_in[d.last_seen][d.item_key]
@@ -217,14 +323,17 @@ def sell_rate_evidence(
         return d.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
 
     probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]
-    sales += [(d.item_key, d.gone_at, d.unit_buyout, d.quantity) for d in probable_sales]
-    return SellRateEvidence(
-        window_hours=window_hours(windows),
+    # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
+    sales = ends.partial_sales + [
+        (d.item_key, d.gone_at, d.unit_buyout, d.quantity) for d in probable_sales
+    ]
+    evidence = _WindowEvidence(
         sale_events=_sale_events(sales),
         reposts=pairing.reposts,
         coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],
-        windows=windows,
     )
+    new.evidence[key] = evidence
+    return evidence
 
 
 def _sale_events(sales: list[tuple[str, int, int, int]]) -> list[SaleEvent]:
