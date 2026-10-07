@@ -1,3 +1,11 @@
+2026-10-06 (later 95): #139 built and closed (c2207c4). A break of up to 2 Scans with nothing under the post price (`SHORT_BREAK_SCANS` in recommend.py) no longer ends the cheap stretch, when cheap stock was up again before it. `_Cheap.stretch` returns `_Stretch(since, breaks)`. `WhyNot.cheap_breaks` holds the skipped Scans, and `--why-not` adds "(none at ...)". ADR-0029 is amended and CONTEXT.md updated. The replay numbers are on #139: graded per Flip once per Item Key at Scans 40-63, 1 Scan nets +33g and 2 Scans +64g. On the 10-06 17:51 and 19:46 Scans, 248689 is off the list, plus 1121, 11177, 3182, 2879, 729, 12977 and 5637. The crate-stacking question is now #140 (ready-for-human, in game).
+
+Next, in order: 1. #116: grill/spec first (budget, profile one Decision Engine run, skip or narrow work when no Scan changed). Then #138, PC items (#81, #39, #85, #140), #136.
+
+- Gotchas: same as later 94, plus:
+  - Per-Flip grading recipe (faster than a replay): build the Shopping List for each variant in one process (sharing a `FairValueCache`), then grade only the Flips that differ, each on its own with `replay._grade(conn, config, m, replay._Moves(spent=cost, posts=[replay._Post(key, qty, post_at)]), later, deposit, cut, t)`. Grading every row costs ~30 s per Flip, while a recommend pass takes ~30-60 s. Six processes covered 24 Scans x 3 variants in about 25 min.
+  - `tests/test_instance_lock.py::test_another_running_brain_holds_the_lock_until_it_is_killed` fails locally: in a Windows venv, `sys.executable` is a launcher, so the PID in the lock file is the child's. It's not related to #139. Deselect it locally (CI is Linux).
+
 2026-10-06 (later 94): #115 Acceptance run on the `aqtest` account; results commented on #115 (it was already closed, on 10-05). #116 moved to `core` with per-stage numbers. No code changed.
 
 - Passed on aqtest: SmartScreen ("unknown publisher"), setup popups (found Z: WoW from the registry, beta + live, no key), autostart after reboot, update to 0.1.1 with data kept, uninstall (shortcuts and both Addons gone).
