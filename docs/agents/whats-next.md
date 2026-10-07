@@ -1,3 +1,12 @@
+2026-10-06 (later 98): #141 built and closed (slice A of #116). `_way_out` is memoized on the `_Valuer` (`ways_out`), `_post_at` uses `cheapest_without` with the player's own cheapest cached per Valuer, and `FairValueCache.listings` loads each Market's Listings once per pass (reset by `start_pass`). New `brain bench [--out DIR]` runs two passes on a sqlite copy of the history and prints per-stage seconds. Pass 2 Decision Engine went from 62.7 s to 34.6 s. The budget is NOT met, so #142 goes ahead. Bench and the new profile are on #116: `sell_rates` x2 is 25 s (`disappearances` 19 s), then `listings` 8 s, `flips` 8 s, `_others_lows` 7 s, `_buy_unders` 5.5 s.
+
+Next, in order: 1. #142 (incremental Sell Rate evidence), then `brain bench`. 2. #143 (reuse Scan-only results when no Scan changed; it's the only way to get no-Scan under 5 s). Then #138, #146, the #85 day-1 checks, #147 (see later 97's critical path).
+
+- Gotchas: same as later 97, plus:
+  - Byte-identical check: run both old and new with `PYTHONHASHSEED=0`. Without it even the old code's Recommendations.lua can differ, because `cli._beta_priors` iterates a `set` of Item Keys, so the `betaPrior.prices` order follows the hash seed. The data is equal. Old code: `git worktree add --detach <scratch>/head HEAD`, then `PYTHONPATH=<scratch>/head/brain/src python script.py`.
+  - Bench recipe: a scratchpad folder with the `backup()` copy as history.sqlite, grades.toml copied, and a config.toml with one `[[installs]]` whose folder has `Interface/AddOns/AzerothQuant` created. `brain --config that/config.toml bench` takes ~2 min. Don't run two benches or profiles at once: they share the CPU and skew the numbers.
+  - The working tree mixes CRLF and LF (autocrlf=true). Scripted edits that write LF are harmless, since git normalizes on commit.
+
 2026-10-06 (later 97): DEADLINE. Guild-ready proof of concept must work end to end on Beta by ~Oct 20. Beta ends Oct 21, Live launches Nov 4, and it has to be frictionless from day 1 of Live. Oct 21 to Nov 4 has no game, so every in-game check has to happen before Oct 21. QoL gaps are accepted. Rank work by "does a guildie hit this on day 1".
 
 Critical path (the user added: the Scan Pool has to work too):

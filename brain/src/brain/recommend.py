@@ -677,7 +677,10 @@ def recommend_market(
     by_character = _by_character(conn, market, characters, as_of)
     holdings = _pooled(by_character)
     # Loaded once for the whole pass: the Market's every Listing is the bulk of it (#105).
-    seen = listings(conn, market)
+    if fair_value_cache is not None:
+        seen = fair_value_cache.listings(conn, market)
+    else:
+        seen = listings(conn, market)
     # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
     # options are alternatives, so none is assumed (#86).
     valuer, _ = _valuer(
@@ -1172,7 +1175,26 @@ def _way_out(
 ) -> _WayOut | None:
     """The best of an Item Key's ways out for one more unit, or None without any: Vendor,
     Sell, or with `sources` a Craft it's a reagent of or Disenchant. A way with no units
-    left isn't one."""
+    left isn't one.
+
+    The Valuer remembers it for the pass (#141): the Buy Unders, the Loot Alert and the
+    Flips to Disenchant ask ~26k times, and the Disenchant and Craft ways ask again
+    inside. Nothing the answer reads changes while the Valuer is alive: a Valuer with
+    other units held or bought is a new one (`after`), and these `sources` are never
+    committed to. The entry holds `sources` and `config`, so neither id is reused."""
+    key = (item_key, None if sources is None else id(sources))
+    known = valuer.ways_out.get(key)
+    if known is not None and known[0] is sources and known[1] is config:
+        return known[2]
+    out = _best_way_out(item_key, valuer, config, sources)
+    valuer.ways_out[key] = (sources, config, out)
+    return out
+
+
+def _best_way_out(
+    item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None"
+) -> _WayOut | None:
+    """`_way_out` worked out afresh, with nothing remembered."""
     ways = [_sell_way(item_key, valuer, config)]
     vendor = valuer.vendor.get(item_id_of(item_key))
     if vendor is not None:
@@ -1761,6 +1783,7 @@ class _Valuer:
         pricer: Pricer | None = None,
         by_item: Mapping[int, tuple[str, ...]] | None = None,
         listed: Mapping[str, tuple[tuple[int, int], ...]] = MappingProxyType({}),
+        own_cheapest: dict[str, int | None] | None = None,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
         self.listed = listed
@@ -1771,6 +1794,14 @@ class _Valuer:
         self._by_item = _by_item(rates) if by_item is None else by_item
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
         self._held_rates: dict[str, tuple[SellRate | None, int]] = {}
+        # The cheapest of the player's own Listings by Item Key. `supply` and `others`
+        # don't change, so every Valuer `after` this one shares it (#141).
+        self._own_cheapest: dict[str, int | None] = {} if own_cheapest is None else own_cheapest
+        # `_way_out`'s answers by (Item Key, id of its Sources), with the Sources and
+        # Config they were for.
+        self.ways_out: dict[
+            tuple[str, int | None], tuple[_Sources | None, Config, _WayOut | None]
+        ] = {}
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":
         """This Valuer with `bought` as the units taken off other players' Listings, and
@@ -1791,6 +1822,7 @@ class _Valuer:
             self._pricer,
             self._by_item,
             self.listed,
+            self._own_cheapest,
         )
 
     def cheap(self, item_key: str) -> _Cheap:
@@ -1958,10 +1990,12 @@ class _Valuer:
         if (price := self.priced(item_key)) is not None:
             left = without(self.others.get(item_key, []), self.flipped.get(item_key, []))
             return price(_cheapest(left))
-        return _post_at(
-            self.supply.get(item_key, []),
-            self.others.get(item_key, []),
-            self.flipped.get(item_key, []),
+        others = self.others.get(item_key, [])
+        if item_key not in self._own_cheapest:
+            self._own_cheapest[item_key] = cheapest_without(self.supply.get(item_key, []), others)
+        return _undercut(
+            cheapest_without(others, self.flipped.get(item_key, [])),
+            self._own_cheapest[item_key],
             self._config,
             _ceiling(cap, self.merchant.get(item_key)),
         )
@@ -3660,7 +3694,7 @@ def _post_at(
     lower. The player's own Listings, the rest of `supply`, are matched rather than
     undercut. None if no Listing is left to price against."""
     return _undercut(
-        _cheapest(without(others, bought)), _cheapest(without(supply, others)), config, cap
+        cheapest_without(others, bought), cheapest_without(supply, others), config, cap
     )
 
 
@@ -3719,6 +3753,18 @@ def without(supply: Supply, bought: Supply) -> Supply:
     for unit, quantity in bought:
         left[unit] -= quantity
     return [(unit, quantity) for unit, quantity in sorted(left.items()) if quantity > 0]
+
+
+def cheapest_without(supply: Supply, bought: Supply) -> int | None:
+    """`_cheapest(without(supply, bought))` without building and sorting what's left:
+    `_post_at` asks it hundreds of thousands of times a pass (#141)."""
+    taken = Counter()
+    for unit, quantity in bought:
+        taken[unit] += quantity
+    left = Counter()
+    for unit, quantity in supply:
+        left[unit] += quantity
+    return min((unit for unit, quantity in left.items() if quantity > taken[unit]), default=None)
 
 
 def _option(

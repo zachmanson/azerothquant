@@ -913,6 +913,32 @@ def _three_linen_held(tmp_path, mailbox_reads=()):
     return config
 
 
+def test_bench_times_two_passes_on_a_copy_of_the_history(tmp_path, monkeypatch, capsys):
+    # #116's yardstick (#141): the second pass is the one a watching Brain makes after
+    # its first. Neither touches the history or writes into a real install.
+    config = _three_linen_held(tmp_path)
+    install_addon(tmp_path / "_classic_beta_")
+    history = config.history_path.read_bytes()
+    monkeypatch.setattr("brain.cli.load_config", lambda path: config)
+    out = tmp_path / "bench"
+
+    assert main(["--config", str(tmp_path / "config.toml"), "bench", "--out", str(out)]) == 0
+
+    passes = re.findall(r"Pass (\d): (.*); total (\d+\.\d)s", capsys.readouterr().out)
+    assert [n for n, _, _ in passes] == ["1", "2"]
+    for _, stages, total in passes:
+        named = dict(stage.rsplit(" ", 1) for stage in stages.split(", "))
+        assert list(named)[0] == "Decision Engine"
+        assert "Recommendations.lua" in named
+        assert sum(float(s.removesuffix("s")) for s in named.values()) <= float(total) + 0.1
+    assert config.history_path.read_bytes() == history
+    assert not (addon_folder(Install(tmp_path / "_classic_beta_", Era.BETA)) / FILE_NAME).exists()
+    written = parse_savedvariables(
+        (addon_folder(Install(out / "beta", Era.BETA)) / FILE_NAME).read_text(encoding="utf-8")
+    )[GLOBAL_NAME]
+    assert "Classic Beta PvP" in written["recommendations"]
+
+
 def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # A 48 h posting, so exactly one queued unit waits past it (below).
     config = dataclasses.replace(_three_linen_held(tmp_path), post_duration_hours=48)

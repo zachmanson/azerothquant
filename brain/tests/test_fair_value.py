@@ -5,7 +5,7 @@ import pytest
 
 from brain.config import Config, Era, Install
 from brain.fair_value import FairValueCache, fair_value, fair_values
-from brain.history import Market, import_scans, open_history, supply_at
+from brain.history import Market, import_scans, listings, open_history, supply_at
 
 # Default slice (cheapest 15% of units) and outlier cut (under half the slice's median).
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
@@ -189,3 +189,19 @@ def test_a_pass_keeps_only_the_scans_the_last_pass_used(db, monkeypatch):
     cache.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE)
 
     assert calls == [T0, T0 + 20 * MINUTE, T0]
+
+
+def test_a_pass_loads_a_markets_listings_once_and_the_next_pass_sees_new_scans(db):
+    # #141: the Valuer and the Beta Prior share one load of the Market's every Listing.
+    run(db, scan(T0, row(unit=100)))
+    cache = FairValueCache()
+    cache.start_pass()
+    first = cache.listings(db, MARKET)
+
+    run(db, scan(T0 + 20 * MINUTE, row(unit=100), row(item=SILK, unit=50)))
+
+    assert cache.listings(db, MARKET) is first
+    assert {x.item_key for x in first} == {LINEN_KEY}
+    cache.start_pass()
+    assert cache.listings(db, MARKET) == listings(db, MARKET)
+    assert {x.item_key for x in cache.listings(db, MARKET)} == {LINEN_KEY, SILK_KEY}

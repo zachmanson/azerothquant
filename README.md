@@ -49,6 +49,7 @@ cd brain
 ..\.venv\Scripts\brain replay --since 2026-09-20  # grade the Brain against Auctionator and emulated TSM (ADR-0015)
 ..\.venv\Scripts\brain disenchants  # check the Disenchant tables against your Disenchant Results (ADR-0018)
 ..\.venv\Scripts\brain flips  # grade the Flips to Sell you made against what the Brain named (ADR-0023)
+..\.venv\Scripts\brain bench  # time two Decision Engine passes on a copy of the history, by stage (#116's budget)
 ```
 
 It reads `WTF\Account\*\SavedVariables\AzerothQuant.lua` in each configured install folder. The game writes that file on `/reload` or logout, so `brain watch` picks up a Scan (or a Mailbox Read, taken each time you open a mailbox, or a Character Read of your gold, bags and bank, taken on every `/reload` and logout) a few seconds after you `/reload`. Stop it with Ctrl+C.

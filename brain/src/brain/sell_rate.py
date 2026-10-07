@@ -91,8 +91,14 @@ def sell_rates(
     """Sell Rate of every Item Key the Market has seen, from the Observation Windows
     ending in the range before `now`. Empty when there are none: no data is not 0.
     `seen` is the Market's `listings`, when the caller has them already (#105), and
-    `fair_value_cache` as in `sell_rate_evidence`."""
-    seen = listings(conn, market) if seen is None else seen
+    `fair_value_cache` as in `sell_rate_evidence`; without `seen`, the cache's for the
+    pass (#141)."""
+    if seen is None:
+        seen = (
+            fair_value_cache.listings(conn, market)
+            if fair_value_cache is not None
+            else listings(conn, market)
+        )
     since, until = _range(config, now)
     evidence = sell_rate_evidence(
         conn, market, config, since, until, seen, fair_value_cache=fair_value_cache

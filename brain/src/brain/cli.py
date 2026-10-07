@@ -25,6 +25,7 @@ import math
 import os
 import sqlite3
 import sys
+import tempfile
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
@@ -42,6 +43,7 @@ from brain.config import (
     Config,
     ConfigError,
     Era,
+    Install,
     config_candidates,
     find_config,
     load_config,
@@ -90,7 +92,7 @@ from brain.recommend import (
     return_on_cost,
     split_purchases,
 )
-from brain.recommendations import write_recommendations
+from brain.recommendations import addon_folder, write_recommendations
 from brain.replay import MarketReplay, Policy, replay
 from brain.savedvariables import SavedVariablesError
 from brain.timings import Timings, timed
@@ -404,6 +406,57 @@ def _recommend(
         return 1
     except GradesError as e:
         log.error("Can't load the Grades: %s", e)
+        return 1
+    print(text, end="")
+    return 0
+
+
+BENCH_STAGES = ("Decision Engine", "Fair Values", "Recommendations.lua")
+
+
+def run_bench(config: Config, out: Path) -> str:
+    """Two `_write_recommendations` passes in one process, as a watching Brain makes them,
+    timed by stage (#141): the yardstick for #116's budget. They run on a copy of the
+    history in `out`, so a running Brain isn't blocked and nothing is changed, and write
+    into one install per Era there, never a real one. The first pass computes every Fair
+    Value; the second reuses them, as every pass after a Brain's first does."""
+    out.mkdir(parents=True, exist_ok=True)
+    copy = out / config.history_path.name
+    live_uri = f"{config.history_path.resolve().as_uri()}?mode=ro"
+    with (
+        closing(sqlite3.connect(live_uri, uri=True)) as live,
+        closing(sqlite3.connect(copy)) as conn,
+    ):
+        live.backup(conn)
+    eras = sorted({install.era for install in config.installs}, key=lambda era: era.value)
+    installs = tuple(Install(out / era.value, era) for era in eras)
+    for install in installs:
+        addon_folder(install).mkdir(parents=True, exist_ok=True)
+    bench_config = dataclasses.replace(config, history_path=copy, installs=installs)
+    cache = FairValueCache()
+    lines = []
+    with closing(open_history(copy)) as conn:
+        for n in (1, 2):
+            timings = Timings()
+            start = time.monotonic()
+            _write_recommendations(conn, bench_config, fair_value_cache=cache, timings=timings)
+            took = time.monotonic() - start
+            stages = ", ".join(
+                f"{name} {timings.seconds.get(name, 0.0):.1f}s" for name in BENCH_STAGES
+            )
+            lines.append(f"Pass {n}: {stages}; total {took:.1f}s\n")
+    return "".join(lines)
+
+
+def _bench(config: Config, out: Path | None) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            text = run_bench(config, out if out is not None else Path(folder))
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
         return 1
     print(text, end="")
     return 0
@@ -1354,6 +1407,14 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "disenchants", help="check the Disenchant tables against your Disenchant Results"
     )
+    benching = commands.add_parser(
+        "bench", help="time two Decision Engine passes on a copy of the history, by stage"
+    )
+    benching.add_argument(
+        "--out",
+        type=Path,
+        help="keep the history copy and the Recommendations.lua written in this folder",
+    )
     pooling = commands.add_parser("pool", help="sync with the Scan Pool by hand")
     pool_commands = pooling.add_subparsers(dest="pool_command", required=True)
     pool_commands.add_parser("push", help="upload your Scans the pool doesn't have yet")
@@ -1426,6 +1487,8 @@ def _run_command(args: argparse.Namespace, config_path: Path) -> int:
         return _rebuild(config)
     if args.command == "recommend":
         return _recommend(config, args.chain, args.why_not, args.beta_ratios)
+    if args.command == "bench":
+        return _bench(config, args.out)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
     if args.command == "disenchants":

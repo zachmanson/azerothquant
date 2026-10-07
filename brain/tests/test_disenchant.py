@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import brain.recommend as recommend_module
 from brain.config import Config, Era, Install
 from brain.disenchant import ItemInfo, load_table
 from brain.history import (
@@ -13,6 +14,7 @@ from brain.history import (
     import_character_reads,
     import_scans,
     item_info,
+    known_recipes,
     open_history,
 )
 from brain.lots import start_of
@@ -22,6 +24,10 @@ from brain.recommend import (
     BuyUnder,
     ListingBuy,
     MatYield,
+    _nothing_held,
+    _plans,
+    _valuer,
+    _way_out,
     exit_values,
     grades,
     recommend,
@@ -738,3 +744,59 @@ def test_flips_to_disenchant_are_cut_to_the_most_profitable(db):
     [kept] = recommend(db, config)[0].shopping_list
 
     assert kept == both[0]
+
+
+def test_a_way_out_asked_again_in_a_pass_is_the_one_worked_out_afresh(db, monkeypatch):
+    # #141: a Valuer remembers its ways out for the pass. The Greater Magic Essence's
+    # is a Craft (the wand), the green's a Disenchant, and the Dust's is limited by the
+    # 6 that sell in the horizon: each asked over and over, with and without Sources,
+    # in both orders, on one Valuer, is what it is with nothing remembered.
+    wand = {
+        "recipeID": 1,
+        "outputItemID": 7777,
+        "quantityMin": 1,
+        "quantityMax": 1,
+        "bindType": 0,
+        "reagents": [{"itemID": GREATER_MAGIC, "quantity": 2, "reagentType": 1}],
+    }
+    scans = market_scans(dust_selling=True)
+    for s in scans:
+        s["listings"].append(
+            {"itemString": GREEN_ITEM, "quantity": 1, "buyout": 300, "timeLeft": 4}
+        )
+    prices = MAT_PRICES | {10940: 10, 7777: 10000}
+    import_scans(db, scans, Era.BETA, RECOMMEND_CONFIG)
+    import_character_reads(db, [enchanter(vendor_prices=prices, recipes=[wand])], Era.BETA, CONFIG)
+    now, config = T0 + HOUR, RECOMMEND_CONFIG
+    valuer, _ = _valuer(db, config, MARKET, now)
+    plans = _plans(known_recipes(db, MARKET), now)
+    keys = [GREEN, DUST_KEY, "10939", "10978", "7777"]
+
+    sources = _nothing_held(valuer, plans, config)
+    ahead = valuer.after({}, {**valuer.held, DUST_KEY: 3})
+
+    # Nothing remembered: every way out, the nested Craft and Disenchant ones too, is
+    # worked out afresh.
+    with monkeypatch.context() as m:
+        m.setattr(
+            "brain.recommend._way_out",
+            lambda key, v, c, s=None: recommend_module._best_way_out(key, v, c, s),
+        )
+        expected = {
+            (key, s): recommend_module._way_out(key, valuer, config, sources if s else None)
+            for key in keys
+            for s in (True, False)
+        }
+        expected_ahead = recommend_module._way_out(DUST_KEY, ahead, config, sources)
+    assert {expected[GREEN, True].way, expected["10939", True].way} == {
+        Action.DISENCHANT,
+        Action.CRAFT,
+    }
+    assert expected[DUST_KEY, True].units is not None
+
+    asked = [(key, s) for s in (True, False, True) for key in [*keys, *reversed(keys)]]
+    for key, s in asked:
+        assert _way_out(key, valuer, config, sources if s else None) == expected[key, s]
+    # One with 3 Dust held ahead has 3 fewer units of room: it doesn't share the answers.
+    assert expected_ahead.units == expected[DUST_KEY, True].units - 3
+    assert _way_out(DUST_KEY, ahead, config, sources) == expected_ahead

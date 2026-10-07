@@ -9,7 +9,7 @@ import sqlite3
 from statistics import median
 
 from brain.config import Config
-from brain.history import Market, scan_times, supply_at
+from brain.history import Listing, Market, listings, scan_times, supply_at
 from brain.timings import Timings, timed
 
 Supply = list[tuple[int, int]]  # (unit buyout, quantity), in any order
@@ -53,17 +53,29 @@ class FairValueCache:
     """Fair Values by Scan, kept by `brain watch` from one pass to the next (#105). A
     Scan's supply doesn't change once it's imported, since `supply_at` adds back the
     Partial Sales seen after it, so neither do its Fair Values under the same config.
-    A pass keeps only the Scans the pass before it used, so it doesn't grow forever."""
+    A pass keeps only the Scans the pass before it used, so it doesn't grow forever.
+
+    It also keeps each Market's `listings` for one pass, so the Valuer and the Beta Prior
+    load them once (#141). Those do change with a new Scan, so a pass never reuses the
+    last one's: a pass starts after the import that brought the Scan."""
 
     def __init__(self) -> None:
         self._last_pass: dict[_ScanKey, dict[str, float]] = {}
         self._this_pass: dict[_ScanKey, dict[str, float]] = {}
+        self._listings: dict[Market, list[Listing]] = {}
         # Set by the caller for a pass: the Fair Values computed, not found here, are timed
         # in it (#131).
         self.timings: Timings | None = None
 
     def start_pass(self) -> None:
         self._last_pass, self._this_pass = self._this_pass, {}
+        self._listings = {}
+
+    def listings(self, conn: sqlite3.Connection, market: Market) -> list[Listing]:
+        """The Market's `listings`, loaded once this pass."""
+        if market not in self._listings:
+            self._listings[market] = listings(conn, market)
+        return self._listings[market]
 
     def fair_values(
         self, conn: sqlite3.Connection, market: Market, config: Config, at: int
