@@ -1,3 +1,13 @@
+2026-10-06 (later 97): DEADLINE. Guild-ready proof of concept must work end to end on Beta by ~Oct 20. Beta ends Oct 21, Live launches Nov 4, and it has to be frictionless from day 1 of Live. Oct 21 to Nov 4 has no game, so every in-game check has to happen before Oct 21. QoL gaps are accepted. Rank work by "does a guildie hit this on day 1".
+
+Critical path (the user added: the Scan Pool has to work too):
+1. #116 speed: #141, then `brain bench`. Do #142/#143 only if the budget isn't met. Bench a pass with Pooled Scans arriving too, since with several members most imports bring new Scans. #144 is cut unless parsing is still the bottleneck.
+2. #138 setup guide (now core). The PoC test needs it.
+3. #146 guild PoC on Beta (ready-for-human, by ~Oct 13): a guildie on their own PC, with the exe and a pool key. Pool in both directions, import time with 2+ members, the problem lines. The pool has only been checked from one machine (#124). Failures become core bugs, fixed by Oct 20.
+4. #85: only the day-1 checks (#120 clock, #78 deposit, `brain rebuild`, the Beta replay for #83).
+5. #147 day 1 of Live (needs-triage, grill first): zero history, Live Era pool, Beta Prior column.
+Cut to after Nov 4: #81, #39, #136, #140, #144, #145 and all `later`.
+
 2026-10-06 (later 96): #116 grilled. The spec is a comment on #116 (ready-for-agent), with 4 sub-issues. It's pure optimization: Recommendations.lua must stay byte-identical. The budget is a new Scan under 15 s and no Scan under 5 s, from the reload being noticed to the file written. Profile (cProfile, DB copy): 103 s per pass. `_way_out` (no memo, 132k calls) is 51 s, `without()` in `_post_at` 17 s, `sell_rates` twice 26 s, `_others_lows` 6 s. About 80% is Scan-only. Slices in order: #141 A (memo within a pass + `brain bench`), #142 B (incremental Sell Rate evidence), #143 C (reuse Scan-only results when no Scan changed), #144 D (SavedVariables parser fast paths, moved off #10). #145 (`later`): Fair Values across a Brain restart. No code changed.
 
 Next, in order: 1. #141. After it, run `brain bench` and drop later slices if the budget is met. Then #142, #143, #144, then #138, PC items (#81, #39, #85, #140), #136.
