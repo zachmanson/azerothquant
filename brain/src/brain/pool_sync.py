@@ -27,7 +27,7 @@ from brain.history import (
     scans_to_push,
     set_pool_cursor,
 )
-from brain.pool import Pool, PoolBusy, PoolError, strip_scan
+from brain.pool import Pool, PoolBusy, PoolEntry, PoolError, strip_scan
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,8 @@ DAY_SECONDS = 24 * 3600
 class SyncReport:
     pushed: int = 0
     pulled: int = 0
-    # Pooled Scans left out as truncated (the completeness guard).
+    # Pooled Scans left out: truncated (the completeness guard), or whose body doesn't
+    # match its index entry (#149).
     rejected: int = 0
     # Pooled Scans older than their Market's latest, so re-matched its tail.
     rematched: int = 0
@@ -138,6 +139,12 @@ def pull(
                 ):
                     continue
                 raw = pool.fetch(entry.id)
+                if not _matches(raw, entry):
+                    report.rejected += 1
+                    report.warn(
+                        f"Left out Pooled Scan {entry.id}: it doesn't match its index entry"
+                    )
+                    continue
                 report.add(import_pooled_scans(conn, [(entry.id, raw)], entry.era, config))
             report.add(roll_back_pooled(conn, page.rolled_back, config))
             # A pull `since` a date starts over from the beginning; never move back.
@@ -149,6 +156,25 @@ def pull(
         report.warn(f"Couldn't pull from the Scan Pool; will try again: {e}")
         report.failed = True
         return report
+
+
+def _matches(raw: dict, entry: PoolEntry) -> bool:
+    """Whether a Pooled Scan's body says the same Market and requestedAt as its index entry.
+
+    The Worker checks only the headers, and the Brain imports the body. One whose date is
+    off can leave its Market waiting for `brain rebuild` for every member (#149). So a
+    mismatch is neither archived nor imported, or a rebuild would bring it back.
+
+    The Worker already rejects a requestedAt header more than 10 minutes past the upload,
+    by its own clock (pool/src/index.ts), so matching it here keeps the body from being
+    dated after the upload too, without trusting this PC's clock. The era isn't in the
+    body: the Scan is imported under the entry's.
+    """
+    return (raw.get("realm"), raw.get("faction"), raw.get("requestedAt")) == (
+        entry.realm,
+        entry.faction,
+        entry.requested_at,
+    )
 
 
 # What the Addon tells the player while the pool can't be reached (#115).

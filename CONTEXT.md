@@ -51,7 +51,7 @@ A shared online store of Scans that several players' Brains upload to and downlo
 _Avoid_: cloud, shared database, AuctionDB
 
 **Pooled Scan**:
-A Scan from the Scan Pool that another player took. It goes into the player's Archive (under `pool/`, apart from their own) and history like one of their own Scans, but nothing in it is own. One with too few Listings next to its Market's recent Scans is taken as cut short: archived, never imported. It never counts toward what the Addon may prune.
+A Scan from the Scan Pool that another player took. It goes into the player's Archive (under `pool/`, apart from their own) and history like one of their own Scans, but nothing in it is own. One with too few Listings next to its Market's recent Scans is taken as cut short: archived, never imported. One whose body names another Market or requestedAt than its index entry is neither archived nor imported (#149). It never counts toward what the Addon may prune.
 _Avoid_: remote Scan, foreign Scan
 
 **Item Key**:

@@ -1,3 +1,12 @@
+2026-10-07 (later 104): #149 built and closed. `pool_sync.pull` now leaves out a Pooled Scan whose body's realm, faction or requestedAt differs from its index entry (`_matches`). It's neither archived nor imported, so `brain rebuild` can't bring it back. It counts under `rejected`. There's no era check: the body has no era and is imported under the entry's. "Not later than the upload time" holds because the Worker rejects a header more than 10 min past the upload by its own clock, and the body must now equal the header. A pull-time check against the PC clock was built, then dropped in review: a PC clock running slow would have dropped real Scans for good, since the cursor moves past them. Accepted gap: a bad body archived before this change still freezes its Market on every rebuild. Before the PoC there was a single uploader, so this is unlikely. If it ever happens, delete that file from `pool/`. ADR-0026 and CONTEXT.md (**Pooled Scan**) now say this. `FakePool.upload(header_overrides=...)` makes the index disagree with the body.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): the #150/#144 check (unchanged from later 103).
+2. #138 guide, then #146 PoC (the rest of #85 rides along).
+3. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 103.
+
 2026-10-07 (later 103): Addon batch built and pushed (088ee4b): #150 part (a) + #144 packed rows. Both stay open until the in-game check (steps on #150's comment; #144's comment adds the file-size check). The Addon saves `droppedItemIDs` (from `GetReplicateItemInfo` return 17) and `packedListings` ("itemString,quantity,buyout,timeLeft;..."). Own rows stay tables in `listings`. The Brain leaves dropped items out of both Observation Windows touching that Scan (`scan_dropped_item`, `_ends_of_windows`). `pool.strip_scan` folds own rows into the sorted packed string (ADR-0026). The parser's plain-run regex took one real 73k-row Scan from 4.4 s to 0.11 s. `item_id_of` moved to `scan.py`. Review leftover, deferred to the gap and noted on #150: a left-out item still gets the window's hours (`window_hours` is per Market), which pushes its Sell Rate toward 0. That's the safe side. Fix it with per-item hours if #153's data shows the same items dropping often.
 
 Next, in order (target #146 by ~Oct 13):

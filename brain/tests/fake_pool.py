@@ -12,6 +12,8 @@ class FakePool:
 
     def __init__(self):
         self.scans: dict[str, tuple[Era, dict, str]] = {}  # id -> (era, Scan, uploader)
+        # id -> the headers (realm, faction, requestedAt) that differ from the body
+        self.header_overrides: dict[str, dict] = {}
         self.events: list[tuple[str, str]] = []  # ("add" | "rollback", id), cursor = index + 1
         self.fail = False
         self.busy: set[tuple[str, str]] = set()
@@ -19,9 +21,14 @@ class FakePool:
         self.fetched: list[str] = []
         self.calls: list[str] = []  # "push", "list" and "fetch", in order
 
-    def upload(self, era: Era, raw: dict, uploader: str = "friend") -> str:
+    def upload(
+        self, era: Era, raw: dict, uploader: str = "friend", header_overrides: dict | None = None
+    ) -> str:
+        """`header_overrides` replace the body's realm, faction or requestedAt in the index,
+        as an upload whose headers disagree with its body would."""
         pool_id = f"p{len(self.scans) + 1}"
         self.scans[pool_id] = (era, raw, uploader)
+        self.header_overrides[pool_id] = header_overrides or {}
         self.events.append(("add", pool_id))
         return pool_id
 
@@ -51,13 +58,14 @@ class FakePool:
                 rolled_back.append(pool_id)
                 continue
             era, raw, uploader = self.scans[pool_id]
+            headers = {**raw, **self.header_overrides[pool_id]}
             entries.append(
                 PoolEntry(
                     id=pool_id,
                     era=era,
-                    realm=raw["realm"],
-                    faction=raw["faction"],
-                    requested_at=raw["requestedAt"],
+                    realm=headers["realm"],
+                    faction=headers["faction"],
+                    requested_at=headers["requestedAt"],
                     mine=uploader == "me",
                 )
             )

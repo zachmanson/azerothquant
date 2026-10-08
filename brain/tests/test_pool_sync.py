@@ -108,6 +108,33 @@ def test_pulled_scans_are_archived_under_pool_and_imported(db, config, pool):
     assert pool_file(config, T0).exists()
 
 
+def test_a_pooled_body_dated_other_than_its_index_entry_is_left_out(db, config, pool):
+    # Probe P5 (#149): a body 30 days ahead of its headers froze the Market until rebuild.
+    pool.upload(Era.BETA, strip_scan(scan(T0 + 30 * DAY)), header_overrides={"requestedAt": T0})
+    import_scans(db, [scan(T0 - MINUTE)], Era.BETA, config)
+
+    report = pull(db, pool, config, now=T0 + MINUTE)
+    later = import_scans(db, [scan(T0 + 30 * MINUTE)], Era.BETA, config)
+
+    assert report.pulled == 0 and report.rejected == 1 and report.warnings
+    assert not pool_file(config, T0 + 30 * DAY).exists()
+    assert later.scans_imported == 1
+    assert scan_times(db, MARKET) == [T0 - MINUTE, T0 + 30 * MINUTE]
+
+
+@pytest.mark.parametrize("headers", [{"realm": "Other"}, {"faction": "Horde"}])
+def test_a_pooled_body_from_another_market_than_its_index_entry_is_left_out(
+    db, config, pool, headers
+):
+    pool.upload(Era.BETA, strip_scan(scan(T0)), header_overrides=headers)
+
+    report = pull(db, pool, config, now=T0 + MINUTE)
+
+    assert report.pulled == 0 and report.rejected == 1
+    assert scan_times(db, MARKET) == []
+    assert not pool_file(config, T0).exists()
+
+
 def test_the_player_s_own_uploads_are_skipped_on_pull(db, config, pool):
     # Uploaded with this key, but not in this history: say, from a history since deleted.
     pool.upload(Era.BETA, strip_scan(scan(T0)), uploader="me")
