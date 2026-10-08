@@ -1,3 +1,12 @@
+2026-10-08 (later 113): #136 built (761de4a), not closed: in-game check left (list on #136's last comment). New plain-Lua `ColumnLayout.fit(section, width)` (4 busted specs) replaces the per-tab width tables: widths by column name (gold 95, Item 190, Qty 50), `TAB_WIDTHS` for per-tab overrides, last column takes the rest, hides Beta, Cost, ROI until the Note gets 150. Frame opens 1100x540, min 1000x400, corner grip, size in `AzerothQuantDB.recommendationFrameSize`, max width keeps the Craft Chain panel on screen. Hidden columns' values go in the row tooltip (stopgap: #160 replaces it). At 1100 the Shopping List already hides Cost (and Beta): #158 item 4 accepted that.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts (later 111's item 1), the guide read-through (#138), the #136 check (its last comment), and paste the last few `Import took` lines from the Brain log for #162.
+2. #156 passes: tag v0.2.0 and run #146's release steps (later 111's item 2).
+3. Meanwhile: #160 (side pane, slice 2 of #158), TDD. It removes the tooltip stopgap for hidden columns. Then #161, #162, #163, #145, #134, gap.
+
+- Gotchas: same as later 112, plus: in-game units may not be screen pixels (UIParent is ~1365 wide at 1920x1080 at default scale), so 1100 may overlap the AH: retune WIDTH/MIN_WIDTH from the in-game check. `lupa` can compile-check glue files busted doesn't load: `loadstring(src)` on a `lupa.lua51` runtime.
+
 2026-10-08 (later 112): #158 designed, no code. ui-ux-pro-max, /prototype (branch `prototype/158-table-layouts`, layout D won), grilled the loop; decisions on #158's comment. Tabs on top, a next-step banner with one Scan/Reload/Load button, every number column in the table, Note and Post/Search in a hover/pin side pane, resizable frame opening ~1100 px. Auto-Load, always on: the Brain writes 3 LoadOnDemand slots, the Addon tries at ~20/45/90 s after a reload (each LoadAddOn is one disk read). Slices filed: #136 → #160 → #161 → #162 (needs an ADR updating ADR-0021) → #163. #156 in-game results still pending.
 
 Next, in order (target #146 by ~Oct 13):
