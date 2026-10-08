@@ -1,3 +1,12 @@
+2026-10-08 (later 118): #145 built (0c13931), not closed: restart check left (#145's last comment: restart watch twice, paste the second `Import stages` line). `FairValueCache(keep_in_history=True)`, made by cli's `watch_fair_value_cache()` (watch only; recommend/bench/replay stay in memory), keeps each Scan's Fair Values in new history table `scan_fair_values` (scan_id PK, `worked_out_with` = `FAIR_VALUE_VERSION` + the 2 Fair Value config fields, JSON). `_rewind` deletes them with their Scans (needed: foreign keys are on). test_scan_only_reuse's re-match tests now run kept-in-memory / kept-in-history / restarted. 1152 pytest.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): as later 116's item 1, plus the #163 check, plus the #145 restart check.
+2. #156 passes: tag v0.2.0 and run #146's release steps.
+3. Meanwhile: #134, then the gap.
+
+- Gotchas: same as later 117, plus: bump `FAIR_VALUE_VERSION` (fair_value.py) whenever `fair_value` or `supply_at` changes what a Scan's Fair Values come to, or a restarted Brain loads stale ones. `test_instance_lock.py::test_another_running_brain_holds_the_lock_until_it_is_killed` fails here on a clean tree too (not from #145; unlooked-at). Never `git stash -- <paths>` in this repo on this machine: a stash/pop of brain/ emptied .git/index (every file showed staged-deleted + untracked); `git reset` (mixed) fixed it with no loss.
+
 2026-10-08 (later 117): #163 built (da9639f), not closed: in-game check left (list on #163's last comment). New pure `Tips.lua` (loads after NextStep in the .toc): TABS, COLUMNS (by column name), STEPS (by NextStep action), BUDGET, DAYS_TO_SELL, POST, SEARCH, SORT, RESIZE. RecommendationFrame's local `showTip(owner, title, text, footnote)` draws them; tabs and headers use HookScript so the templates keep their own scripts. The AH Scan button in Scanner.lua shows Tips.STEPS.scan (motion scripts on while disabled). `spec/tips_spec.lua` (3 cases) checks every tab and column `RecommendationTable.build` makes (Beta included) and every banner action has a tip. The frame's `TAB_TITLES` must keep matching build's section titles (the test reads build's). Setup guide: the strip and its Scan/Reload button, Days to Sell, hover line, Load line removed. No per-field side-pane hover (agreed). 344 busted specs. That closes #158's slices once the in-game checks pass.
 
 Next, in order (target #146 by ~Oct 13):
