@@ -1,3 +1,12 @@
+2026-10-08 (later 117): #163 built (da9639f), not closed: in-game check left (list on #163's last comment). New pure `Tips.lua` (loads after NextStep in the .toc): TABS, COLUMNS (by column name), STEPS (by NextStep action), BUDGET, DAYS_TO_SELL, POST, SEARCH, SORT, RESIZE. RecommendationFrame's local `showTip(owner, title, text, footnote)` draws them; tabs and headers use HookScript so the templates keep their own scripts. The AH Scan button in Scanner.lua shows Tips.STEPS.scan (motion scripts on while disabled). `spec/tips_spec.lua` (3 cases) checks every tab and column `RecommendationTable.build` makes (Beta included) and every banner action has a tip. The frame's `TAB_TITLES` must keep matching build's section titles (the test reads build's). Setup guide: the strip and its Scan/Reload button, Days to Sell, hover line, Load line removed. No per-field side-pane hover (agreed). 344 busted specs. That closes #158's slices once the in-game checks pass.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): as later 116's item 1, plus the #163 check.
+2. #156 passes: tag v0.2.0 and run #146's release steps.
+3. Meanwhile: #145, then #134, then the gap.
+
+- Gotchas: same as later 116. Recommendations.lua in the working tree has uncommitted Brain-written data from dev runs: never commit it with a feature.
+
 2026-10-08 (later 116): #162 built (20c14ce), not closed: in-game check left (list on #162's last comment, incl. dev setup: restart brain watch, let it import, restart the client, delete the old AzerothQuant_Data by hand). ADR-0030 supersedes ADR-0021 in part. Brain writes Recommendations.lua into `DATA_SLOTS` AzerothQuant_Data1..3 (titles 'AzerothQuant Data N'); setup/uninstall cover all 3 and remove the old folder (`old_data_addon_folder`). Addon: pure `LoadTries.run(slots, after, try, done)` with `LoadTries.AFTER = {20, 45, 90}` (5 busted cases); Scanner.lua's `tryDataSlots()` runs it at load when `DataAddon.slotsToTry()` is non-empty and the Brain isn't catching up; `DataAddon.lua` is now just atLoad/slotsToTry/load(slot). Manual Load button and `/aq load` removed. NextStep.of: Brain working (trying) > orange took longer (Reload pulsing) > the no-slots fallback (working, then 'should be ready' Reload). Chat: 'are ready' only with the window closed and Scans waiting; 'took longer' always (problem line) unless the Brain is behind. 341 busted specs.
 
 Next, in order (target #146 by ~Oct 13):
