@@ -1,3 +1,13 @@
+2026-10-08 (later 114): #160 built (d2fe1cc), not closed: in-game check left (list on #160's last comment). The Note column is gone from every tab. A side pane on the right of the frame (260 wide) shows the hovered row, else the selected one: Action, Note, a plain "what to do" line (`WHAT_TO_DO` per tab in RecommendationTable.lua), hidden/clipped values, then details. The row tooltip and #136's stopgap are gone. Post/Search sit in `pane.actions` and hide while the pane shows a row other than the selected one. Item now takes the slack (least 150). Hide order: Beta, Cost, ROI, Per click, Per day. Built rows carry `name`, `action`, `note`, `todo`, `details` (was `tooltip`). `RecommendationTable.paneText(row, values)` builds the pane text. 331 busted specs.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts (later 111's item 1), the guide read-through (#138), the #136 check and the #160 check (each on its last comment), and paste the last few `Import took` lines from the Brain log for #162.
+2. #156 passes: tag v0.2.0 and run #146's release steps (later 111's item 2).
+3. Meanwhile: #161 (tabs on top + banner, slice 3 of #158), TDD. Then #162, #163, #145, #134, gap.
+
+- Gotchas: same as later 113, plus: the pane body is one FontString with no scroll; a long Craft row may overflow (on the #160 check list). Heredocs through the Bash tool can mangle `
+` inside Python strings: write the script to the scratchpad and run it from there.
+
 2026-10-08 (later 113): #136 built (761de4a), not closed: in-game check left (list on #136's last comment). New plain-Lua `ColumnLayout.fit(section, width)` (4 busted specs) replaces the per-tab width tables: widths by column name (gold 95, Item 190, Qty 50), `TAB_WIDTHS` for per-tab overrides, last column takes the rest, hides Beta, Cost, ROI until the Note gets 150. Frame opens 1100x540, min 1000x400, corner grip, size in `AzerothQuantDB.recommendationFrameSize`, max width keeps the Craft Chain panel on screen. Hidden columns' values go in the row tooltip (stopgap: #160 replaces it). At 1100 the Shopping List already hides Cost (and Beta): #158 item 4 accepted that.
 
 Next, in order (target #146 by ~Oct 13):
