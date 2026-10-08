@@ -32,11 +32,15 @@ local QUIET_SECONDS = 2
 local NO_RESPONSE_SECONDS = 60
 -- ~58k rows per Scan; read them over several frames to avoid a long freeze.
 local ROWS_PER_FRAME = 2000
+-- How long to wait for the items of dropped rows to load before reading those rows again
+-- (#156). The chat line says how many came back, so this can be tuned.
+local REREAD_CAP_SECONDS = 15
 
 local db
 local marketFaction -- decided on AUCTION_HOUSE_SHOW, while the auctioneer is the "npc" unit
 local pending -- the in-flight Scan request, or nil
 local reading = false
+local rereading -- while waiting to re-read dropped rows: { rows, waitingFor, startedAt, capTimer }
 local debounceTimer, noResponseTimer
 local button, pulse, ticker
 local checkedAt -- last Nudge check while the AH is open
@@ -131,7 +135,8 @@ local function itemInfo(itemID)
   return Scan.fromGetItemInfo(getItemInfo(itemID))
 end
 
-local function finish(rows)
+-- rereadNote: "re-read N of M dropped rows in X s", or nil when the main read dropped none.
+local function finish(rows, rereadNote)
   cancel(noResponseTimer)
   pending.readAt = GetServerTime()
   local scan = Scan.build(pending, rows, UnitName("player"), sellPrice, itemInfo)
@@ -139,9 +144,60 @@ local function finish(rows)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false
   refreshButton()
-  Chat.say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data (%d items),"
+  Chat.say(string.format("Scan #%d saved: %d Listings%s, %d dropped for missing item data (%d items),"
     .. " %d items with no Vendor Price yet. /reload to hand it to the Brain.",
-    scan.id, Scan.listingCount(scan), scan.droppedRows, #scan.droppedItemIDs, scan.vendorPricesMissing))
+    scan.id, Scan.listingCount(scan), rereadNote and (" (" .. rereadNote .. ")") or "", scan.droppedRows,
+    #scan.droppedItemIDs, scan.vendorPricesMissing))
+end
+
+-- GetReplicateItemLink, or nil if it errors: after the AH closes the list may be gone, and
+-- an error then would lose a Scan that's already read (#156).
+local function readLink(index)
+  local ok, link = pcall(AH.GetReplicateItemLink, index)
+  return ok and link or nil
+end
+
+-- Reads the dropped rows again in one pass and saves the Scan (#156). Runs once every
+-- requested item has reported, at the cap, or when the AH closes mid-wait. A row that still
+-- doesn't read stays dropped and recorded.
+local function rereadAndFinish(rows, startedAt)
+  local reread, dropped = Scan.reread(rows, readLink)
+  finish(rows, string.format("re-read %d of %d dropped rows in %.1f s", reread, dropped, GetTime() - startedAt))
+end
+
+-- Ends the wait for dropped rows' items and re-reads them.
+local function stopWaiting()
+  local state = rereading
+  rereading = nil
+  cancel(state.capTimer)
+  rereadAndFinish(state.rows, state.startedAt)
+end
+
+-- Asks the game to load the items of the rows the main read dropped (#156), then waits
+-- for them before reading those rows again. With none dropped, saves right away.
+local function rereadDropped(rows)
+  local itemIDs = Scan.missingItemIDs(rows)
+  if #itemIDs == 0 then
+    finish(rows)
+    return
+  end
+  local waitingFor, count = {}, 0
+  for _, itemID in ipairs(itemIDs) do
+    -- GetItemInfo returns nil for an item not loaded yet and asks the server for it;
+    -- GET_ITEM_INFO_RECEIVED fires when it arrives.
+    if getItemInfo(itemID) == nil then
+      waitingFor[itemID] = true
+      count = count + 1
+    end
+  end
+  if count == 0 then
+    rereadAndFinish(rows, GetTime())
+    return
+  end
+  rereading = { rows = rows, waitingFor = waitingFor, startedAt = GetTime() }
+  rereading.capTimer = C_Timer.NewTimer(REREAD_CAP_SECONDS, stopWaiting)
+  Chat.debug(string.format("Waiting up to %d s for %d items to load, to re-read their dropped rows.",
+    REREAD_CAP_SECONDS, count))
 end
 
 local function readRows()
@@ -171,7 +227,7 @@ local function readRows()
     if i < n then
       C_Timer.After(0, step)
     else
-      finish(rows)
+      rereadDropped(rows)
     end
   end
 
@@ -221,6 +277,7 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("AUCTION_HOUSE_SHOW")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
+frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 frame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
     if arg1 == "AzerothQuant" then
@@ -268,8 +325,20 @@ frame:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "AUCTION_HOUSE_CLOSED" then
     cancel(ticker)
     ticker = nil
-    if pending then
+    if rereading then
+      -- The rows are read; save with whatever reads now rather than lose the Scan (#156).
+      stopWaiting()
+    elseif pending then
       abort("Auction House closed before the Scan finished; nothing was saved.")
+    end
+  elseif event == "GET_ITEM_INFO_RECEIVED" then
+    -- arg1 is the itemID. It reports even when the item failed to load (arg2 false), and
+    -- then there's nothing more to wait for either.
+    if rereading and rereading.waitingFor[arg1] then
+      rereading.waitingFor[arg1] = nil
+      if next(rereading.waitingFor) == nil then
+        stopWaiting()
+      end
     end
   elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
     -- Ignore updates when we haven't asked. (While we have, another addon's scan is

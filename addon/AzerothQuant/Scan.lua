@@ -162,6 +162,41 @@ function Scan.build(request, rows, playerName, sellPrice, itemInfo)
   }
 end
 
+-- The itemIDs of the rows whose link didn't read, once each: what the Addon asks the game to
+-- load before Scan.reread (#156).
+function Scan.missingItemIDs(rows)
+  local itemIDs, seen = {}, {}
+  for _, r in ipairs(rows) do
+    if not itemString(r.link) and r.itemID and not seen[r.itemID] then
+      seen[r.itemID] = true
+      itemIDs[#itemIDs + 1] = r.itemID
+    end
+  end
+  return itemIDs
+end
+
+-- Reads the link of each row the main read dropped again, once the game has had time to
+-- load their items (#156). rows are Scan.build's, in replicate order: rows[i] is replicate
+-- index i - 1. readLink(index) is GetReplicateItemLink. A row whose link still doesn't read
+-- stays dropped, and Scan.build records it as before. So does one whose link is now another
+-- item's: the list changed under the wait, and the index is no longer this auction.
+-- Returns how many dropped rows now read, and how many there were.
+function Scan.reread(rows, readLink)
+  local reread, dropped = 0, 0
+  for i, r in ipairs(rows) do
+    if not itemString(r.link) then
+      dropped = dropped + 1
+      local link = readLink(i - 1)
+      local item = itemString(link)
+      if item and r.itemID and tonumber(item:match("^item:(%d+)")) == r.itemID then
+        r.link = link
+        reread = reread + 1
+      end
+    end
+  end
+  return reread, dropped
+end
+
 -- How many Listings a built Scan holds, own and packed.
 function Scan.listingCount(scan)
   local _, separators = scan.packedListings:gsub(";", "")

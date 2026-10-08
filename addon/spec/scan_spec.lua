@@ -5,6 +5,7 @@ local Scan = require("Scan")
 -- beta client (spike #1).
 local WOLF_MEAT = "|cnIQ1:|Hitem:2680::::::::20:1490:::::::::|h[Spiced Wolf Meat]|h|r"
 local NATURE_PROT = "|cnIQ2:|Hitem:9768::::::::20:1490::1:1:12743:::::::|h[Scouting Belt of Nature Protection]|h|r"
+local LINEN = "|cnIQ1:|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
 
 local REQUEST = {
   id = 7,
@@ -24,6 +25,13 @@ local function row(overrides)
   for k, v in pairs(overrides or {}) do
     r[k] = v
   end
+  return r
+end
+
+-- A row the main read dropped: the game gave its itemID but not its link yet (#150).
+local function dropped(itemID)
+  local r = row({ itemID = itemID })
+  r.link = nil
   return r
 end
 
@@ -166,11 +174,6 @@ describe("Scan.build", function()
   it("records the itemIDs of dropped rows once each, when the game gave them", function()
     -- #150: GetReplicateItemInfo's itemID is there even when the link isn't, so the Brain
     -- can leave those items out of the Observation Windows this Scan touches.
-    local function dropped(itemID)
-      local r = row({ itemID = itemID })
-      r.link = nil
-      return r
-    end
     local noID = row()
     noID.link = nil
     local rows = { dropped(2589), dropped(2589), dropped(4306), noID, row({ itemID = 2680 }) }
@@ -298,5 +301,88 @@ describe("Scan.build", function()
     end
     table.sort(keys)
     assert.are.same({ "buyout", "itemString", "name", "own", "quantity", "timeLeft" }, keys)
+  end)
+end)
+
+describe("Scan.reread", function()
+  it("puts a dropped row back once its link reads", function()
+    -- #156: after the wait, the Addon reads the dropped rows' links again.
+    local rows = { row(), dropped(2589), row({ link = NATURE_PROT }) }
+
+    local reread, droppedCount = Scan.reread(rows, function(index)
+      return index == 1 and LINEN or nil
+    end)
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal(1, reread)
+    assert.are.equal(1, droppedCount)
+    assert.are.equal(0, scan.droppedRows)
+    assert.are.same({}, scan.droppedItemIDs)
+    assert.are.equal("item:2589::::::::20:1490", others(scan)[2].itemString)
+  end)
+
+  it("leaves the rows whose link still doesn't read dropped, and records their items", function()
+    -- Items the game hasn't loaded by the 15 s cap: the Brain's backstop handles those (#156).
+    local rows = { dropped(2589), dropped(4306), dropped(4306), row() }
+    local asked = {}
+
+    local reread, droppedCount = Scan.reread(rows, function(index)
+      asked[#asked + 1] = index
+      return index == 0 and LINEN or ""
+    end)
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal(1, reread)
+    assert.are.equal(3, droppedCount)
+    assert.are.equal(2, scan.droppedRows)
+    assert.are.same({ 4306 }, scan.droppedItemIDs)
+    -- Only the dropped rows are read again, not all ~58k.
+    assert.are.same({ 0, 1, 2 }, asked)
+  end)
+
+  it("leaves a row dropped when the link it reads now is another item's", function()
+    -- The list can change during the wait (another addon's Scan), shifting the indices.
+    -- A link for a different item would put one auction's item on another's price.
+    local rows = { dropped(4306) }
+
+    local reread = Scan.reread(rows, function()
+      return LINEN
+    end)
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal(0, reread)
+    assert.are.same({ 4306 }, scan.droppedItemIDs)
+  end)
+
+  it("saves the Scan as read when the Auction House closed before the re-read", function()
+    -- #156: closing the AH mid-wait still saves the Scan. With the list gone, nothing reads.
+    local rows = { row(), dropped(2589), dropped(4306) }
+
+    local reread, droppedCount = Scan.reread(rows, function()
+      return nil
+    end)
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal(0, reread)
+    assert.are.equal(2, droppedCount)
+    assert.are.equal(2, scan.droppedRows)
+    table.sort(scan.droppedItemIDs)
+    assert.are.same({ 2589, 4306 }, scan.droppedItemIDs)
+    assert.are.equal(1, Scan.listingCount(scan))
+  end)
+end)
+
+describe("Scan.missingItemIDs", function()
+  it("lists each dropped row's item once, to request before the re-read", function()
+    -- #156: the Addon asks the game to load these, then waits until all have reported.
+    local noID = row()
+    noID.link = nil
+    local rows = { dropped(2589), row({ itemID = 2680 }), dropped(4306), dropped(2589), noID }
+
+    local itemIDs = Scan.missingItemIDs(rows)
+
+    table.sort(itemIDs)
+    assert.are.same({ 2589, 4306 }, itemIDs)
+    assert.are.same({}, Scan.missingItemIDs({ row() }))
   end)
 end)
