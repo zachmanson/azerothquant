@@ -1,3 +1,7 @@
+2026-10-08 (later 119): no code. User asked why so few recs, why 2 reloads, why the Brain is slow, and the window overlapping the AH. Few recs: `--why-not` shows nearly everything fails Flip margin (listed at about its clear price), so working as designed. 2 reloads: the running `brain watch` (started 12:05) predates #162 (16:40), so only the old AzerothQuant_Data existed and the Addon fell back to Reload; user told to do #162's dev setup (restart watch, delete old folder, restart client). Slow: restart Fair Values ~25-33 s is #145 (watcher predates it), new-Scan Decision Engine ~21 s is #155. Filed #164 (window opens over the AH; options a/b, user hasn't picked).
+
+Next, in order: unchanged from later 118.
+
 2026-10-08 (later 118): #145 built (0c13931), not closed: restart check left (#145's last comment: restart watch twice, paste the second `Import stages` line). `FairValueCache(keep_in_history=True)`, made by cli's `watch_fair_value_cache()` (watch only; recommend/bench/replay stay in memory), keeps each Scan's Fair Values in new history table `scan_fair_values` (scan_id PK, `worked_out_with` = `FAIR_VALUE_VERSION` + the 2 Fair Value config fields, JSON). `_rewind` deletes them with their Scans (needed: foreign keys are on). test_scan_only_reuse's re-match tests now run kept-in-memory / kept-in-history / restarted. 1152 pytest.
 
 Next, in order (target #146 by ~Oct 13):
