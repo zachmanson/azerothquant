@@ -6,7 +6,8 @@
 
 # Written by the Brain (never edit). It must exist when the client starts, since new
 # files aren't picked up on /reload, so the Addon ships a stub. The Brain writes the same
-# file into AzerothQuant_Data, a LoadOnDemand addon it creates, for the Load button (#106).
+# file into AzerothQuant_Data1..3, LoadOnDemand addons it creates, which the Addon tries
+# by itself after a reload (ADR-0030).
 Recommendations.lua
 
 # Plain-Lua logic modules (no WoW API calls; tested with busted in addon/spec)
@@ -24,6 +25,7 @@ MerchantCosts.lua
 Prune.lua
 Freshness.lua
 Nudge.lua
+LoadTries.lua
 NextStep.lua
 DisenchantGroup.lua
 BoughtMarks.lua

@@ -16,7 +16,13 @@ from pathlib import Path
 
 from brain.config import CONFIG_FILE, Era, Install, load_config
 from brain.instance_lock import LOCK_FILE, instance_lock
-from brain.recommendations import FILE_NAME, addon_folder, create_data_addon, data_addon_folder
+from brain.recommendations import (
+    FILE_NAME,
+    addon_folder,
+    create_data_slots,
+    data_slot_folders,
+    old_data_addon_folder,
+)
 
 EXE_NAME = "AzerothQuantBrain.exe"
 DEFAULT_WOW_FOLDER = Path(r"C:\Program Files (x86)\World of Warcraft")
@@ -123,7 +129,7 @@ def install(
     make_shortcut: Callable[[Shortcut], None],
 ) -> None:
     """Set the Brain up: copy `exe` into the app folder, install the bundled `addon` and
-    its Data addon into each install, write the config and make the shortcuts."""
+    its Data slots into each install, write the config and make the shortcuts."""
     places.app_dir.mkdir(parents=True, exist_ok=True)
     _copy_brain(exe, places.exe)
     for game in installs:
@@ -131,7 +137,8 @@ def install(
         if _is_link(addon_folder(game)):
             continue
         _install_addon(addon, game)
-        create_data_addon(game)
+        create_data_slots(game)
+        _remove_folder(old_data_addon_folder(game))
     (places.app_dir / CONFIG_FILE).write_text(
         render_config(installs, pool_url, pool_key), encoding="utf-8"
     )
@@ -165,6 +172,12 @@ def _install_addon(addon: Path, game: Install) -> None:
     shutil.copytree(addon, target)
     if kept is not None:
         recommendations.write_bytes(kept)
+
+
+def _remove_folder(folder: Path) -> None:
+    # A linked-in folder is the dev setup's (the repo's), never to be deleted.
+    if folder.is_dir() and not _is_link(folder):
+        shutil.rmtree(folder)
 
 
 def _is_link(folder: Path) -> bool:
@@ -232,16 +245,16 @@ def stop_running_brain(data_dir: Path, timeout: float = 5.0) -> bool:
 
 
 def uninstall(places: Places) -> list[Path]:
-    """Take off the shortcuts, the copied Brain, and both Addons from each install, leaving
-    the config and the data. Returns what couldn't be deleted because it's in use: the
-    running Brain's own exe, when it uninstalls itself."""
+    """Take off the shortcuts, the copied Brain, and the Addon and its Data slots from each
+    install, leaving the config and the data. Returns what couldn't be deleted because it's
+    in use: the running Brain's own exe, when it uninstalls itself."""
     in_use = []
     config = places.app_dir / CONFIG_FILE
     installs = load_config(config).installs if config.is_file() else ()
     for game in installs:
-        for folder in (addon_folder(game), data_addon_folder(game)):
-            if folder.is_dir() and not _is_link(folder):
-                shutil.rmtree(folder)
+        folders = [addon_folder(game), *data_slot_folders(game), old_data_addon_folder(game)]
+        for folder in folders:
+            _remove_folder(folder)
     for path in [s.link for s in shortcuts(places)] + [places.exe]:
         try:
             path.unlink(missing_ok=True)

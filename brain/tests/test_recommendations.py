@@ -762,9 +762,10 @@ def _addon_install(tmp_path: Path) -> Install:
     return install
 
 
-def test_the_brain_mirrors_recommendations_into_a_load_on_demand_data_addon(tmp_path):
-    # The client reads a LoadOnDemand addon's files when it's loaded, so the Addon's Load
-    # button can pick up this copy without a reload (ADR-0021).
+def test_the_brain_mirrors_recommendations_into_three_load_on_demand_data_slots(tmp_path):
+    # The client reads a LoadOnDemand addon's files when it's loaded, once a session, so
+    # three slots give the Addon three tries to pick up this copy without a reload
+    # (ADR-0030).
     install = _addon_install(tmp_path)
 
     conn = open_history(tmp_path / "history.db")
@@ -773,18 +774,21 @@ def test_the_brain_mirrors_recommendations_into_a_load_on_demand_data_addon(tmp_
     finally:
         conn.close()
 
-    data = install.path / "Interface" / "AddOns" / "AzerothQuant_Data"
-    assert (data / FILE_NAME).read_text(encoding="utf-8") == written.read_text(encoding="utf-8")
-    assert (data / "AzerothQuant_Data.toc").read_text(encoding="utf-8") == (
-        "## Interface: 16001\n"
-        "## Title: AzerothQuant Data\n"
-        "## Notes: The Brain's latest Recommendations, loaded by the Addon's Load button."
-        " Written by the Brain; edits are overwritten.\n"
-        "## LoadOnDemand: 1\n"
-        "## Dependencies: AzerothQuant\n"
-        "\n"
-        "Recommendations.lua\n"
-    )
+    addons = install.path / "Interface" / "AddOns"
+    for n in (1, 2, 3):
+        data = addons / f"AzerothQuant_Data{n}"
+        assert (data / FILE_NAME).read_text(encoding="utf-8") == written.read_text(encoding="utf-8")
+        assert (data / f"AzerothQuant_Data{n}.toc").read_text(encoding="utf-8") == (
+            "## Interface: 16001\n"
+            f"## Title: AzerothQuant Data {n}\n"
+            "## Notes: The Brain's latest Recommendations, loaded by the Addon after a reload."
+            " Written by the Brain; edits are overwritten.\n"
+            "## LoadOnDemand: 1\n"
+            "## Dependencies: AzerothQuant\n"
+            "\n"
+            "Recommendations.lua\n"
+        )
+    assert not (addons / "AzerothQuant_Data").exists()
 
 
 def test_a_merged_prediction_buy_is_partly_from_beta_if_any_of_its_rooms_was():

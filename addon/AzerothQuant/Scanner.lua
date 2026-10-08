@@ -8,8 +8,10 @@
 -- should have imported the Scans saved at load (#71). At logout it stamps each Scan with
 -- when it was first saved, so the next load can tell the Brain is behind (#104). It also
 -- lends the Scan button's pulse (addPulse, setPulsing) to the banner's button, which can
--- Scan too (requestScan, #161). "Scan saved" and "should be done" go to chat only while the
--- Recommendation frame is closed: open, its banner says so.
+-- Scan too (requestScan, #161). After a load with a stale copy it tries the Brain's Data
+-- slots by itself (DataAddon.lua, LoadTries.lua, ADR-0030). "Scan saved", "should be done"
+-- and "are ready" go to chat only while the Recommendation frame is closed: open, its
+-- banner says so.
 --
 -- Every stamp here is GetServerTime(), not time(), so Scans from different players'
 -- clients order on one clock in the Scan Pool (#117). The cooldown and Nudge checks
@@ -22,6 +24,7 @@ local Prune = ns.Prune
 local Nudge = ns.Nudge
 local Chat = ns.Chat
 local DataAddon = ns.DataAddon
+local LoadTries = ns.LoadTries
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
@@ -50,6 +53,13 @@ local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
 local behindAtLoad = false -- it should have imported some long ago, so brain watch is off (#104)
+-- The Data slot tries since load (ADR-0030): nil when none were started, else "trying",
+-- "fresh" (one caught up) or "stale" (every slot was).
+local tryState
+local onDataLoad -- the Recommendation frame's redraw, after a try kept a newer copy
+
+local READY_LINE = "New recommendations are ready. /aq recs to see them."
+local TOOK_LONGER_LINE = "The Brain took longer than usual. Reload to try again."
 
 local function cancel(timer)
   if timer then
@@ -280,6 +290,62 @@ local function createButton()
   pulse = addPulse(button)
 end
 
+-- After a try loaded a copy (DataAddon.load), which pruned by its stamps: fresh is whether
+-- it caught up. Recounts what's waiting, and whether the Brain is behind, from what's left.
+-- Saved Scans are the ones with savedAt; the rest were taken since the load. A stale copy
+-- leaves Reload due.
+local function afterDataLoad(fresh)
+  savedAtLoad = 0
+  for _, scan in ipairs(db.scans) do
+    if scan.savedAt then
+      savedAtLoad = savedAtLoad + 1
+    end
+  end
+  local now = GetServerTime()
+  -- While the Brain is catching up, Reload would only show the same table (#159).
+  local catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now)
+  behindAtLoad = not catchingUp and Nudge.brainBehind(db.scans, now) ~= nil
+  reloadReady = not fresh and not catchingUp
+  if onDataLoad then
+    onDataLoad()
+  end
+end
+
+-- Tries the Data slots by itself when the startup copy is stale (ADR-0030). Not while the
+-- Brain catches up: its Scans wait behind the pull, and every try would be stale. Only
+-- Scans waiting at load are news for chat: a Character Read is saved on every reload, so
+-- the copy is stale after most of them. When the Brain is behind, Nudge's "is the Brain
+-- running?" line already said what to do.
+local function tryDataSlots()
+  local slots = DataAddon.slotsToTry()
+  if #slots == 0 or Nudge.catchingUp(AzerothQuantRecommendations, GetServerTime()) then
+    return
+  end
+  local news = savedAtLoad > 0
+  tryState = "trying"
+  LoadTries.run(slots, C_Timer.After, function(slot)
+    local fresh = DataAddon.load(slot)
+    if fresh ~= nil then
+      afterDataLoad(fresh)
+    end
+    return fresh
+  end, function(fresh)
+    tryState = fresh and "fresh" or "stale"
+    if not news or behindAtLoad then
+      return
+    end
+    -- The Scans are in even if the Character Read isn't.
+    if savedAtLoad == 0 then
+      if not windowShown() then
+        Chat.say(READY_LINE)
+      end
+    else
+      -- A problem line: chat too, whether the banner shows it or not.
+      Chat.say(TOOK_LONGER_LINE)
+    end
+  end)
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
@@ -295,6 +361,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       db.scans = db.scans or {}
       db.nextScanId = db.nextScanId or 1
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
+      DataAddon.atLoad(db)
       Nudge.atLogin(AzerothQuantRecommendations, Chat.say, GetServerTime())
       local pruned = Prune.importedScans(db.scans, AzerothQuantRecommendations)
       if pruned > 0 then
@@ -302,16 +369,14 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       end
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
+      tryDataSlots()
       behindAtLoad = Nudge.afterLoad(db.scans, GetServerTime(), C_Timer.After, function()
-        -- Load already used: its own chat line said whether to reload.
-        if DataAddon.loaded() then
-          return nil
+        -- The Data slots are tried instead: their outcome sets reloadReady and says so.
+        if tryState then
+          return false
         end
         reloadReady = true
-        if windowShown() then
-          return nil
-        end
-        return DataAddon.canLoad() and "Load" or "Reload"
+        return not windowShown()
       end, Chat.say, Nudge.catchingUp(AzerothQuantRecommendations, GetServerTime()))
       -- While the Brain catches up, afterLoad waits for nothing. Once its pull should be over,
       -- Reload is the step, or the banner would say the Brain is working until the next
@@ -324,7 +389,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       end
       if savedAtLoad > 0 and not behindAtLoad then
         Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
-          .. " (scripts\\play.bat), Load (or Reload) once it's done.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
+          .. " (scripts\\play.bat), they show by themselves once it's done.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
       end
     end
   elseif event == "PLAYER_LOGOUT" then
@@ -388,27 +453,20 @@ ns.Scanner = {
   waiting = function()
     return (db and #db.scans or 0) - savedAtLoad, savedAtLoad, behindAtLoad
   end,
-  -- True once the Brain should have imported the Scans saved at load, so Reload (or
-  -- Load) pulses.
+  -- True once the Brain should have imported the Scans saved at load, so Reload pulses.
   reloadReady = function()
     return reloadReady
   end,
-  -- After the Load button loaded a copy (DataAddon.load), which pruned by its stamps:
-  -- fresh is whether it caught up. Recounts what's waiting, and whether the Brain is
-  -- behind, from what's left. Saved Scans are the ones with savedAt; the rest were taken
-  -- since the load. A stale copy leaves Reload pulsing.
-  afterDataLoad = function(fresh)
-    savedAtLoad = 0
-    for _, scan in ipairs(db.scans) do
-      if scan.savedAt then
-        savedAtLoad = savedAtLoad + 1
-      end
-    end
-    local now = GetServerTime()
-    -- While the Brain is catching up, Reload would only show the same table (#159).
-    local catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now)
-    behindAtLoad = not catchingUp and Nudge.brainBehind(db.scans, now) ~= nil
-    reloadReady = not fresh and not catchingUp
+  -- The Data slot tries (ADR-0030): some still to come, and every one was stale.
+  trying = function()
+    return tryState == "trying"
+  end,
+  tookLonger = function()
+    return tryState == "stale"
+  end,
+  -- fn runs after each try that loaded a copy: the Recommendation frame redraws.
+  setOnDataLoad = function(fn)
+    onDataLoad = fn
   end,
   -- The AH's Scan button's click, for the banner's (a click is the hardware event it needs).
   requestScan = requestScan,

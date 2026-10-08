@@ -14,7 +14,8 @@ local function loop(changes)
     behind = false,
     catchingUp = false,
     brainRan = true,
-    canLoad = false,
+    trying = false,
+    tookLonger = false,
     reloadReady = false,
     lastScanAt = NOW - 60 * MIN,
   }
@@ -47,7 +48,7 @@ describe("NextStep.of", function()
   end)
 
   it("is Reload, pulsing, once a Scan is saved, wherever the Brain is", function()
-    local step = NextStep.of(loop({ unsaved = 1, unimported = 2, canLoad = true, behind = true }), NOW)
+    local step = NextStep.of(loop({ unsaved = 1, unimported = 2, trying = true, behind = true }), NOW)
     assert.are.equal("Reload", step.button)
     assert.is_true(step.enabled)
     assert.is_true(step.pulse)
@@ -63,7 +64,7 @@ describe("NextStep.of", function()
   end)
 
   it("warns the Brain isn't running when it's behind on a saved Scan", function()
-    local step = NextStep.of(loop({ unimported = 1, behind = true, reloadReady = true, canLoad = true }), NOW)
+    local step = NextStep.of(loop({ unimported = 1, behind = true, reloadReady = true, tookLonger = true }), NOW)
     assert.are.equal("Brain not running", step.title)
     assert.is_true(step.warn)
     assert.are.equal("Reload", step.button)
@@ -76,26 +77,37 @@ describe("NextStep.of", function()
     assert.is_true(step.warn)
   end)
 
-  it("says the Brain is working, with no button, until it should be done with the Scans saved", function()
-    local step = NextStep.of(loop({ unimported = 1, canLoad = true, ahOpen = true }), NOW)
+  it("says the Brain is working, with no button, while the Data slots are being tried", function()
+    -- A stale try counts the Brain as due (reloadReady), but later slots may still catch it.
+    local step = NextStep.of(loop({ unimported = 1, trying = true, reloadReady = true, ahOpen = true }), NOW)
     assert.are.equal("The Brain is working", step.title)
+    assert.are.equal("New recommendations will show by themselves. About a minute.", step.line)
     assert.is_nil(step.button)
   end)
 
-  it("is Load, pulsing, once the Brain should be done", function()
-    local step = NextStep.of(loop({ unimported = 1, canLoad = true, reloadReady = true }), NOW)
-    assert.are.equal("Load", step.button)
-    assert.are.equal("load", step.action)
-    assert.is_true(step.enabled)
+  it("warns the Brain took longer, with Reload pulsing, once every Data slot was stale", function()
+    local step = NextStep.of(loop({ unimported = 1, tookLonger = true, reloadReady = true }), NOW)
+    assert.are.equal("The Brain took longer than usual", step.title)
+    assert.are.equal("Reload to try again.", step.line)
+    assert.is_true(step.warn)
+    assert.are.equal("Reload", step.button)
     assert.is_true(step.pulse)
   end)
 
-  it("is Reload, pulsing, once the Brain should be done but Load can't help", function()
-    -- No Data addon yet, or Load already used and its copy was stale.
+  it("says the Brain is working, with no button, until it should be done, with no Data slots", function()
+    local step = NextStep.of(loop({ unimported = 1, ahOpen = true }), NOW)
+    assert.are.equal("The Brain is working", step.title)
+    assert.are.equal("The Brain is reading your Scan. About a minute.", step.line)
+    assert.is_nil(step.button)
+  end)
+
+  it("is Reload, pulsing, once the Brain should be done, with no Data slots", function()
+    -- The first run before a client restart: the client hasn't found the slots yet.
     local step = NextStep.of(loop({ unimported = 1, reloadReady = true }), NOW)
     assert.are.equal("Reload", step.button)
     assert.are.equal("reload", step.action)
     assert.is_true(step.pulse)
+    assert.is_nil(step.warn)
   end)
 
   it("shrinks to one line, with no button, when up to date and the Scan cooldown is running", function()

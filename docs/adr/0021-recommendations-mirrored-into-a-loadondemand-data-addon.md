@@ -1,5 +1,7 @@
 # Recommendations are mirrored into a LoadOnDemand data addon
 
+> Superseded in part by ADR-0030: the mirror stays, but as three slots the Addon loads by itself, with no Load button.
+
 A Scan used to take two reloads to reach the table: one to save it for the Brain, then a second to read the `Recommendations.lua` the Brain wrote in between, because the client reads an addon's files once, at load (#106). A LoadOnDemand addon's files are read from disk when it's loaded, not at client start (spike, 2026-09-29), so a Load button can pick up the Brain's output without a reload. It only works once per session, though.
 
 The Brain writes the same `Recommendations.lua` twice: into `AzerothQuant/`, read at startup as before, and into `AzerothQuant_Data/`, loaded when the player clicks Load. Moving the file there outright would leave the table empty after every reload until Load, and a Load clicked too early would leave it stale for the whole session. It would also move pruning off `ADDON_LOADED`. With the mirror, the startup path is unchanged and Load can only make the data newer. Pruning again with the newer stamps is safe, since an older stamp just deletes less.

@@ -37,20 +37,16 @@ end)
 describe("Nudge.afterLoad", function()
   local NOW = SCAN + 60 * MIN
 
-  -- Fakes for C_Timer.After, starting the button's pulse (which says which button it
-  -- pulsed: "Load", "Reload", or nil when Load was already clicked) and a chat line.
-  -- button: what the pulse returns; Reload unless given, and false for nil.
-  local function world(button)
+  -- Fakes for C_Timer.After, starting Reload's pulse (which says whether chat should say
+  -- so) and a chat line. quiet: the pulse says chat shouldn't.
+  local function world(quiet)
     local w = { timers = {}, pulses = 0, lines = {} }
     w.after = function(seconds, fn)
       table.insert(w.timers, { seconds = seconds, fn = fn })
     end
     w.pulse = function()
       w.pulses = w.pulses + 1
-      if button == false then
-        return nil
-      end
-      return button or "Reload"
+      return not quiet
     end
     w.say = function(text)
       table.insert(w.lines, text)
@@ -75,17 +71,8 @@ describe("Nudge.afterLoad", function()
     assert.are.same({ "The Brain should be done: Reload to see the new Scan." }, w.lines)
   end)
 
-  it("says to Load instead when the button pulsing is Load (#106)", function()
-    local w = world("Load")
-
-    Nudge.afterLoad({ { savedAt = NOW } }, NOW, w.after, w.pulse, w.say)
-    w.timers[1].fn()
-
-    assert.are.same({ "The Brain should be done: Load to see the new Scan." }, w.lines)
-  end)
-
-  it("says nothing when Load was clicked before the Brain should be done", function()
-    local w = world(false)
+  it("says nothing when the pulse says not to (the Data slots are tried, or the banner says it)", function()
+    local w = world(true)
 
     Nudge.afterLoad({ { savedAt = NOW } }, NOW, w.after, w.pulse, w.say)
     w.timers[1].fn()

@@ -14,10 +14,11 @@ local NextStep = {}
 -- loop: what the Addon knows, as RecommendationFrame.lua gathers it each frame:
 --   scanning (Scanner.busy), ahOpen, unsaved and unimported and behind (Scanner.waiting),
 --   catchingUp (Nudge.catchingUp), brainRan (Recommendations.lua has a brain table),
---   canLoad (DataAddon.canLoad), reloadReady (Scanner.reloadReady), lastScanAt.
+--   trying and tookLonger (DataAddon: Data slots still to try, every slot tried stale),
+--   reloadReady (Scanner.reloadReady), lastScanAt.
 -- now: GetServerTime(), the clock lastScanAt is on. Returns the banner:
--- { title, line, button ("Scan", "Scanning...", "Reload", "Load" or nil for none), action
--- (what the button does: "scan", "busy", "reload" or "load"), enabled, pulse, warn (orange),
+-- { title, line, button ("Scan", "Scanning...", "Reload" or nil for none), action
+-- (what the button does: "scan", "busy" or "reload"), enabled, pulse, warn (orange),
 -- quiet (one line, no title or button) }.
 function NextStep.of(loop, now)
   -- A reload now would lose the Scan, so this comes before every other step.
@@ -67,16 +68,33 @@ function NextStep.of(loop, now)
       warn = true,
     }
   end
+  if loop.unimported > 0 and loop.trying then
+    return {
+      title = "The Brain is working",
+      line = "New recommendations will show by themselves. About a minute.",
+    }
+  end
+  if loop.unimported > 0 and loop.tookLonger then
+    return {
+      title = "The Brain took longer than usual",
+      line = "Reload to try again.",
+      button = "Reload",
+      action = "reload",
+      enabled = true,
+      pulse = true,
+      warn = true,
+    }
+  end
+  -- No Data slots (the first run before a client restart): Reload once the Brain should be done.
   if loop.unimported > 0 and not loop.reloadReady then
-    -- No Load yet: Load works once per reload, so one clicked too early locks in the old copy.
     return { title = "The Brain is working", line = "The Brain is reading your Scan. About a minute." }
   end
   if loop.unimported > 0 then
     return {
       title = "New recommendations should be ready",
-      line = loop.canLoad and "Load to see them." or "Reload to see them.",
-      button = loop.canLoad and "Load" or "Reload",
-      action = loop.canLoad and "load" or "reload",
+      line = "Reload to see them.",
+      button = "Reload",
+      action = "reload",
       enabled = true,
       pulse = true,
     }

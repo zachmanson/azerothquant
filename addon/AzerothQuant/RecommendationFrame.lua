@@ -30,7 +30,6 @@ local ColumnLayout = ns.ColumnLayout
 local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
-local DataAddon = ns.DataAddon
 local Chat = ns.Chat
 local PostButton = ns.PostButton
 local SearchButton = ns.SearchButton
@@ -724,6 +723,8 @@ local function queueRedraw()
     redraw()
   end)
 end
+-- A Data slot the Addon loaded by itself may hold newer Recommendations (ADR-0030).
+Scanner.setOnDataLoad(queueRedraw)
 
 local function selectTab(title)
   selected = title
@@ -810,13 +811,11 @@ end
 -- Reloading flushes SavedVariables (new Scans reach the Brain) and rereads
 -- Recommendations.lua. Not mid-Scan, which would lose it. The Brain imports what the
 -- reload saved and writes a new Recommendations.lua a minute or so later; when the
--- startup copy missed it, the button becomes Load, which reads the Brain's copy in
--- AzerothQuant_Data without a second reload (DataAddon.lua, #106). Load works once per
--- reload, and can run mid-Scan since it doesn't reload. The banner's button does Scan,
--- Reload or Load by step; /aq reload and /aq load do the last two.
+-- startup copy missed it, Scanner.lua tries the Brain's Data slots by itself and the
+-- table redraws when one catches up (ADR-0030). The banner's button does Scan or Reload
+-- by step; /aq reload does the last.
 local SCAN_TIP = "Scan reads every listing on the Auction House. You can Scan once every 15 minutes."
 local RELOAD_TIP = "Reload the UI: saves new Scans for the Brain and loads its latest Recommendations."
-local LOAD_TIP = "Load the Brain's latest Recommendations (once per reload)."
 local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
 
 local function reload()
@@ -825,18 +824,6 @@ local function reload()
     return
   end
   ReloadUI()
-end
-
-local function loadRecommendations()
-  if not DataAddon.canLoad() then
-    Chat.say("Nothing new to load: /aq reload instead.")
-    return
-  end
-  local fresh = DataAddon.load()
-  if fresh ~= nil then
-    Scanner.afterDataLoad(fresh)
-    redraw()
-  end
 end
 
 local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Prediction buys. "
@@ -929,15 +916,12 @@ local STEP_CLICKS = {
   reload = function()
     reload()
   end,
-  load = function()
-    loadRecommendations()
-  end,
 }
-local STEP_TIPS = { scan = SCAN_TIP, busy = BUSY_TIP, reload = RELOAD_TIP, load = LOAD_TIP }
+local STEP_TIPS = { scan = SCAN_TIP, busy = BUSY_TIP, reload = RELOAD_TIP }
 local GOLD, ORANGE = { 1, 0.82, 0 }, { 1, 0.6, 0.23 }
 local CHECK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:0|t "
 
--- The loop as NextStep.of takes it, from what Scanner, DataAddon and the Brain's file say.
+-- The loop as NextStep.of takes it, from what Scanner and the Brain's file say.
 local function loopState()
   local unsaved, unimported, behind = Scanner.waiting()
   local now = GetServerTime()
@@ -949,15 +933,16 @@ local function loopState()
     behind = behind,
     catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now),
     brainRan = AzerothQuantRecommendations ~= nil and AzerothQuantRecommendations.brain ~= nil,
-    canLoad = DataAddon.canLoad(),
+    trying = Scanner.trying(),
+    tookLonger = Scanner.tookLonger(),
     reloadReady = Scanner.reloadReady(),
     lastScanAt = db.lastScanAt,
   }, now
 end
 
 -- The banner under the tabs (#161). It follows the loop every frame while the frame is
--- shown: a Scan starts and ends on its own clock, the cooldown counts down, and Load is
--- used up once clicked. Up to date, it shrinks to one line and the rows move up.
+-- shown: a Scan starts and ends on its own clock, the cooldown counts down, and the Data
+-- slots are tried on theirs. Up to date, it shrinks to one line and the rows move up.
 local function createBanner()
   local banner = CreateFrame("Frame", nil, frame)
   banner:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, BANNER_TOP)
@@ -985,7 +970,7 @@ local function createBanner()
   end)
   banner.button:SetScript("OnLeave", GameTooltip_Hide)
   -- Pulses when the step is one to take now: a Scan can run, a Scan is saved, or the
-  -- Brain should be done (#71).
+  -- Brain should be done (#71), or took longer than its Data slots (ADR-0030).
   banner.pulse = Scanner.addPulse(banner.button)
 
   banner.title = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1164,7 +1149,7 @@ function refreshPost()
   if not postButton then
     return
   end
-  -- A new import (a reload, or the Load button) starts the counts over.
+  -- A new import (a reload, or a Data slot loaded) starts the counts over.
   if AzerothQuantRecommendations ~= postedFor then
     posted, postedFor = {}, AzerothQuantRecommendations
   end
@@ -1489,12 +1474,10 @@ SlashCmdList.AZEROTHQUANT = function(msg)
     toggle()
   elseif msg:match("^%s*reload%s*$") then
     reload()
-  elseif msg:match("^%s*load%s*$") then
-    loadRecommendations()
   elseif msg:match("^%s*debug%s*$") then
     Chat.toggleDebug()
   else
-    Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload, /aq load,"
+    Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload,"
       .. " /aq debug (toggle chat lines you don't need to act on)")
   end
 end

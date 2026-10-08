@@ -23,6 +23,7 @@ from brain.installer import (
     wow_folder,
 )
 from brain.instance_lock import LOCK_FILE
+from brain.recommendations import DATA_SLOTS
 
 STUB = "-- the stub the Addon ships\n"
 
@@ -157,14 +158,13 @@ def test_install_copies_the_brain_installs_the_addons_writes_the_config_and_make
     assert (config.installs, config.pool_key) == ((beta,), "secret")
     addons = beta.path / "Interface" / "AddOns"
     assert (addons / "AzerothQuant" / "Scan.lua").read_text(encoding="utf-8") == "-- new Scan\n"
-    assert (addons / "AzerothQuant_Data" / "Recommendations.lua").read_text(
-        encoding="utf-8"
-    ) == STUB
-    assert (
-        (addons / "AzerothQuant_Data" / "AzerothQuant_Data.toc")
-        .read_text(encoding="utf-8")
-        .startswith("## Interface: 16001\n")
-    )
+    for slot in DATA_SLOTS:
+        assert (addons / slot / "Recommendations.lua").read_text(encoding="utf-8") == STUB
+        assert (
+            (addons / slot / f"{slot}.toc")
+            .read_text(encoding="utf-8")
+            .startswith("## Interface: 16001\n")
+        )
     assert set(shortcuts.made) == set(
         [
             Shortcut(places.startup / "AzerothQuant Brain.lnk", brain),
@@ -180,7 +180,7 @@ def test_installing_over_an_addon_keeps_its_recommendations_and_drops_files_it_n
 ):
     beta = _game(tmp_path, "_classic_beta_", Era.BETA)
     addons = beta.path / "Interface" / "AddOns"
-    for folder in ("AzerothQuant", "AzerothQuant_Data"):
+    for folder in ("AzerothQuant", *DATA_SLOTS, "AzerothQuant_Data"):
         (addons / folder).mkdir()
         (addons / folder / "Recommendations.lua").write_text("-- written by the Brain\n")
     (addons / "AzerothQuant" / "Gone.lua").write_text("-- dropped since\n")
@@ -195,9 +195,11 @@ def test_installing_over_an_addon_keeps_its_recommendations_and_drops_files_it_n
         make_shortcut=FakeShortcuts(),
     )
 
-    for folder in ("AzerothQuant", "AzerothQuant_Data"):
+    for folder in ("AzerothQuant", *DATA_SLOTS):
         assert (addons / folder / "Recommendations.lua").read_text() == "-- written by the Brain\n"
     assert not (addons / "AzerothQuant" / "Gone.lua").exists()
+    # The one Data addon before the slots (ADR-0030).
+    assert not (addons / "AzerothQuant_Data").exists()
     assert (addons / "AzerothQuant" / "Scan.lua").exists()
 
 
@@ -342,14 +344,15 @@ def test_uninstall_takes_off_the_brain_its_shortcuts_and_both_addons_but_keeps_t
 ):
     shortcuts = FakeShortcuts()
     places, beta = _set_up(tmp_path, shortcuts)
+    addons = beta.path / "Interface" / "AddOns"
+    (addons / "AzerothQuant_Data").mkdir()  # left by a Brain from before ADR-0030
 
     assert uninstall(places) == []
 
     assert not any(s.link.exists() for s in shortcuts.made)
     assert not places.exe.exists()
-    addons = beta.path / "Interface" / "AddOns"
-    assert not (addons / "AzerothQuant").exists()
-    assert not (addons / "AzerothQuant_Data").exists()
+    for folder in ("AzerothQuant", *DATA_SLOTS, "AzerothQuant_Data"):
+        assert not (addons / folder).exists()
     assert (places.app_dir / "history.sqlite").read_bytes() == b"the guildie's data"
     assert (places.app_dir / "config.toml").exists()
 

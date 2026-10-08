@@ -35,14 +35,11 @@ end
 -- rewritten Recommendations.lua: a guess, since the Addon can't see that file change.
 -- Tune it by the "Import took Xs" lines `brain watch` logs, plus its 3 s
 -- settle time (#71). A cold pass on the Beta took 59 s (2026-09-29, after #90's Beta
--- Prior): that plus the settle plus a margin. Too early costs more since #106: a Load
--- clicked before the Brain is done locks in the stale copy until the next reload.
+-- Prior): that plus the settle plus a margin. Since ADR-0030 it only times Reload for
+-- when the Data slots are missing (LoadTries.lua times the tries), and the clock
+-- BRAIN_BEHIND_AFTER runs on.
 Nudge.RELOAD_READY_AFTER = 70
--- By the button that pulses: Load, or Reload when the Data addon is missing (#106).
-Nudge.READY_LINES = {
-  Load = "The Brain should be done: Load to see the new Scan.",
-  Reload = "The Brain should be done: Reload to see the new Scan.",
-}
+Nudge.READY_LINE = "The Brain should be done: Reload to see the new Scan."
 
 -- Called at PLAYER_LOGOUT (which a /reload fires too), as SavedVariables is written:
 -- stamps every Scan saved for the first time with savedAt = now. One saved before keeps
@@ -75,11 +72,11 @@ end
 
 -- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
 -- in chat and asks after the Brain app. Otherwise, if any Scans are waiting, waits
--- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the button's pulse and
--- returns which button that is: "Load", "Reload", or nil for no chat line: Load was
--- already clicked, or the Recommendation frame is open and its banner says it, #161)
--- and says so in chat once (#71, #106). "The Brain should be done" would be a false
--- promise when it's behind, so it's one or the other. `after` and `say` are C_Timer.After
+-- RELOAD_READY_AFTER seconds, then calls `ready` (which starts Reload's pulse and returns
+-- whether chat should say so: not while the Data slots are tried (ADR-0030), nor while
+-- the Recommendation frame is open and its banner says it, #161) and says so once (#71).
+-- "The Brain should be done" would be a false promise when it's behind, so it's one or
+-- the other. `after` and `say` are C_Timer.After
 -- and the chat line. While the Brain is catchingUp (Nudge.catchingUp), it does neither:
 -- the Scans wait behind its pull, and atLogin already said so. Returns whether the Brain
 -- is behind.
@@ -95,9 +92,8 @@ function Nudge.afterLoad(scans, now, after, ready, say, catchingUp)
   end
   if #scans > 0 then
     after(Nudge.RELOAD_READY_AFTER, function()
-      local button = ready()
-      if button then
-        say(Nudge.READY_LINES[button])
+      if ready() then
+        say(Nudge.READY_LINE)
       end
     end)
   end

@@ -3,9 +3,9 @@
 The Brain writes it into the Addon's folder in each install, never into
 SavedVariables, since the client overwrites SavedVariables on every logout
 (ADR-0001). The client reads it on login or `/reload`. It writes the same file into
-AzerothQuant_Data too, a LoadOnDemand addon the Brain creates, whose files the client
-reads when the Addon's Load button loads it, so a new import needs no second reload
-(ADR-0021).
+three Data slots too, LoadOnDemand addons the Brain creates, whose files the client
+reads when the Addon loads one, once a session. The Addon tries them in turn after a
+reload, so a new import needs no second reload (ADR-0030).
 
 It holds, per Market, when the latest imported Scan was requested.
 The Addon then deletes every stored Scan in that Market requested at or before
@@ -110,10 +110,12 @@ _HEADER = (
 )
 
 
-DATA_ADDON = "AzerothQuant_Data"
+DATA_SLOTS = ("AzerothQuant_Data1", "AzerothQuant_Data2", "AzerothQuant_Data3")
+# The one Data addon before ADR-0030's slots: setup and uninstall remove it.
+OLD_DATA_ADDON = "AzerothQuant_Data"
 _DATA_TOC = (
-    "## Title: AzerothQuant Data\n"
-    "## Notes: The Brain's latest Recommendations, loaded by the Addon's Load button."
+    "## Title: AzerothQuant Data {n}\n"
+    "## Notes: The Brain's latest Recommendations, loaded by the Addon after a reload."
     " Written by the Brain; edits are overwritten.\n"
     "## LoadOnDemand: 1\n"
     "## Dependencies: AzerothQuant\n"
@@ -126,8 +128,12 @@ def addon_folder(install: Install) -> Path:
     return install.path / "Interface" / "AddOns" / "AzerothQuant"
 
 
-def data_addon_folder(install: Install) -> Path:
-    return install.path / "Interface" / "AddOns" / DATA_ADDON
+def data_slot_folders(install: Install) -> list[Path]:
+    return [install.path / "Interface" / "AddOns" / slot for slot in DATA_SLOTS]
+
+
+def old_data_addon_folder(install: Install) -> Path:
+    return install.path / "Interface" / "AddOns" / OLD_DATA_ADDON
 
 
 def render(
@@ -397,35 +403,39 @@ def write_recommendations(
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.
     _write_atomically(path, text)
-    _write_atomically(_write_data_toc(install) / FILE_NAME, text)
+    for data in _write_data_tocs(install):
+        _write_atomically(data / FILE_NAME, text)
     return path
 
 
-def create_data_addon(install: Install) -> None:
-    """Create the install's Data addon from its Addon, keeping any Recommendations it already
-    has. Setup does this up front (#115), so the game finds it at its first start rather
-    than only after a restart once the Brain has run."""
-    data = _write_data_toc(install)
-    if not (data / FILE_NAME).exists():
-        stub = (addon_folder(install) / FILE_NAME).read_text(encoding="utf-8")
-        _write_atomically(data / FILE_NAME, stub)
+def create_data_slots(install: Install) -> None:
+    """Create the install's Data slots from its Addon, keeping any Recommendations they
+    already have. Setup does this up front (#115), so the game finds them at its first
+    start rather than only after a restart once the Brain has run."""
+    stub = (addon_folder(install) / FILE_NAME).read_text(encoding="utf-8")
+    for data in _write_data_tocs(install):
+        if not (data / FILE_NAME).exists():
+            _write_atomically(data / FILE_NAME, stub)
 
 
-def _write_data_toc(install: Install) -> Path:
-    """Make the install's Data addon folder with its TOC, and return the folder."""
-    data = data_addon_folder(install)
-    data.mkdir(exist_ok=True)
-    _write_atomically(data / f"{DATA_ADDON}.toc", _data_toc(addon_folder(install)))
-    return data
+def _write_data_tocs(install: Install) -> list[Path]:
+    """Make the install's Data slot folders with their TOCs, and return the folders."""
+    interface = _interface_line(addon_folder(install))
+    folders = data_slot_folders(install)
+    # Numbered titles, so the AddOns list doesn't show three identical rows.
+    for n, data in enumerate(folders, start=1):
+        data.mkdir(exist_ok=True)
+        _write_atomically(data / f"{data.name}.toc", interface + _DATA_TOC.format(n=n))
+    return folders
 
 
-def _data_toc(addon: Path) -> str:
-    """The Data addon's TOC, with the Addon's Interface line so the client doesn't list it
-    as out of date whenever the Addon's is current."""
+def _interface_line(addon: Path) -> str:
+    """The Addon's Interface line, for a Data slot's TOC, so the client doesn't list the
+    slot as out of date whenever the Addon is current."""
     toc = addon / "AzerothQuant.toc"
     lines = toc.read_text(encoding="utf-8").splitlines() if toc.is_file() else []
     interface = [line + "\n" for line in lines if line.startswith("## Interface:")]
-    return "".join(interface[:1]) + _DATA_TOC
+    return "".join(interface[:1])
 
 
 def _write_atomically(path: Path, text: str) -> None:

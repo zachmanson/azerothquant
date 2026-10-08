@@ -24,9 +24,9 @@ That also installed the addon, so you don't need CurseForge or anything else. Th
 2. Go to an auctioneer and open the Auction House.
 3. Click **Scan** (just above the top right corner of the Auction House window). Keep the Auction House open until chat says `Scan #... saved`. It takes a minute or two. If you close it early, nothing is saved, and you just scan again.
 4. The AzerothQuant window opens next to the Auction House. Click its **Reload** button. Your screen reloads.
-5. Wait about a minute. The button changes to **Load** and starts to glow. Click it.
+5. Wait about a minute and keep playing. The table fills in by itself.
 
-Your table is now filled in. That's the loop from now on: **Scan, Reload, wait, Load.**
+That's the loop from now on: **Scan, Reload, wait.**
 
 You can scan once every 15 minutes. The Scan button shows a countdown until the next one.
 
@@ -58,7 +58,9 @@ Some handy things:
 
 ## 4. When something looks wrong
 
-**The table says "No Recommendations yet".** Do a Scan, click Reload, wait a minute, click Load.
+**The table says "No Recommendations yet".** Do a Scan, click Reload, wait a minute.
+
+**The window says "The Brain took longer than usual".** Click **Reload** and wait another minute.
 
 **Chat says "Your Scan from X min ago hasn't reached the Brain. Is AzerothQuant Brain running?"** The Brain isn't running. Open the Start menu, click **AzerothQuant Brain**, then Reload in game.
 
