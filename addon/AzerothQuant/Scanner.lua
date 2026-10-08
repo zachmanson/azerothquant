@@ -25,6 +25,7 @@ local Nudge = ns.Nudge
 local Chat = ns.Chat
 local DataAddon = ns.DataAddon
 local LoadTries = ns.LoadTries
+local Tips = ns.Tips
 local AH = C_AuctionHouse
 
 -- The throttle is silent (spike #1): a re-scan inside ~15 min gets no response
@@ -287,6 +288,14 @@ local function createButton()
   button:SetSize(110, 22)
   button:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -25, 2)
   button:SetScript("OnClick", requestScan)
+  -- Disabled while Scanning or cooling down, when the tip matters most.
+  button:SetMotionScriptsWhileDisabled(true)
+  button:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(Tips.STEPS.scan, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  button:SetScript("OnLeave", GameTooltip_Hide)
   pulse = addPulse(button)
 end
 

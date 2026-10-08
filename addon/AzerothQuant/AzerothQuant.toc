@@ -27,6 +27,7 @@ Freshness.lua
 Nudge.lua
 LoadTries.lua
 NextStep.lua
+Tips.lua
 DisenchantGroup.lua
 BoughtMarks.lua
 RecommendationTable.lua

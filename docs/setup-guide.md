@@ -21,9 +21,9 @@ That also installed the addon, so you don't need CurseForge or anything else. Th
 ## 2. Your first scan
 
 1. Start WoW. If the addon list on the character screen shows AzerothQuant as out of date, tick **Load out of date AddOns**.
-2. Go to an auctioneer and open the Auction House.
-3. Click **Scan** (just above the top right corner of the Auction House window). Keep the Auction House open until chat says `Scan #... saved`. It takes a minute or two. If you close it early, nothing is saved, and you just scan again.
-4. The AzerothQuant window opens next to the Auction House. Click its **Reload** button. Your screen reloads.
+2. Go to an auctioneer and open the Auction House. The AzerothQuant window opens next to it. The strip under its tabs always says the next step, with the button for it.
+3. Click **Scan** in that strip (or the one just above the top right corner of the Auction House window). Keep the Auction House open until the strip says the Scan is saved. It takes a minute or two. If you close it early, nothing is saved, and you just scan again.
+4. The strip's button now says **Reload**. Click it. Your screen reloads.
 5. Wait about a minute and keep playing. The table fills in by itself.
 
 That's the loop from now on: **Scan, Reload, wait.**
@@ -36,7 +36,7 @@ The first table may be short. It gets better the more you (and the guild, if you
 
 The window opens by itself when you visit the Auction House. Anywhere else, type `/aq recs` to open or close it.
 
-Each tab is a list:
+Each tab along the top is a list:
 
 - **Holdings**: what you already own, in bags and bank on all your characters, and what to do with each: Sell (and at what price), Vendor, or Hold.
 - **Shopping List**: things on the Auction House that are cheap enough to buy and resell (or vendor) for a profit. **Max price** is the most to pay, **Post at** is what to sell it for.
@@ -47,11 +47,13 @@ Each tab is a list:
 
 Some handy things:
 
+- **Hover** over any tab, column name, button or box for a short explanation of what it means.
 - **Hover** over a row: the panel on the right says what to do with it and why.
 - **Click** a row to keep it in that panel. On a Sell row, the panel's **Post** button then posts it at the right price. Each click posts once.
 - **Search** (in the same panel) looks up the selected item on the Auction House.
 - **Right-click** a row on a buy list once you've bought it. It greys out so you don't buy it twice.
-- **Budget** at the top: type the most gold you want to spend on one buy. Leave it blank to use all your gold.
+- **Budget (g)**, under the strip: type the most gold you want to spend on one buy, then press Enter. Leave it blank to use all your gold.
+- **Days to Sell**, next to it: the most days you'll wait for something you buy to sell. Leave it blank for the default.
 - Item tooltips in your bags show a short `AQ:` line with what to do with that item.
 
 **You always do the buying and selling yourself.** The addon never buys anything, and only posts when you click Post. If a price looks off, don't buy. Check the Auction House first.
@@ -62,13 +64,11 @@ Some handy things:
 
 **The window says "The Brain took longer than usual".** Click **Reload** and wait another minute.
 
-**Chat says "Your Scan from X min ago hasn't reached the Brain. Is AzerothQuant Brain running?"** The Brain isn't running. Open the Start menu, click **AzerothQuant Brain**, then Reload in game.
+**The window says "Brain not running"** (chat may say "Your Scan from X min ago hasn't reached the Brain"). The Brain isn't running. Open the Start menu, click **AzerothQuant Brain**, then Reload in game.
 
-**Chat says "AzerothQuant is downloading recent Scans".** With a guild code, the Brain downloads recent scans the first time it runs, and after a long break. It takes a few minutes. Keep playing, then Reload.
+**The window says "Downloading guild Scans".** With a guild code, the Brain downloads recent scans the first time it runs, and after a long break. It takes a few minutes. Keep playing, then Reload.
 
 **Chat says "AzerothQuant needs its Brain app".** The Brain was never set up on this PC. Go back to step 1.
-
-**The button says Reload again instead of Load.** You clicked too early. Reload once more and wait the minute.
 
 **Chat says "Auction House closed before the Scan finished".** Scan again and keep the Auction House open until it says saved.
 

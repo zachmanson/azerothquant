@@ -28,6 +28,7 @@ local BoughtMarks = ns.BoughtMarks
 local CraftChain = ns.CraftChain
 local ColumnLayout = ns.ColumnLayout
 local Money = ns.Money
+local Tips = ns.Tips
 local Scan = ns.Scan
 local Scanner = ns.Scanner
 local Chat = ns.Chat
@@ -121,6 +122,22 @@ local function contentWidth()
 end
 
 local redraw, refreshPost, drawPane
+
+-- A plain hover text (Tips.lua, #163): a gold title when there is one, then the text and
+-- a grey footnote.
+local function showTip(owner, title, text, footnote)
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  if title then
+    GameTooltip:SetText(title)
+    GameTooltip:AddLine(text, 1, 1, 1, true)
+  else
+    GameTooltip:SetText(text, 1, 1, 1, 1, true)
+  end
+  if footnote then
+    GameTooltip:AddLine(footnote, 0.7, 0.7, 0.7, true)
+  end
+  GameTooltip:Show()
+end
 
 local function linkInChat(line)
   local _, link = getItemInfo(line.itemString)
@@ -571,6 +588,13 @@ local function getHeader(k)
     db.recommendationSorts[shown.title] = RecommendationTable.savedSort(shown, sort)
     redraw()
   end)
+  header:HookScript("OnEnter", function(self)
+    local name = shown and shown.columns[self.column]
+    if name then
+      showTip(self, name, Tips.COLUMNS[name] or "", Tips.SORT)
+    end
+  end)
+  header:HookScript("OnLeave", GameTooltip_Hide)
   headers[k] = header
   return header
 end
@@ -802,6 +826,10 @@ local function createTabs()
       db.recommendationTab = title
       selectTab(title)
     end)
+    tab:HookScript("OnEnter", function(self)
+      showTip(self, title, Tips.TABS[title])
+    end)
+    tab:HookScript("OnLeave", GameTooltip_Hide)
     tabs[i] = tab
   end
   frame.Tabs = tabs
@@ -814,24 +842,13 @@ end
 -- startup copy missed it, Scanner.lua tries the Brain's Data slots by itself and the
 -- table redraws when one catches up (ADR-0030). The banner's button does Scan or Reload
 -- by step; /aq reload does the last.
-local SCAN_TIP = "Scan reads every listing on the Auction House. You can Scan once every 15 minutes."
-local RELOAD_TIP = "Reload the UI: saves new Scans for the Brain and loads its latest Recommendations."
-local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
-
 local function reload()
   if Scanner.busy() then
-    Chat.say(BUSY_TIP)
+    Chat.say(Tips.STEPS.busy)
     return
   end
   ReloadUI()
 end
-
-local BUDGET_TIP = "Most gold to spend on each Shopping List option, and on Prediction buys. "
-  .. "Blank for all your gold. Options over it hide now; Reload to re-size the rest."
-
-local DAYS_TIP = "Most days a unit you buy to Sell may take to sell: caps Flips to Sell, "
-  .. "Flips to Craft and to Disenchant, and Buy Unders. Blank for the Sale Horizon, never more than it. "
-  .. "Reload to re-size."
 
 -- A box left of `anchor` for one per-Market setting. Enter saves it (blank clears it);
 -- Escape puts it back. setting: { label, width, tip, hint, parse, text, saved, save },
@@ -860,9 +877,7 @@ local function createSettingBox(anchor, setting)
     self:ClearFocus()
   end)
   box:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText(setting.tip, 1, 1, 1, 1, true)
-    GameTooltip:Show()
+    showTip(self, setting.label, setting.tip)
   end)
   box:SetScript("OnLeave", GameTooltip_Hide)
   -- Shows the saved value, unfocused. Called from the frame's OnShow: the box's own
@@ -879,7 +894,7 @@ local function createBudgetBox(anchor)
   frame.budget = createSettingBox(anchor, {
     label = "Budget (g)",
     width = 60,
-    tip = BUDGET_TIP,
+    tip = Tips.BUDGET,
     hint = "Budget: type gold, like 250 or 12.5, or leave it blank for all your gold.",
     parse = Money.parseGold,
     text = Money.goldText,
@@ -896,7 +911,7 @@ local function createDaysToSellBox()
   frame.daysToSell = createSettingBox(frame.budget.label, {
     label = "Days to Sell",
     width = 36,
-    tip = DAYS_TIP,
+    tip = Tips.DAYS_TO_SELL,
     hint = "Days to Sell: type days over 0, like 2 or 0.5, or leave it blank for the Sale Horizon.",
     parse = RecommendationTable.parseDays,
     text = RecommendationTable.daysText,
@@ -908,7 +923,7 @@ local function createDaysToSellBox()
   })
 end
 
--- What the banner's button does, by NextStep.of's action, and its tooltip.
+-- What the banner's button does, by NextStep.of's action (its tooltip is in Tips.STEPS).
 local STEP_CLICKS = {
   scan = function()
     Scanner.requestScan()
@@ -917,7 +932,6 @@ local STEP_CLICKS = {
     reload()
   end,
 }
-local STEP_TIPS = { scan = SCAN_TIP, busy = BUSY_TIP, reload = RELOAD_TIP }
 local GOLD, ORANGE = { 1, 0.82, 0 }, { 1, 0.6, 0.23 }
 local CHECK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:0|t "
 
@@ -964,9 +978,7 @@ local function createBanner()
   -- Disabled buttons get no OnEnter unless told to, and the tooltip must say why it's off.
   banner.button:SetMotionScriptsWhileDisabled(true)
   banner.button:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText(STEP_TIPS[self.action] or "", 1, 1, 1, 1, true)
-    GameTooltip:Show()
+    showTip(self, nil, Tips.STEPS[self.action] or "")
   end)
   banner.button:SetScript("OnLeave", GameTooltip_Hide)
   -- Pulses when the step is one to take now: a Scan can run, a Scan is saved, or the
@@ -1256,11 +1268,8 @@ local function createPostButton()
   postButton:SetScript("OnClick", onPostClick)
   postButton:SetMotionScriptsWhileDisabled(true)
   postButton:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     local failed = postError and selectedRow and postError.id == selectedRow.id and postError.text
-    local tip = failed or (postState and postState.reason) or "Post the selected row at its Post at."
-    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
-    GameTooltip:Show()
+    showTip(self, nil, failed or (postState and postState.reason) or Tips.POST)
   end)
   postButton:SetScript("OnLeave", GameTooltip_Hide)
   postButton.undercut = paneButtonLine(postButton, "GameFontNormalSmall")
@@ -1273,10 +1282,7 @@ local function createPostButton()
   searchButton:SetScript("OnClick", onSearchClick)
   searchButton:SetMotionScriptsWhileDisabled(true)
   searchButton:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    local tip = searchState and searchState.reason or "Search the Auction House for the selected row's item."
-    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
-    GameTooltip:Show()
+    showTip(self, nil, searchState and searchState.reason or Tips.SEARCH)
   end)
   searchButton:SetScript("OnLeave", GameTooltip_Hide)
   searchButton.live = paneButtonLine(searchButton, "GameFontHighlightSmall")
@@ -1330,6 +1336,10 @@ local function createFrame()
     saveSize()
     savePosition()
   end)
+  grip:SetScript("OnEnter", function(self)
+    showTip(self, nil, Tips.RESIZE)
+  end)
+  grip:SetScript("OnLeave", GameTooltip_Hide)
   frame:Hide()
   tinsert(UISpecialFrames, "AzerothQuantRecommendationFrame") -- Escape closes it
   frame:SetPortraitToAsset(PORTRAIT)
