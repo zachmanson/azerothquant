@@ -1,6 +1,6 @@
 -- Which of a Recommendation Table section's columns fit across the table, and how wide
--- each is (#136). The frame is resizable, so the width changes. Every column but the last
--- has a set width; the last (the Note, mostly) gets what's left.
+-- each is (#136). The frame is resizable, so the width changes. Every column but the Item
+-- has a set width; the Item gets what's left (#160).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for the
 -- namespace fallback.
@@ -46,16 +46,16 @@ local function widthOf(section, name)
   return tab and tab[name] or WIDTHS[name]
 end
 
--- The least the last column may get before a column makes way for it.
-local MIN_NOTE_WIDTH = 150
+-- The least the Item may get before a column makes way for it.
+local MIN_ITEM_WIDTH = 150
 
--- What makes way first when the table is narrow. Every value is still in the row's tooltip.
-local HIDE_ORDER = { "Beta", "Cost", "ROI" }
+-- What makes way first when the table is narrow. Every value is still in the side pane.
+local HIDE_ORDER = { "Beta", "Cost", "ROI", "Per click", "Per day" }
 
 -- The section's columns that fit in width, in order, as { column (its place in
--- section.columns), width }. Columns in HIDE_ORDER go, one at a time, until the last
--- column gets its least (a Note's MIN_NOTE_WIDTH, any other its own width). Once they're
--- all gone the last column gets what's left, however little.
+-- section.columns), width }. Columns in HIDE_ORDER go, one at a time, until the Item (the
+-- first column) gets MIN_ITEM_WIDTH. Once they're all gone the Item gets what's left,
+-- however little.
 function ColumnLayout.fit(section, width)
   local columns = section.columns
   local hidden = {}
@@ -63,26 +63,41 @@ function ColumnLayout.fit(section, width)
   local function place()
     layout, left = {}, width - ColumnLayout.ICON_WIDTH
     for c, name in ipairs(columns) do
-      if not hidden[name] or c == #columns then
+      if not hidden[name] then
         layout[#layout + 1] = { column = c, width = widthOf(section, name) }
       end
     end
-    for i = 1, #layout - 1 do
+    for i = 2, #layout do
       left = left - layout[i].width
     end
   end
   place()
-  local last = columns[#columns]
-  local least = last == "Note" and MIN_NOTE_WIDTH or widthOf(section, last)
   for _, name in ipairs(HIDE_ORDER) do
-    if left >= least then
+    if left >= MIN_ITEM_WIDTH then
       break
     end
     hidden[name] = true
     place()
   end
-  layout[#layout].width = left
+  layout[1].width = left
   return layout
+end
+
+-- The row's values in the columns layout left out, as { name, text } in column order, for
+-- the side pane. Blank cells are skipped.
+function ColumnLayout.hiddenValues(section, layout, row)
+  local onShow = {}
+  for _, placed in ipairs(layout) do
+    onShow[placed.column] = true
+  end
+  local values = {}
+  for c, name in ipairs(section.columns) do
+    local text = row.cells[c]
+    if not onShow[c] and text and text ~= "" then
+      values[#values + 1] = { name = name, text = text }
+    end
+  end
+  return values
 end
 
 ns.ColumnLayout = ColumnLayout

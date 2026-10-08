@@ -6,11 +6,14 @@
 -- last picked and each Market's Budget and Days to Sell are saved in AzerothQuantDB;
 -- open/closed is not.
 --
--- Hover shows a tooltip, a click selects the row and shift-click links the item
--- (ADR-0016). With the AH open, the Post button posts the selected Sell row (#81): one
--- protected call per click, made only in onPostClick (spec/protected_calls_spec.lua). On a
--- Shopping List, Prediction buys or single-item Buy Under row not yet in the bags, the Search button takes its slot (#39): a click
--- searches the AH for the row's Item Key and a line under it shows the cheapest Listing.
+-- The side pane on the right (#160) shows the row under the mouse, or else the selected
+-- (pinned) row: its Action, Note, what to do, its details and any values the table was too
+-- narrow to show. A click selects the row and shift-click links the item (ADR-0016). With
+-- the AH open, the pane's Post button posts the selected Sell row (#81): one protected call
+-- per click, made only in onPostClick (spec/protected_calls_spec.lua). On a Shopping List,
+-- Prediction buys or single-item Buy Under row not yet in the bags, the Search button takes
+-- its slot (#39): a click searches the AH for the row's Item Key and a line under it shows
+-- the cheapest Listing.
 -- Selecting a Craft row opens its Craft Chain panel on the left (#77). A right-click on a
 -- buy-side row toggles its Bought mark (#97), saved per Market in AzerothQuantDB.bought:
 -- it greys out and the Budget fold runs on the gold left.
@@ -37,8 +40,9 @@ local TooltipLines = ns.TooltipLines
 -- column headers). The Classic-era names (CharacterFrameTabButtonTemplate,
 -- WhoFrameColumnHeaderTemplate) are missing there.
 -- The frame is resizable from its bottom-right corner, and its size is saved (#136). It
--- opens at WIDTH, which fits beside the AH at 1920 px. MIN_WIDTH still fits the Shopping
--- List once ColumnLayout has hidden Beta, Cost and ROI.
+-- opens at WIDTH, which fits beside the AH at 1920 px. At MIN_WIDTH the Shopping List's rows
+-- get 690 beside the side pane, which ColumnLayout fits by hiding Beta, Cost, ROI and Per
+-- click.
 local WIDTH, HEIGHT = 1100, 540
 local MIN_WIDTH, MIN_HEIGHT = 1000, 400
 local PORTRAIT = "Interface\\Icons\\INV_Misc_Coin_01"
@@ -49,8 +53,10 @@ local ICON_GAP = ColumnLayout.ICON_WIDTH - ICON_SIZE
 local HEADER_HEIGHT = 24
 local SCROLL_LEFT = 6
 local SCROLLBAR_WIDTH = 30
--- The inset spans x 4 .. width-6; rows sit inside it, left of the scroll bar.
-local CONTENT_INSET = 10 + SCROLL_LEFT + SCROLLBAR_WIDTH
+-- The side pane, at the inset's right edge (#160).
+local PANE_WIDTH, PANE_GAP = 260, 4
+-- The inset spans x 4 .. width-6; rows sit inside it, left of the scroll bar and the pane.
+local CONTENT_INSET = 10 + SCROLL_LEFT + SCROLLBAR_WIDTH + PANE_GAP + PANE_WIDTH
 local MAX_COLUMNS = 12
 local STRIPE_ALPHA = 0.04
 
@@ -66,9 +72,13 @@ local redrawQueued = false
 -- The selected row's id (RecommendationTable.find). It survives a redraw while a row with
 -- the same Item Key and action is on show, and clears otherwise.
 local selectedId
--- That row as the last redraw built it, from whichever tab has it, and that tab's title.
+-- That row as the last redraw built it, from whichever tab has it, that tab's title, and
+-- the section (as built) it's in.
 local selectedRow
 local selectedSection
+local selectedRowSection
+local pane -- the side pane (#160)
+local hovered -- the line under the mouse, which the pane shows over the selected row
 
 -- C_Item on newer clients (the Beta has no global GetItemInfo), the old globals otherwise.
 local getItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
@@ -100,47 +110,7 @@ local function contentWidth()
   return frame:GetWidth() - CONTENT_INSET
 end
 
--- The item, the row's tooltip lines, any cell text clipped by its column, and the columns
--- too narrow a frame hid (#136), by name. A row for no one item (a Disenchant source
--- group's Buy Under, #88) is titled by its first cell.
-local function showTooltip(line)
-  GameTooltip:SetOwner(line, "ANCHOR_RIGHT")
-  if line.itemString then
-    GameTooltip:SetHyperlink(line.itemString)
-  else
-    GameTooltip:SetText(line.cells[1]:GetText())
-  end
-  -- The hyperlink's item-tooltip hook (Tooltip.lua) already added the holder and
-  -- reagent lines this row also has, so skip those (#94).
-  local shown = {}
-  for i = 1, GameTooltip:NumLines() do
-    local left = _G["GameTooltipTextLeft" .. i]
-    local text = left and left:GetText()
-    if text then
-      shown[text] = true
-    end
-  end
-  for _, text in ipairs(line.tooltip) do
-    if not shown[text] then
-      GameTooltip:AddLine(text, 1, 1, 1, true)
-      shown[text] = true
-    end
-  end
-  -- The first cell is the item name, which the hyperlink already shows in full.
-  for c = 2, MAX_COLUMNS do
-    local cell = line.cells[c]
-    local text = cell:IsShown() and cell:GetText()
-    if text and not shown[text] and cell:IsTruncated() then
-      GameTooltip:AddLine(text, 1, 1, 1, true)
-    end
-  end
-  for _, hidden in ipairs(line.hidden or {}) do
-    GameTooltip:AddDoubleLine(hidden.name, hidden.text, 1, 0.82, 0, 1, 1, 1)
-  end
-  GameTooltip:Show()
-end
-
-local redraw, refreshPost
+local redraw, refreshPost, drawPane
 
 local function linkInChat(line)
   local _, link = getItemInfo(line.itemString)
@@ -170,12 +140,19 @@ local function getLine(i)
     cell:SetWordWrap(false)
     line.cells[c] = cell
   end
+  -- The pane follows the mouse, and goes back to the selected row once it leaves the rows.
   line:SetScript("OnEnter", function(self)
-    if self.tooltip then
-      showTooltip(self)
+    if self.row then
+      hovered = self
+      drawPane()
     end
   end)
-  line:SetScript("OnLeave", GameTooltip_Hide)
+  line:SetScript("OnLeave", function(self)
+    if hovered == self then
+      hovered = nil
+      drawPane()
+    end
+  end)
   line:SetScript("OnClick", function(self, button)
     if button == "RightButton" then
       if self.markable then
@@ -196,16 +173,17 @@ local function getLine(i)
 end
 
 -- Lays out one line: for an item, its icon and then its cells in the columns of layout
--- (ColumnLayout.fit over columns, the section's column names), striped on every other
--- row. Otherwise one text spans the line (the empty-tab line, "N more"). marks, for a row
--- of a buy-side tab, are the Market's Bought marks.
-local function drawLine(i, texts, layout, font, item, justify, marks, columns)
+-- (ColumnLayout.fit over section), striped on every other row. Otherwise one text spans
+-- the line (the empty-tab line, "N more"). marks, for a row of a buy-side tab, are the
+-- Market's Bought marks.
+local function drawLine(i, texts, layout, font, item, justify, marks, section)
   local line = getLine(i)
   line:ClearAllPoints()
   line:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * LINE_HEIGHT)
   line:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -(i - 1) * LINE_HEIGHT)
   line.itemString = item and item.itemString
-  line.tooltip = item and item.tooltip
+  line.row = item
+  line.layout, line.section = layout, section
   line.id = item and item.id
   line.bought = item and item.bought
   line.marks = marks
@@ -254,20 +232,113 @@ local function drawLine(i, texts, layout, font, item, justify, marks, columns)
       cell:Hide()
     end
   end
-  -- What the layout left out, for the tooltip.
-  line.hidden = {}
-  if layout then
-    local onShow = {}
-    for _, p in ipairs(layout) do
-      onShow[p.column] = true
+  line:Show()
+end
+
+-- The side pane (#160): the row under the mouse, else the selected row. Its item hovers to
+-- the game's item tooltip and shift-clicks into chat. Post and Search sit at its bottom, in
+-- pane.actions, and act on the selected row only, so they hide while it shows another.
+local EMPTY_PANE = "|cffb0b0b0Hover a row to see more about it here.|r"
+
+local function createPane()
+  pane = CreateFrame("Frame", nil, frame.Inset)
+  pane:SetPoint("TOPRIGHT", frame.Inset, "TOPRIGHT", -4, -4)
+  pane:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -4, 4)
+  pane:SetWidth(PANE_WIDTH)
+  local background = pane:CreateTexture(nil, "BACKGROUND")
+  background:SetAllPoints()
+  background:SetColorTexture(0, 0, 0, 0.25)
+  local edge = pane:CreateTexture(nil, "BORDER")
+  edge:SetPoint("TOPLEFT")
+  edge:SetPoint("BOTTOMLEFT")
+  edge:SetWidth(1)
+  edge:SetColorTexture(1, 0.82, 0, 0.25)
+
+  local item = CreateFrame("Button", nil, pane)
+  item:SetPoint("TOPLEFT", 10, -10)
+  item:SetPoint("RIGHT", -10, 0)
+  item:SetHeight(32)
+  item.icon = item:CreateTexture(nil, "ARTWORK")
+  item.icon:SetSize(28, 28)
+  item.icon:SetPoint("LEFT")
+  item.name = item:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  item.name:SetPoint("LEFT", item.icon, "RIGHT", 6, 0)
+  item.name:SetPoint("RIGHT")
+  item.name:SetJustifyH("LEFT")
+  item.name:SetMaxLines(2)
+  item:SetScript("OnEnter", function(self)
+    if self.itemString then
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetHyperlink(self.itemString)
+      GameTooltip:Show()
     end
-    for c, name in ipairs(columns) do
-      if not onShow[c] and texts[c] and texts[c] ~= "" then
-        line.hidden[#line.hidden + 1] = { name = name, text = texts[c] }
+  end)
+  item:SetScript("OnLeave", GameTooltip_Hide)
+  item:SetScript("OnClick", function(self)
+    if self.itemString and IsModifiedClick("CHATLINK") then
+      linkInChat(self)
+    end
+  end)
+  pane.item = item
+
+  -- Post or Search and the line under it.
+  pane.actions = CreateFrame("Frame", nil, pane)
+  pane.actions:SetPoint("BOTTOMLEFT", 10, 4)
+  pane.actions:SetPoint("BOTTOMRIGHT", -10, 4)
+  pane.actions:SetHeight(46)
+
+  pane.body = pane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  pane.body:SetPoint("TOPLEFT", pane, "TOPLEFT", 10, -50)
+  pane.body:SetPoint("BOTTOMRIGHT", pane.actions, "TOPRIGHT", 0, 6)
+  pane.body:SetJustifyH("LEFT")
+  pane.body:SetJustifyV("TOP")
+  pane.body:SetSpacing(2)
+end
+
+-- The row the pane shows, the section and layout it's drawn in (the selected row's may be
+-- on another tab), and its line when one is on show, for the cells clipped there.
+local function paneRow()
+  if hovered and hovered:IsShown() and hovered.row then
+    return hovered.row, hovered.section, hovered.layout, hovered
+  end
+  if not selectedRow then
+    return nil
+  end
+  local layout = ColumnLayout.fit(selectedRowSection, contentWidth())
+  for _, line in ipairs(lines) do
+    if line:IsShown() and line.id == selectedRow.id then
+      return selectedRow, selectedRowSection, layout, line
+    end
+  end
+  return selectedRow, selectedRowSection, layout, nil
+end
+
+function drawPane()
+  if not pane then
+    return
+  end
+  local row, section, layout, line = paneRow()
+  pane.item:SetShown(row ~= nil)
+  pane.actions:SetShown(row ~= nil and row == selectedRow)
+  if not row then
+    pane.body:SetText(EMPTY_PANE)
+    return
+  end
+  pane.item.itemString = row.itemString
+  pane.item.icon:SetTexture(row.itemString and select(5, getItemInfoInstant(row.itemString)) or nil)
+  pane.item.name:SetText(row.name)
+  -- What the table hid (#136), then what it clipped; the first cell is the item, named in
+  -- full above.
+  local values = ColumnLayout.hiddenValues(section, layout, row)
+  if line then
+    for k = 2, #layout do
+      local cell = line.cells[k]
+      if cell:IsShown() and cell:IsTruncated() then
+        values[#values + 1] = { name = section.columns[layout[k].column], text = cell:GetText() }
       end
     end
   end
-  line:Show()
+  pane.body:SetText(RecommendationTable.paneText(row, values))
 end
 
 -- The Craft Chain panel (#77): the selected Craft row's chain as a top-down tree, docked to
@@ -563,9 +634,9 @@ function redraw()
     GetMoney()
   )
   local n = 0
-  local function add(texts, layout, font, item, justify, rowMarks, columns)
+  local function add(texts, layout, font, item, justify, rowMarks, section)
     n = n + 1
-    drawLine(n, texts, layout, font, item, justify, rowMarks, columns)
+    drawLine(n, texts, layout, font, item, justify, rowMarks, section)
   end
 
   drawTabs(view)
@@ -592,7 +663,7 @@ function redraw()
         end
         for _, row in ipairs(section.rows) do
           local font = row.bought and "GameFontDisable" or "GameFontHighlight"
-          add(row.cells, layout, font, row, nil, section.markable and marks or nil, section.columns)
+          add(row.cells, layout, font, row, nil, section.markable and marks or nil, section)
         end
         if section.more then
           add({ section.more }, nil, "GameFontDisable")
@@ -617,15 +688,17 @@ function redraw()
   if not kept then
     selectedId = nil
   end
-  selectedRow, selectedSection = nil, nil
+  selectedRow, selectedSection, selectedRowSection = nil, nil, nil
   for _, section in ipairs(view.sections or {}) do
     if not selectedRow then
       selectedRow = selectedId and RecommendationTable.find(section, selectedId)
       selectedSection = selectedRow and section.title
+      selectedRowSection = selectedRow and section
     end
   end
   local row = shown and selectedId and RecommendationTable.find(shown, selectedId)
   drawChain(row and row.record.action == "Craft" and row.record or nil)
+  drawPane()
   refreshPost()
 end
 
@@ -1078,11 +1151,25 @@ local function onPostClick(self)
   refreshPost()
 end
 
+-- Post and Search share one slot at the top of the pane's actions, with a line under it.
+local function createPaneButton()
+  local button = CreateFrame("Button", nil, pane.actions, "UIPanelButtonTemplate")
+  button:SetSize(90, 22)
+  button:SetPoint("TOPLEFT")
+  return button
+end
+
+local function paneButtonLine(button, font)
+  local line = button:CreateFontString(nil, "OVERLAY", font)
+  line:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
+  line:SetPoint("RIGHT", pane.actions, "RIGHT")
+  line:SetJustifyH("LEFT")
+  line:SetMaxLines(2)
+  return line
+end
+
 local function createPostButton()
-  postButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  postButton:SetSize(90, 22)
-  -- Hangs under the frame's bottom right, level with the tabs.
-  postButton:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -6, -2)
+  postButton = createPaneButton()
   postButton:SetScript("OnClick", onPostClick)
   postButton:SetMotionScriptsWhileDisabled(true)
   postButton:SetScript("OnEnter", function(self)
@@ -1093,15 +1180,12 @@ local function createPostButton()
     GameTooltip:Show()
   end)
   postButton:SetScript("OnLeave", GameTooltip_Hide)
-  postButton.undercut = postButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  postButton.undercut:SetPoint("TOPRIGHT", postButton, "BOTTOMRIGHT", 0, -4)
+  postButton.undercut = paneButtonLine(postButton, "GameFontNormalSmall")
   postButton.undercut:SetTextColor(1, 0.5, 0.25)
   postButton:Hide()
 
   -- Search takes the same slot on a buy-side row (#39).
-  searchButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  searchButton:SetSize(90, 22)
-  searchButton:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -6, -2)
+  searchButton = createPaneButton()
   searchButton:SetText("Search")
   searchButton:SetScript("OnClick", onSearchClick)
   searchButton:SetMotionScriptsWhileDisabled(true)
@@ -1112,8 +1196,7 @@ local function createPostButton()
     GameTooltip:Show()
   end)
   searchButton:SetScript("OnLeave", GameTooltip_Hide)
-  searchButton.live = searchButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  searchButton.live:SetPoint("TOPRIGHT", searchButton, "BOTTOMRIGHT", 0, -4)
+  searchButton.live = paneButtonLine(searchButton, "GameFontHighlightSmall")
   searchButton:Hide()
 end
 
@@ -1183,17 +1266,19 @@ local function createFrame()
 
   scroll = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", SCROLL_LEFT, -4 - HEADER_HEIGHT - 2)
-  scroll:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -SCROLLBAR_WIDTH, 6)
+  scroll:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -(SCROLLBAR_WIDTH + PANE_GAP + PANE_WIDTH), 6)
   content = CreateFrame("Frame", nil, scroll)
   content:SetSize(contentWidth(), 1)
   scroll:SetScrollChild(content)
 
   createTabs()
+  createPane()
   createPostButton()
 
   -- After the boxes exist (the frame:Hide() above would otherwise fire it first).
   -- A box left focused while hidden would swallow the next Enter meant for chat.
   frame:SetScript("OnHide", function()
+    hovered = nil
     frame.budget:ClearFocus()
     frame.daysToSell:ClearFocus()
   end)

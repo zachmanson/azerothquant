@@ -47,9 +47,9 @@ Each tab is a list:
 
 Some handy things:
 
-- **Hover** over a row to see why.
-- **Click** a row to select it. On a Sell row, the **Post** button then posts it at the right price. Each click posts once.
-- **Search** looks up the selected item on the Auction House.
+- **Hover** over a row: the panel on the right says what to do with it and why.
+- **Click** a row to keep it in that panel. On a Sell row, the panel's **Post** button then posts it at the right price. Each click posts once.
+- **Search** (in the same panel) looks up the selected item on the Auction House.
 - **Right-click** a row on a buy list once you've bought it. It greys out so you don't buy it twice.
 - **Budget** at the top: type the most gold you want to spend on one buy. Leave it blank to use all your gold.
 - Item tooltips in your bags show a short `AQ:` line with what to do with that item.

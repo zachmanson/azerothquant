@@ -1,6 +1,6 @@
 -- Turns one Market's entry in AzerothQuantRecommendations into what the Recommendation
--- Table frame draws: header lines, and per section the cell text, tooltip lines and how
--- many low-value rows were folded away.
+-- Table frame draws: header lines, and per section the cell text, what the side pane says
+-- about each row (#160) and how many low-value rows were folded away.
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. Item names come through
 -- nameOf(itemID), which the glue backs with GetItemInfo.
@@ -319,9 +319,15 @@ local function details(r, nameOf, held, holdersOf)
   return lines
 end
 
--- A row's details, then which Characters hold its Item Key (#38).
-local function tooltip(r, nameOf, held, holdersOf)
-  local lines = details(r, nameOf, held, holdersOf)
+-- A row's details, then which Characters hold its Item Key (#38), leaving out the line
+-- that only repeats its note (the side pane shows the note above them).
+local function paneLines(r, note, nameOf, held, holdersOf)
+  local lines = {}
+  for _, line in ipairs(details(r, nameOf, held, holdersOf)) do
+    if line ~= note then
+      lines[#lines + 1] = line
+    end
+  end
   for _, line in ipairs(RecommendationTable.holderLines(holdersOf[r.itemKey])) do
     lines[#lines + 1] = line
   end
@@ -490,15 +496,6 @@ function RecommendationTable.betaLine(beta, itemKey)
     .. plural(p.saleEvents, "Sale Event") .. rate
 end
 
--- Puts value at place pos of a row's n cells or sort keys, moving the rest along. Keys can
--- hold nils, so the length operator can't be trusted to find the end.
-local function insertAt(list, n, pos, value)
-  for i = n, pos, -1 do
-    list[i + 1] = list[i]
-  end
-  list[pos] = value
-end
-
 -- The place of the column with that name, or nil.
 local function columnAt(columns, name)
   for c, column in ipairs(columns) do
@@ -509,12 +506,57 @@ local function columnAt(columns, name)
   return nil
 end
 
--- Where the Beta column goes in a section's columns: before the Note, else last.
-local function betaPlace(columns)
-  return columnAt(columns, "Note") or #columns + 1
+local BOUGHT_LINE = "Bought: right-click to undo"
+
+-- What the side pane says to do with a row, in plain words (#160), and the Action it heads
+-- the pane with, by tab. A row that can be marked Bought adds the hint to mark it.
+local LATER = "they should sell for more later."
+local BOUGHT_HINT = " Right-click the row once you've bought it."
+
+local function buyUpTo(r)
+  return "Buy up to " .. r.quantity .. " at " .. Money.format(r.price) .. " or less each"
 end
 
-local BOUGHT_LINE = "Bought: right-click to undo"
+-- Where a Flip's units go once bought or crafted: a Flip to Vendor has no Post at.
+local function sellThem(r)
+  return r.postAt and ("post them at " .. Money.format(r.postAt)) or "sell them to any merchant"
+end
+
+local WHAT_TO_DO = {
+  ["Holdings"] = function(r)
+    if r.action == "Sell" then
+      return r.action, "Post " .. r.quantity .. " at " .. Money.format(r.price) .. "."
+    elseif r.action == "Vendor" then
+      return r.action, "Sell " .. r.quantity .. " to any merchant."
+    elseif r.action == "Hold" then
+      return r.action, "Keep them for now: " .. LATER
+    elseif r.action == "Craft" and r.blocked then
+      return r.action, "This can't be crafted yet: see the note."
+    elseif r.action == "Craft" then
+      return r.action, "Craft " .. r.quantity .. " on " .. r.character .. " with the reagents below."
+    elseif r.action == "Disenchant" then
+      return r.action, "Disenchant them on " .. r.character .. "."
+    end
+    return r.action, nil
+  end,
+  ["Shopping List"] = function(r)
+    return "Buy", buyUpTo(r) .. ", then " .. sellThem(r) .. "."
+  end,
+  ["Flips to Craft"] = function(r)
+    return "Craft", "Get the reagents below, craft " .. r.quantity .. " on " .. r.character .. ", then " .. sellThem(r) .. "."
+  end,
+  ["Flips to Disenchant"] = function(r)
+    return "Disenchant", "Buy the items below, disenchant them on " .. r.disenchant.disenchanter
+      .. ", then sell what you get."
+  end,
+  ["Prediction buys"] = function(r)
+    return "Buy", buyUpTo(r) .. ", and keep them: " .. LATER
+  end,
+  ["Buy Under"] = function(r)
+    local units = r.units and (", up to " .. r.units) or ""
+    return "Buy Under", "Buy any you see on the Auction House at " .. Money.format(r.price) .. " or less" .. units .. "."
+  end,
+}
 
 -- What an empty tab says, in place of its rows.
 local NOTHING = {
@@ -554,7 +596,7 @@ function RecommendationTable.sort(section, state)
 end
 
 -- Columns sorted by their text. A first click sorts these A to Z and the rest largest first.
-local TEXT_COLUMNS = { Item = true, Action = true, Note = true, Prediction = true, ["Way out"] = true }
+local TEXT_COLUMNS = { Item = true, Action = true, Prediction = true, ["Way out"] = true }
 
 -- The sort after a click on a column header: the clicked column's first direction, or the
 -- other direction if it's the column already sorted by.
@@ -590,16 +632,18 @@ end
 -- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
 -- beta is the entry's Beta Prior, and adds its column while the Brain writes one (#90).
 -- marks, given for the buy-side tabs only, are the Market's rows marked Bought by id (#97).
+-- The cells and keys functions give a Note last where columns has one: it goes to the side
+-- pane as the row's note (#160), and the Beta column goes last.
 local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta, marks)
   local held = RecommendationTable.heldUnits(rows)
-  local n, place = #columns, betaPlace(columns)
+  local noteAt = columnAt(columns, "Note")
+  columns = { unpack(columns, 1, noteAt and noteAt - 1 or #columns) }
+  local n = #columns
   if beta then
-    columns = { unpack(columns) }
-    insertAt(columns, n, place, "Beta")
+    columns[n + 1] = "Beta"
   end
   -- markable: a right-click toggles a row's Bought mark (#97).
   local out = { title = title, columns = columns, rows = {}, sort = default, markable = marks ~= nil or nil }
-  local noteAt = columnAt(columns, "Note")
   local folded, over = 0, 0
   for _, r in ipairs(rows) do
     -- A Disenchant source group's Buy Under, or its Flip to Disenchant, is for no one item
@@ -622,19 +666,23 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         rowCells[1] = RecommendationTable.BAG .. " " .. name
       end
       local rowKeys = keys(r, name, rowCells)
-      local rowTooltip = tooltip(r, nameOf, held, holdersOf)
+      local note = noteAt and rowCells[noteAt] or nil
+      if noteAt then
+        rowCells[noteAt], rowKeys[noteAt] = nil, nil
+      end
+      local rowDetails = paneLines(r, note, nameOf, held, holdersOf)
       if beta then
         local p = betaPrice(beta, r.itemKey)
-        insertAt(rowCells, n, place, RecommendationTable.betaCell(beta, r.itemKey))
-        insertAt(rowKeys, n, place, p and p.price)
-        rowTooltip[#rowTooltip + 1] = RecommendationTable.betaLine(beta, r.itemKey)
+        rowCells[n + 1] = RecommendationTable.betaCell(beta, r.itemKey)
+        rowKeys[n + 1] = p and p.price
+        rowDetails[#rowDetails + 1] = RecommendationTable.betaLine(beta, r.itemKey)
       end
       if bought then
-        -- The Prediction buys tab has no Note: greyed out is all it shows.
-        if noteAt then
-          rowCells[noteAt] = "Bought"
-        end
-        rowTooltip[#rowTooltip + 1] = BOUGHT_LINE
+        rowDetails[#rowDetails + 1] = BOUGHT_LINE
+      end
+      local action, todo = WHAT_TO_DO[title](r)
+      if todo and marks and not bought then
+        todo = todo .. BOUGHT_HINT
       end
       out.rows[#out.rows + 1] = {
         id = id,
@@ -645,7 +693,13 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         keys = rowKeys,
         worth = (r.price or 0) * (r.quantity or 0),
         order = #out.rows + 1,
-        tooltip = rowTooltip,
+        -- For the side pane: the name without the bag marker, the note (nil when there's
+        -- none) and the lines under it.
+        name = name,
+        note = note ~= "" and note or nil,
+        details = rowDetails,
+        action = action,
+        todo = todo,
       }
     end
   end
@@ -665,6 +719,32 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
   end
   out.more = #more > 0 and table.concat(more, ", ") or nil
   return out
+end
+
+-- The side pane's text for a built row (#160): its Action, its note and what to do, then
+-- values, as { name, text } (the columns the table hid or clipped), ahead of the details,
+-- which can run long.
+local PANE_GOLD, PANE_GREY = "|cffffd100", "|cffb0b0b0"
+
+function RecommendationTable.paneText(row, values)
+  local parts = { PANE_GOLD .. (row.action or "") .. "|r" }
+  if row.note then
+    parts[#parts + 1] = row.note
+  end
+  if row.todo then
+    parts[#parts + 1] = "\n" .. PANE_GREY .. row.todo .. "|r"
+  end
+  local more = {}
+  for _, value in ipairs(values) do
+    more[#more + 1] = PANE_GOLD .. value.name .. ":|r " .. value.text
+  end
+  for _, text in ipairs(row.details) do
+    more[#more + 1] = text
+  end
+  if #more > 0 then
+    parts[#parts + 1] = "\n" .. table.concat(more, "\n")
+  end
+  return table.concat(parts, "\n")
 end
 
 -- The section's row with that id, if a redraw kept it (#77).
@@ -745,7 +825,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
     return { empty = EMPTY }
   end
   local holdersOf = entry.held or {}
-  local spent = BoughtMarks.spent(marks or {})
+  -- The buy-side tabs can be marked Bought whether or not any row is yet.
+  marks = marks or {}
+  local spent = BoughtMarks.spent(marks)
   -- Once something is marked, the buy-side tabs fold on the gold left (#97).
   local fold = BoughtMarks.goldLeft(budget, gold, spent)
   -- No re-sort and no filter: the marker only points out what's on hand (#38).

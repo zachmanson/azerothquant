@@ -27,11 +27,11 @@ One Auction House in one Era, identified by realm, faction (Alliance, Horde or N
 _Avoid_: server, AH (when you mean the data scope)
 
 **Beta Prior**:
-A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it, though it may use the Beta Sell Rate. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and its tooltip names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
+A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it, though it may use the Beta Sell Rate. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and the row's side pane names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
 _Avoid_: Beta price as a prior or input (it's display only)
 
 **Beta Sell Rate**:
-The Sell Rate of the Beta Market a Live Market's Beta Prior comes from. Its tooltip shows it, and for `beta_column_days` from the Live Market's first Scan, a Prediction buy's Max Loss room may count it (`beta_sell_rate_weight`, 0 and so off by default). Each Beta Sale Event priced at or above the Live post price times the Item Key's Beta/Live Fair Value ratio counts as that share of a Sale Event, and each Beta Observation Window hour as that share of an hour, added to Live's, so Live takes over as its own hours build. Only demand is borrowed, never a price, and nothing else reads it: not Flips, Flip to Craft, Holdings or Buy Under (#110, ADR-0024).
+The Sell Rate of the Beta Market a Live Market's Beta Prior comes from. The row's side pane shows it, and for `beta_column_days` from the Live Market's first Scan, a Prediction buy's Max Loss room may count it (`beta_sell_rate_weight`, 0 and so off by default). Each Beta Sale Event priced at or above the Live post price times the Item Key's Beta/Live Fair Value ratio counts as that share of a Sale Event, and each Beta Observation Window hour as that share of an hour, added to Live's, so Live takes over as its own hours build. Only demand is borrowed, never a price, and nothing else reads it: not Flips, Flip to Craft, Holdings or Buy Under (#110, ADR-0024).
 _Avoid_: Sell Rate Prior (that's empty hours added, not events borrowed)
 
 **Scan**:
@@ -238,7 +238,7 @@ The best Action for one Candidate Item, with quantity, price ceiling, the full A
 _Avoid_: signal, tip
 
 **Recommendation Table**:
-The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). Only Post exists so far; Cancel waits on #134. It shows the Market of the Character's own faction, the only one the Brain recommends for.
+The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). Only Post exists so far; Cancel waits on #134. It shows the Market of the Character's own faction, the only one the Brain recommends for. Its side pane shows the row under the mouse, or else the selected one: what to do with it, its Note and details, and any value the table is too narrow to show (#160).
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:
