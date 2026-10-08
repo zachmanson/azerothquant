@@ -1,3 +1,12 @@
+2026-10-08 (later 108): #156 part (2), the Addon re-read, built (6983547). Issue stays open for the in-game check of both parts. After the main read, `Scanner.lua` calls GetItemInfo on each dropped row's itemID (`Scan.missingItemIDs`), waits for `GET_ITEM_INFO_RECEIVED` on all of them or 15 s (`REREAD_CAP_SECONDS`), then `Scan.reread` reads the dropped rows' links again in one pass. A link whose itemID isn't the row's is refused (the list can change under the wait). AH closed mid-wait: re-reads what it can (`GetReplicateItemLink` is pcall'd, unknown whether the list survives the close) and saves. Chat line: "Scan #N saved: X Listings (re-read N of M dropped rows in X s), ...".
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts. Scan once, AH open the whole time. Check the chat line's "re-read N of M" (how many come back, and the seconds: tune the cap if it always hits 15). Then a second Scan, closing the AH during the "Waiting up to 15 s" debug line: it must still save. After `brain watch` imports, the Shopping List should have more rows than Scan 67's 10, and any still-dropped items stay off it. If it's close: comment results on #156 and close it.
+2. #138 guide, then #146 PoC (the rest of #85 rides along).
+3. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 107, plus: run the busted stand-in from `addon/` (`cd addon && python ../scripts/busted.py`); from the repo root protected_calls_spec fails on a relative path. If the in-game re-read gets 0 of M, the item loading isn't what makes `GetReplicateItemLink` return a link; part (1)'s backstop still covers it.
+
 2026-10-07 (later 107): #156 part (1), the Brain backstop, built (stays open for part (2)). `recommend_market` reads the Scan's drop list (`history.dropped_at`, only the Scan the table is built from). Flips to Sell/Vendor of a dropped item, Flips to Craft whose output is dropped, and Flips to Disenchant candidates that are dropped are left off. Crafts that only buy a dropped reagent stay. Holdings rows of a dropped item get "Price may be off. Check the AH." (`PRICE_MAY_BE_OFF`). Why not has a new Check, `Dropped rows`, between Flip margin and Budget. On Scan 67 the table is 4 rows, none dropped, and 27 of 65 Holdings rows have the note. Part (2) is what brings rows back.
 
 Next, in order (target #146 by ~Oct 13):
