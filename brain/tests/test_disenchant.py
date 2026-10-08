@@ -701,6 +701,18 @@ def test_no_flip_to_disenchant_without_a_character_who_can_disenchant(db):
     assert flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), [reader]) == []
 
 
+def test_a_flip_to_disenchant_leaves_out_items_the_latest_scan_dropped_rows_of(db):
+    # #156: the Scan's ladder of Green Chests is partial, so the cheapest it saw may not
+    # be the cheapest up. The other pieces' 150 and 320 are the first two Disenchants.
+    listed = [(GREEN_ITEM, 300), (OTHER_ITEM, 150), (GREEN_ITEM, 100), (OTHER_ITEM, 320)]
+    scans = flip_scans(*listed)
+    scans[-1] |= {"droppedRows": 5, "droppedItemIDs": [int(GREEN)]}
+
+    [row] = flips_to_disenchant(db, scans, [enchanter(vendor_prices=FLIP_PRICES)])
+
+    assert row.disenchant.buys == (ListingBuy(OTHER, 150), ListingBuy(OTHER, 320))
+
+
 def test_the_budget_cuts_a_flip_to_disenchant(db):
     reader = enchanter(vendor_prices=FLIP_PRICES)
     reader["budget"] = 299

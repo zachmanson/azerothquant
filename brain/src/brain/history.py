@@ -1802,6 +1802,18 @@ def dropped_item_ids(conn: sqlite3.Connection, market: Market) -> dict[int, froz
     return {at: frozenset(ids) for at, ids in result.items()}
 
 
+def dropped_at(conn: sqlite3.Connection, market: Market, at: int) -> frozenset[int]:
+    """The itemIDs the Market's Scan requested at `at` dropped rows of: none if it didn't
+    say which."""
+    rows = conn.execute(
+        "SELECT d.item_id FROM scan_dropped_item d"
+        " JOIN scan s ON s.id = d.scan_id JOIN market m ON m.id = s.market_id"
+        f" WHERE {_MARKET_FILTER} AND s.requested_at = ?",
+        (*_market_params(market), at),
+    )
+    return frozenset(item_id for (item_id,) in rows)
+
+
 ScanStamp = tuple[int, int, str, str | None]  # requested_at, ID, source, pool ID if Pooled
 
 

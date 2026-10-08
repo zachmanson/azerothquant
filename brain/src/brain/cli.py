@@ -1048,6 +1048,8 @@ def _shortfall(w: WhyNot) -> float:
             return (w.held + w.needs - w.room) / (w.held + w.needs)
         case Check.MARGIN:
             return math.inf if w.clear_at is None else (w.ask - w.clear_at) / w.ask
+        case Check.DROPPED:
+            return 0.0
         case Check.BUDGET:
             return (w.cost - w.spend) / w.cost
         case Check.ROW_CAP:
@@ -1084,6 +1086,8 @@ def _numbers(w: WhyNot, check: Check) -> str:
                 f"ask {_money(w.ask)}, clears at {_money(w.clear_at)}: "
                 f"{_money(short)} ({short / w.ask:.1%})"
             )
+        case Check.DROPPED:
+            return "the latest Scan dropped rows of it" if w.failed is check else ""
         case Check.BUDGET:
             return f"cheapest run {_money(w.cost)}, spend {_money(w.spend)}"
         case Check.ROW_CAP:

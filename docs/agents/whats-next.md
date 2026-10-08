@@ -1,3 +1,12 @@
+2026-10-07 (later 107): #156 part (1), the Brain backstop, built (stays open for part (2)). `recommend_market` reads the Scan's drop list (`history.dropped_at`, only the Scan the table is built from). Flips to Sell/Vendor of a dropped item, Flips to Craft whose output is dropped, and Flips to Disenchant candidates that are dropped are left off. Crafts that only buy a dropped reagent stay. Holdings rows of a dropped item get "Price may be off. Check the AH." (`PRICE_MAY_BE_OFF`). Why not has a new Check, `Dropped rows`, between Flip margin and Budget. On Scan 67 the table is 4 rows, none dropped, and 27 of 65 Holdings rows have the note. Part (2) is what brings rows back.
+
+Next, in order (target #146 by ~Oct 13):
+1. #156 part (2): Addon re-read, TDD on a pure `Scan.lua` function (busted), per Decisions 4 to 6 on the issue. Then the in-game check for both by ~Oct 11.
+2. #138 guide, then #146 PoC (the rest of #85 rides along).
+3. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 106, plus: replay and `rework` apply the backstop to past Scans too, so grades and replay numbers for Scans with drop lists move. Tests that need a drop to matter must use `sale_events>=3`: with fewer, #150 (a) already strips the item's evidence and the test goes green by accident. `dropping(scans, *ids)` in test_recommend.py marks the latest Scan.
+
 2026-10-07 (later 106): #156 diagnosed and grilled (decisions on the issue's last comment). Root cause: `recommend.py` never reads `scan_dropped_item`, so the latest Scan's partial ladder is taken as the whole market. Thin table: NOT #150 (a). With Scan 67's drop list deleted, the 10 rows are identical. As of Scan 66 it's 23 rows. Partial Scans make fake price gaps, and the Shopping List picks those first: 6 of Scan 67's 10 rows are dropped items, and 3 more Crafts buy a dropped reagent. So #150 (b) is back: the Addon re-reads dropped rows (15 s cap), with a Brain backstop. Filed #157 (Brain still writes the old `addon/AzerothQuant/Recommendations.lua`, the 4k-line diff in git status).
 
 Next, in order (target #146 by ~Oct 13):

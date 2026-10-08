@@ -845,6 +845,80 @@ def test_a_flip_to_sell_still_undercuts_a_listing_under_the_merchant_cost(db):
     assert flip.post_at == 19499
 
 
+# --- Items the latest Scan dropped rows of (#156) ---
+
+
+def dropping(scans, *item_ids, rows=5):
+    """`scans`, with the latest one having dropped `rows` rows of `item_ids` for missing
+    item data: its ladder of those items is partial."""
+    *before, latest = scans
+    return [*before, latest | {"droppedRows": rows, "droppedItemIDs": list(item_ids)}]
+
+
+def test_a_flip_to_sell_of_an_item_the_latest_scan_dropped_rows_of_is_left_off(db):
+    # The 3 at 1g would post under the 1g 95s, but the Scan dropped Linen rows: the
+    # cheapest it saw may not be the cheapest up.
+    result = run(
+        db,
+        dropping(
+            selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500, sale_events=3),
+            2589,
+        ),
+        [character_read(item(), money=GOLD, vendor_prices={2589: 10})],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_holdings_row_of_an_item_the_latest_scan_dropped_rows_of_says_its_price_may_be_off(
+    db,
+):
+    result = run(
+        db,
+        dropping(selling_two_linen_an_hour(sale_events=3), 2589),
+        [character_read(item(count=10), vendor_prices={2589: 10})],
+    )
+
+    assert [(r.action, r.note) for r in result[MARKET].holdings] == [
+        (Action.SELL, "Price may be off. Check the AH."),
+        (Action.VENDOR, "Price may be off. Check the AH."),
+    ]
+
+
+def test_only_the_latest_scans_dropped_rows_keep_a_flip_off_the_shopping_list(db):
+    # An earlier Scan dropped Linen rows. The latest one saw all of them.
+    first, *rest = selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500, sale_events=3)
+    scans = [*dropping([first], 2589), *rest]
+
+    result = run(db, scans, [character_read(item(), money=GOLD, vendor_prices={2589: 10})])
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.item_key, flip.action, flip.quantity) == (LINEN_KEY, Action.SELL, 3)
+
+
+def test_a_flip_to_craft_whose_output_the_latest_scan_dropped_rows_of_is_left_off(db):
+    # Its post price comes from a partial ladder of Bolts.
+    result = run(
+        db,
+        dropping(linen_and_bolts_selling(sale_events=3), 2996),
+        [character_read(money=GOLD, recipes=[recipe()])],
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_to_craft_that_only_buys_a_reagent_the_latest_scan_dropped_rows_of_stays(db):
+    # A partial ladder of Linen can leave the player short of reagents, not losing money.
+    result = run(
+        db,
+        dropping(linen_and_bolts_selling(sale_events=3), 2589),
+        [character_read(money=GOLD, recipes=[recipe()])],
+    )
+
+    [craft] = result[MARKET].shopping_list
+    assert (craft.item_key, craft.action) == (BOLT_KEY, Action.CRAFT)
+
+
 # --- Demand at the post price (#107) ---
 
 
@@ -4120,6 +4194,18 @@ def test_why_not_a_flip_the_budget_cant_buy_one_of_says_what_it_costs(db):
 
     ore = why[ORE_KEY]
     assert (ore.failed, ore.cost, ore.spend) == (Check.BUDGET, 20, 10)
+
+
+def test_why_not_a_flip_of_an_item_the_latest_scan_dropped_rows_of_says_so(db):
+    # #156: the Ore clears as a Flip to Vendor at 20, but the Scan dropped Ore rows.
+    market, why = why_not(
+        db,
+        dropping([scan(T0, row(ORE, quantity=2, unit=20))], 2770),
+        [character_read(money=GOLD, vendor_prices={2770: 25})],
+    )
+
+    assert market.shopping_list == []
+    assert why[ORE_KEY].failed is Check.DROPPED
 
 
 def test_why_not_a_flip_outside_the_kept_rows_says_its_best_place(db):

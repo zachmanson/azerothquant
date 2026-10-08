@@ -45,6 +45,7 @@ from brain.history import (
     character_read_times,
     cheapest_seen,
     crafts,
+    dropped_at,
     enchanting_skills,
     holdings,
     item_info,
@@ -175,6 +176,7 @@ class Check(StrEnum):
     SALE_EVENTS = "Sale Events"
     ROOM = "Room"
     MARGIN = "Flip margin"
+    DROPPED = "Dropped rows"  # the Scan dropped rows of the item (#156)
     BUDGET = "Budget"
     ROW_CAP = "Row cap"
 
@@ -702,7 +704,11 @@ def recommend_market(
     crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
     held = crafting.after
     # The crafts change what's held, so the Flips are sized again after them (#67).
-    valuer, buys = valuer.flips(set(under), _unbound_units(held))
+    valuer, cleared = valuer.flips(set(under), _unbound_units(held))
+    # The Scan may have missed some Listings of an item it dropped rows of, so the cheapest
+    # it saw may not be the cheapest up (#156).
+    dropped = dropped_at(conn, market, now)
+    buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
     gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
     budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
     spend = _spend(gold, budget)
@@ -751,11 +757,12 @@ def recommend_market(
                 plans, crafting, for_sale, merchant, valuer, outlet, set(under), spend, config, plan
             )
             for plan in plans
+            if item_id_of(plan.output) not in dropped
         ]
         if config.flips_to_craft
         else []
     )
-    disenchants = _flips_to_disenchant(valuer, plans, set(under), spend, config)
+    disenchants = _flips_to_disenchant(valuer, plans, set(under), dropped, spend, config)
     shopping = _options(
         buys,
         crafts,
@@ -784,6 +791,10 @@ def recommend_market(
     rows = _hold(rows, active, bound, vendor, caps, lot_costs)
     if paid:
         rows = _with_roi(rows, market_lots(conn, config, market, predictions, seen), cut, config)
+    rows = [
+        _with_note(row, PRICE_MAY_BE_OFF) if item_id_of(row.item_key) in dropped else row
+        for row in rows
+    ]
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
     prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
@@ -807,7 +818,9 @@ def recommend_market(
         buy_under=_buy_unders(conn, config, market, now, valuer, plans, fair_value_cache)
         if buy_under
         else [],
-        why_not=_why_not(valuer, buys, spend, set(under), names, config) if why_not else [],
+        why_not=_why_not(valuer, cleared, dropped, spend, set(under), names, config)
+        if why_not
+        else [],
         beta_ratios=ratios,
         loot_alert=_loot_alert(gold, valuer, plans, config, with_items=loot_alert),
     )
@@ -862,21 +875,24 @@ def named_set(m: MarketRecommendations) -> NamedSet:
 
 def _why_not(
     valuer: "_Valuer",
-    buys: list[_VendorBuy | _FlipToSell],
+    cleared: list[_VendorBuy | _FlipToSell],
+    dropped: frozenset[int],
     spend: int,
     under: set[str],
     names: Mapping[str, str],
     config: Config,
 ) -> list[WhyNot]:
-    """`recommend`'s `why_not` from the Valuer the Flips were sized on, their `buys` and
-    what each option may `spend`, for the Item Keys not `under` a Prediction, with the
-    item `names` known (#108)."""
+    """`recommend`'s `why_not` from the Valuer the Flips were sized on, the buys that
+    `cleared` the Flip margin, the itemIDs the Scan `dropped` rows of, whose buys aren't
+    options (#156), and what each option may `spend`, for the Item Keys not `under` a
+    Prediction, with the item `names` known (#108)."""
+    buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
     flips = _flip_options(buys, spend)
     rank: dict[str, int] = {}
     for row, place in zip(flips, _best_ranks(flips), strict=True):
         rank[row.item_key] = min(place, rank.get(row.item_key, place))
     cost: dict[str, int] = {}
-    for buy in buys:
+    for buy in cleared:
         least = (
             min(run.cost for run in buy.runs) if isinstance(buy, _FlipToSell) else buy.unit_buyout
         )
@@ -911,7 +927,7 @@ def _why_not(
         if item_key in rank:
             failed = Check.ROW_CAP if rank[item_key] > rows else None
         elif item_key in cost:
-            failed = Check.BUDGET
+            failed = Check.DROPPED if item_id_of(item_key) in dropped else Check.BUDGET
         elif sale_events < config.flip_min_sale_events:
             failed = Check.SALE_EVENTS
         elif room < held + needs:
@@ -1069,14 +1085,20 @@ def _cheapest_by_group(
 
 
 def _flips_to_disenchant(
-    valuer: "_Valuer", plans: list["_Plan"], under: set[str], gold: float, config: Config
+    valuer: "_Valuer",
+    plans: list["_Plan"],
+    under: set[str],
+    dropped: frozenset[int],
+    gold: float,
+    config: Config,
 ) -> list[Row]:
     """The Flips to Disenchant in this Scan (#89): one option per Disenchant source group
     with a Character who can Disenchant it, sized alone within `gold` (ADR-0017). Its
-    candidates are other players' Listings of the group's items not `under` a Prediction
-    whose best way out for one unit is Disenchant, so it never repeats a better Flip to
-    Sell or Vendor of the same Listing. A mat that feeds a Craft gets the Craft's credit
-    through its way out, with the Flip margin charged once, as in a Buy Under."""
+    candidates are other players' Listings of the group's items not `under` a Prediction,
+    nor of an item the Scan dropped rows of (#156), whose best way out for one unit is
+    Disenchant, so it never repeats a better Flip to Sell or Vendor of the same Listing. A
+    mat that feeds a Craft gets the Craft's credit through its way out, with the Flip
+    margin charged once, as in a Buy Under."""
     disenchanting = valuer.disenchanting
     if disenchanting is None:
         return []
@@ -1094,7 +1116,7 @@ def _flips_to_disenchant(
     candidates: dict[Group, list[tuple[int, str]]] = {}
     for item_key, offers in sorted(valuer.others.items()):
         group = disenchanting.group(item_key)
-        if group is None or item_key in under:
+        if group is None or item_key in under or item_id_of(item_key) in dropped:
             continue
         out = _way_out(item_key, valuer, config, sources)
         if out is None or out.way is not Action.DISENCHANT:
@@ -3259,6 +3281,10 @@ def _take(h: Holding, n: int) -> Holding:
 def _take_unbound(h: Holding) -> Holding:
     """`h` less one unbound unit, from the bags first."""
     return replace(h, bags=h.bags - 1) if h.bags else replace(h, bank=h.bank - 1)
+
+
+# On a Holdings row of an item the Scan dropped rows of (#156).
+PRICE_MAY_BE_OFF = "Price may be off. Check the AH."
 
 
 def _with_note(row: Row, note: str) -> Row:
