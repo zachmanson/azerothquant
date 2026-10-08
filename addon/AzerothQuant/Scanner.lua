@@ -7,7 +7,9 @@
 -- ns.Scanner.busy() says whether a Scan is in flight, and reloadReady() whether the Brain
 -- should have imported the Scans saved at load (#71). At logout it stamps each Scan with
 -- when it was first saved, so the next load can tell the Brain is behind (#104). It also
--- lends the Scan button's pulse (addPulse, setPulsing) to the Reload button.
+-- lends the Scan button's pulse (addPulse, setPulsing) to the banner's button, which can
+-- Scan too (requestScan, #161). "Scan saved" and "should be done" go to chat only while the
+-- Recommendation frame is closed: open, its banner says so.
 --
 -- Every stamp here is GetServerTime(), not time(), so Scans from different players'
 -- clients order on one clock in the Scan Pool (#117). The cooldown and Nudge checks
@@ -38,6 +40,7 @@ local REREAD_CAP_SECONDS = 15
 
 local db
 local marketFaction -- decided on AUCTION_HOUSE_SHOW, while the auctioneer is the "npc" unit
+local ahOpen = false
 local pending -- the in-flight Scan request, or nil
 local reading = false
 local rereading -- while waiting to re-read dropped rows: { rows, waitingFor, startedAt, capTimer }
@@ -52,6 +55,11 @@ local function cancel(timer)
   if timer then
     timer:Cancel()
   end
+end
+
+-- The banner says what chat would (#161).
+local function windowShown()
+  return AzerothQuantRecommendationFrame ~= nil and AzerothQuantRecommendationFrame:IsShown()
 end
 
 local function cooldownRemaining()
@@ -144,7 +152,8 @@ local function finish(rows, rereadNote)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false
   refreshButton()
-  Chat.say(string.format("Scan #%d saved: %d Listings%s, %d dropped for missing item data (%d items),"
+  local say = windowShown() and Chat.debug or Chat.say
+  say(string.format("Scan #%d saved: %d Listings%s, %d dropped for missing item data (%d items),"
     .. " %d items with no Vendor Price yet. /reload to hand it to the Brain.",
     scan.id, Scan.listingCount(scan), rereadNote and (" (" .. rereadNote .. ")") or "", scan.droppedRows,
     #scan.droppedItemIDs, scan.vendorPricesMissing))
@@ -243,7 +252,7 @@ local function abort(reason)
 end
 
 local function requestScan()
-  if pending or cooldownRemaining() > 0 then
+  if not ahOpen or pending or cooldownRemaining() > 0 then
     return
   end
   pending = {
@@ -299,8 +308,20 @@ frame:SetScript("OnEvent", function(_, event, arg1)
           return nil
         end
         reloadReady = true
+        if windowShown() then
+          return nil
+        end
         return DataAddon.canLoad() and "Load" or "Reload"
       end, Chat.say, Nudge.catchingUp(AzerothQuantRecommendations, GetServerTime()))
+      -- While the Brain catches up, afterLoad waits for nothing. Once its pull should be over,
+      -- Reload is the step, or the banner would say the Brain is working until the next
+      -- reload (#161).
+      if Nudge.catchingUp(AzerothQuantRecommendations, GetServerTime()) then
+        local endsAt = AzerothQuantRecommendations.brain.catchingUpSince + Nudge.CATCHING_UP_FOR
+        C_Timer.After(endsAt - GetServerTime(), function()
+          reloadReady = true
+        end)
+      end
       if savedAtLoad > 0 and not behindAtLoad then
         Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
           .. " (scripts\\play.bat), Load (or Reload) once it's done.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
@@ -312,6 +333,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       Nudge.stampSaved(db.scans, GetServerTime())
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
+    ahOpen = true
     marketFaction = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
     if not button then
       createButton()
@@ -323,6 +345,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     cancel(ticker)
     ticker = C_Timer.NewTicker(1, tick)
   elseif event == "AUCTION_HOUSE_CLOSED" then
+    ahOpen = false
     cancel(ticker)
     ticker = nil
     if rereading then
@@ -354,14 +377,14 @@ frame:SetScript("OnEvent", function(_, event, arg1)
 end)
 
 -- True from the Scan request until it's saved or aborted. A reload then would lose the
--- Scan, so the Reload button and /aq reload wait (#47).
+-- Scan, so Reload and /aq reload wait (#47).
 ns.Scanner = {
   busy = function()
     return pending ~= nil
   end,
   -- Scans the Recommendation Table doesn't reflect yet: those taken since the last reload
   -- (unsaved), and those saved then that the Brain hadn't imported (unimported). Then
-  -- whether the Brain was behind at load (Nudge.brainBehind): waitingNote's arguments.
+  -- whether the Brain was behind at load (Nudge.brainBehind): for NextStep.of.
   waiting = function()
     return (db and #db.scans or 0) - savedAtLoad, savedAtLoad, behindAtLoad
   end,
@@ -386,6 +409,11 @@ ns.Scanner = {
     local catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now)
     behindAtLoad = not catchingUp and Nudge.brainBehind(db.scans, now) ~= nil
     reloadReady = not fresh and not catchingUp
+  end,
+  -- The AH's Scan button's click, for the banner's (a click is the hardware event it needs).
+  requestScan = requestScan,
+  ahOpen = function()
+    return ahOpen
   end,
   addPulse = addPulse,
   setPulsing = setPulsing,

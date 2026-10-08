@@ -1,5 +1,7 @@
 -- WoW glue for the Recommendation Table: one movable Blizzard portrait panel showing the
--- Market's Recommendations from AzerothQuantRecommendations, one section per bottom tab.
+-- Market's Recommendations from AzerothQuantRecommendations, one section per tab along the
+-- top. Under the tabs a banner shows the one next step in the Scan, Reload, Load loop
+-- (NextStep.lua, #161), with the one button that does it.
 -- All shaping happens in RecommendationTable.lua; this file only draws it and talks to the
 -- WoW API. It opens next to a faction Auction House (not a Neutral one, whose Market the
 -- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, size, the tab
@@ -34,6 +36,8 @@ local PostButton = ns.PostButton
 local SearchButton = ns.SearchButton
 local Character = ns.Character
 local TooltipLines = ns.TooltipLines
+local NextStep = ns.NextStep
+local Nudge = ns.Nudge
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
@@ -46,7 +50,14 @@ local TooltipLines = ns.TooltipLines
 local WIDTH, HEIGHT = 1100, 540
 local MIN_WIDTH, MIN_HEIGHT = 1000, 400
 local PORTRAIT = "Interface\\Icons\\INV_Misc_Coin_01"
-local INSET_TOP = -64 -- leaves room for the two header lines under the title bar
+local INSET_TOP = -64 -- the Craft Chain panel's: room for a header under the title bar
+-- Top to bottom under the title bar: the tabs, the banner (BANNER_HEIGHT, or QUIET_HEIGHT
+-- when up to date), then the two header lines beside the Budget and Days to Sell boxes
+-- (HEADER_ROW), then the inset.
+local TABS_TOP = -26
+local BANNER_TOP = -60 -- clear of the portrait
+local BANNER_HEIGHT, QUIET_HEIGHT = 40, 20
+local HEADER_ROW = 34
 local LINE_HEIGHT = 22
 local ICON_SIZE = 20
 local ICON_GAP = ColumnLayout.ICON_WIDTH - ICON_SIZE
@@ -757,19 +768,31 @@ local function restorePosition()
   end
 end
 
--- Bottom tabs, one per section, in the order RecommendationTable.build gives them. A click
--- is remembered, so /aq recs reopens that tab.
+-- Tabs along the top, right of the portrait, one per section, in the order
+-- RecommendationTable.build gives them, each with its row count. A click is remembered, so
+-- /aq recs reopens that tab.
 local TAB_TITLES = {
   "Holdings", "Shopping List", "Flips to Craft", "Flips to Disenchant", "Prediction buys", "Buy Under",
 }
 
+-- Retail's top tab, if this client has it (checked by name, since CreateFrame with a missing
+-- template doesn't fail cleanly); the bottom tab otherwise, which then hangs upside down.
+local function tabTemplate()
+  local top = "PanelTopTabButtonTemplate"
+  if C_XMLUtil and C_XMLUtil.GetTemplateInfo and C_XMLUtil.GetTemplateInfo(top) then
+    return top
+  end
+  return "PanelTabButtonTemplate"
+end
+
 local function createTabs()
+  local template = tabTemplate()
   for i, title in ipairs(TAB_TITLES) do
-    local tab = CreateFrame("Button", "AzerothQuantRecommendationFrameTab" .. i, frame, "PanelTabButtonTemplate")
+    local tab = CreateFrame("Button", "AzerothQuantRecommendationFrameTab" .. i, frame, template)
     tab:SetID(i)
     tab:SetText(title)
     if i == 1 then
-      tab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 11, 2)
+      tab:SetPoint("TOPLEFT", frame, "TOPLEFT", 66, TABS_TOP)
     else
       tab:SetPoint("TOPLEFT", tabs[i - 1], "TOPRIGHT", 3, 0)
     end
@@ -789,7 +812,9 @@ end
 -- reload saved and writes a new Recommendations.lua a minute or so later; when the
 -- startup copy missed it, the button becomes Load, which reads the Brain's copy in
 -- AzerothQuant_Data without a second reload (DataAddon.lua, #106). Load works once per
--- reload, and can run mid-Scan since it doesn't reload.
+-- reload, and can run mid-Scan since it doesn't reload. The banner's button does Scan,
+-- Reload or Load by step; /aq reload and /aq load do the last two.
+local SCAN_TIP = "Scan reads every listing on the Auction House. You can Scan once every 15 minutes."
 local RELOAD_TIP = "Reload the UI: saves new Scans for the Brain and loads its latest Recommendations."
 local LOAD_TIP = "Load the Brain's latest Recommendations (once per reload)."
 local BUSY_TIP = "Wait for the Scan to finish: reloading now would lose it."
@@ -863,8 +888,8 @@ local function createSettingBox(anchor, setting)
   return box
 end
 
-local function createBudgetBox(button)
-  frame.budget = createSettingBox(button, {
+local function createBudgetBox(anchor)
+  frame.budget = createSettingBox(anchor, {
     label = "Budget (g)",
     width = 60,
     tip = BUDGET_TIP,
@@ -896,61 +921,134 @@ local function createDaysToSellBox()
   })
 end
 
-local function createReloadButton()
-  local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  button:SetSize(70, 22)
-  button:SetText("Reload")
-  button:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
-  button:SetScript("OnClick", function()
-    if DataAddon.canLoad() then
-      loadRecommendations()
-    else
-      reload()
+-- What the banner's button does, by NextStep.of's action, and its tooltip.
+local STEP_CLICKS = {
+  scan = function()
+    Scanner.requestScan()
+  end,
+  reload = function()
+    reload()
+  end,
+  load = function()
+    loadRecommendations()
+  end,
+}
+local STEP_TIPS = { scan = SCAN_TIP, busy = BUSY_TIP, reload = RELOAD_TIP, load = LOAD_TIP }
+local GOLD, ORANGE = { 1, 0.82, 0 }, { 1, 0.6, 0.23 }
+local CHECK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:0|t "
+
+-- The loop as NextStep.of takes it, from what Scanner, DataAddon and the Brain's file say.
+local function loopState()
+  local unsaved, unimported, behind = Scanner.waiting()
+  local now = GetServerTime()
+  return {
+    scanning = Scanner.busy(),
+    ahOpen = Scanner.ahOpen(),
+    unsaved = unsaved,
+    unimported = unimported,
+    behind = behind,
+    catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now),
+    brainRan = AzerothQuantRecommendations ~= nil and AzerothQuantRecommendations.brain ~= nil,
+    canLoad = DataAddon.canLoad(),
+    reloadReady = Scanner.reloadReady(),
+    lastScanAt = db.lastScanAt,
+  }, now
+end
+
+-- The banner under the tabs (#161). It follows the loop every frame while the frame is
+-- shown: a Scan starts and ends on its own clock, the cooldown counts down, and Load is
+-- used up once clicked. Up to date, it shrinks to one line and the rows move up.
+local function createBanner()
+  local banner = CreateFrame("Frame", nil, frame)
+  banner:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, BANNER_TOP)
+  banner:SetPoint("RIGHT", frame, "RIGHT", -10, 0)
+  banner:SetHeight(BANNER_HEIGHT)
+  banner.background = banner:CreateTexture(nil, "BACKGROUND")
+  banner.background:SetAllPoints()
+  banner.background:SetColorTexture(1, 1, 1, 1)
+
+  banner.button = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+  banner.button:SetSize(100, 24)
+  banner.button:SetPoint("RIGHT", -8, 0)
+  banner.button:SetScript("OnClick", function(self)
+    local click = STEP_CLICKS[self.action]
+    if click then
+      click()
     end
   end)
   -- Disabled buttons get no OnEnter unless told to, and the tooltip must say why it's off.
-  button:SetMotionScriptsWhileDisabled(true)
-  button:SetScript("OnEnter", function(self)
+  banner.button:SetMotionScriptsWhileDisabled(true)
+  banner.button:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    local tip = DataAddon.canLoad() and LOAD_TIP or Scanner.busy() and BUSY_TIP or RELOAD_TIP
-    GameTooltip:SetText(tip, 1, 1, 1, 1, true)
+    GameTooltip:SetText(STEP_TIPS[self.action] or "", 1, 1, 1, 1, true)
     GameTooltip:Show()
   end)
-  button:SetScript("OnLeave", GameTooltip_Hide)
-  createBudgetBox(button)
-  createDaysToSellBox()
+  banner.button:SetScript("OnLeave", GameTooltip_Hide)
+  -- Pulses when the step is one to take now: a Scan can run, a Scan is saved, or the
+  -- Brain should be done (#71).
+  banner.pulse = Scanner.addPulse(banner.button)
 
-  -- Scans the table doesn't reflect yet, in orange left of the Days to Sell box, and the
-  -- button lights up.
-  local note = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  note:SetPoint("RIGHT", frame.daysToSell.label, "LEFT", -8, 0)
-  note:SetTextColor(1, 0.5, 0.25)
+  banner.title = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  banner.title:SetPoint("TOPLEFT", 10, -5)
+  banner.title:SetPoint("RIGHT", banner.button, "LEFT", -10, 0)
+  banner.title:SetJustifyH("LEFT")
+  banner.line = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  banner.line:SetJustifyH("LEFT")
+  banner.line:SetWordWrap(false)
 
-  -- Pulses once the Brain should have imported the Scans saved at load (#71).
-  local pulse = Scanner.addPulse(button)
-
-  -- A Scan starts and ends on its own clock, so follow it while the frame is shown. So
-  -- does Load, which is used up once clicked.
-  button:SetScript("OnUpdate", function(self)
-    local canLoad = DataAddon.canLoad()
-    local label = canLoad and "Load" or "Reload"
-    if self:GetText() ~= label then
-      self:SetText(label)
+  -- Up to date: no title, button or tint, and the line takes the width.
+  local function setQuiet(quiet)
+    banner.quiet = quiet
+    banner:SetHeight(quiet and QUIET_HEIGHT or BANNER_HEIGHT)
+    banner.title:SetShown(not quiet)
+    banner.line:ClearAllPoints()
+    if quiet then
+      banner.background:SetColorTexture(0, 0, 0, 0)
+      banner.button:Hide()
+      banner.line:SetPoint("LEFT", 10, 0)
+      banner.line:SetPoint("RIGHT", -10, 0)
+    else
+      banner.line:SetPoint("BOTTOMLEFT", 10, 6)
+      banner.line:SetPoint("RIGHT", banner.button, "LEFT", -10, 0)
     end
-    local enabled = canLoad or not Scanner.busy()
-    self:SetEnabled(enabled)
-    Scanner.setPulsing(pulse, Scanner.reloadReady() and enabled)
-    local unsaved, unimported, behind = Scanner.waiting()
-    local text = RecommendationTable.waitingNote(unsaved, unimported, behind, canLoad)
-    if text ~= note:GetText() then
-      note:SetText(text)
-      if text then
-        self:LockHighlight()
-      else
-        self:UnlockHighlight()
+  end
+  setQuiet(false)
+
+  banner:SetScript("OnUpdate", function(self)
+    local step = NextStep.of(loopState())
+    local quiet = step.quiet == true
+    if quiet ~= self.quiet then
+      setQuiet(quiet)
+    end
+    if step.quiet then
+      if self.line:GetText() ~= CHECK .. step.line then
+        self.line:SetText(CHECK .. step.line)
       end
+      Scanner.setPulsing(self.pulse, false)
+      return
     end
+    local color = step.warn and ORANGE or GOLD
+    self.background:SetColorTexture(color[1], color[2], color[3], 0.12)
+    self.title:SetTextColor(color[1], color[2], color[3])
+    if self.title:GetText() ~= step.title then
+      self.title:SetText(step.title)
+    end
+    if self.line:GetText() ~= step.line then
+      self.line:SetText(step.line)
+    end
+    if step.button then
+      self.button.action = step.action
+      if self.button:GetText() ~= step.button then
+        self.button:SetText(step.button)
+      end
+      self.button:SetEnabled(step.enabled)
+      self.button:Show()
+    else
+      self.button:Hide()
+    end
+    Scanner.setPulsing(self.pulse, step.button ~= nil and step.pulse)
   end)
+  frame.banner = banner
 end
 
 -- The Post button (#81, ADR-0016). It posts the selected row only when clicked, and never
@@ -1251,18 +1349,25 @@ local function createFrame()
   tinsert(UISpecialFrames, "AzerothQuantRecommendationFrame") -- Escape closes it
   frame:SetPortraitToAsset(PORTRAIT)
 
-  -- No button bar: the inset runs to the bottom edge, where the tabs hang.
+  createBanner()
+
+  -- The setting boxes ride under the banner, right of the header lines, so they move with it.
+  local settingsAnchor = CreateFrame("Frame", nil, frame)
+  settingsAnchor:SetSize(1, 20)
+  settingsAnchor:SetPoint("TOPRIGHT", frame.banner, "BOTTOMRIGHT", 0, -6)
+  createBudgetBox(settingsAnchor)
+  createDaysToSellBox()
+
+  -- No button bar: the inset runs to the bottom edge. Its top follows the banner.
   frame.Inset:ClearAllPoints()
-  frame.Inset:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, INSET_TOP)
+  frame.Inset:SetPoint("TOPLEFT", frame.banner, "BOTTOMLEFT", -4, -HEADER_ROW)
   frame.Inset:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 6)
 
-  -- The two header lines, right of the portrait.
+  -- The two header lines, under the banner.
   frame.header1 = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  frame.header1:SetPoint("TOPLEFT", frame, "TOPLEFT", 66, -32)
+  frame.header1:SetPoint("TOPLEFT", frame.banner, "BOTTOMLEFT", 4, -6)
   frame.header2 = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   frame.header2:SetPoint("TOPLEFT", frame.header1, "BOTTOMLEFT", 0, -4)
-
-  createReloadButton()
 
   scroll = CreateFrame("ScrollFrame", nil, frame.Inset, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", SCROLL_LEFT, -4 - HEADER_HEIGHT - 2)

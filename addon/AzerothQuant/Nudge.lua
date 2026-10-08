@@ -76,7 +76,8 @@ end
 -- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
 -- in chat and asks after the Brain app. Otherwise, if any Scans are waiting, waits
 -- RELOAD_READY_AFTER seconds, then calls `ready` (which starts the button's pulse and
--- returns which button that is: "Load", "Reload", or nil when Load was already clicked)
+-- returns which button that is: "Load", "Reload", or nil for no chat line: Load was
+-- already clicked, or the Recommendation frame is open and its banner says it, #161)
 -- and says so in chat once (#71, #106). "The Brain should be done" would be a false
 -- promise when it's behind, so it's one or the other. `after` and `say` are C_Timer.After
 -- and the chat line. While the Brain is catchingUp (Nudge.catchingUp), it does neither:
