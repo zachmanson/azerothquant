@@ -1,3 +1,13 @@
+2026-10-08 (later 110): #146 grilled (decisions on its comments) and release prep done, no tag. v0.2.0 tagged only after #156 passes in game AND #159 is fixed. One guildie, same realm and faction, own key from `brain pool key add <name>` sent by DM. Exe + `docs/setup-guide.md` via a Google Drive link (exe 13.4 MB, over Discord's 10 MB). Repo stays private. Version bumped (0535d51). Old unpacked Pooled Scans parse fine, and a v0.1.0-built history upgrades fine (only `scan_dropped_item` is new). **Filed #159 (core):** a fresh install's first pool pull (30-day backfill) took 252 s on my 67 Scans, and the watcher is busy for all of it. A guildie's first Scan then gets the wrong "Is AzerothQuant Brain running?" line.
+
+Next, in order (target #146 by ~Oct 13):
+1. #159: grill the fix (own Scans before the backfill, chunked backfill, or a shorter first backfill), then TDD. Also measure the first Decision Engine pass on a cold 63-Scan history (the rest of the guildie's first wait).
+2. In game (user, by ~Oct 11): #156 both parts, steps as in later 108's item 1, plus a guide read-through (#138).
+3. Both pass: `git tag v0.2.0 && git push --tags`, download the Release exe, `brain pool key add <guildie>`, upload exe + guide to Drive, then run #146's Checks with the guildie.
+4. #158 UI rework, #145, #134, gap: as in later 109.
+
+- Gotchas: same as later 109, plus: archive files wrap the Scan as `{"era", "scan"}`. The first-pull simulation is: strip each archived Scan with `pool.strip_scan`, `FakePool.upload` it (from `brain/tests/fake_pool.py`), then `pool_sync.pull` into `open_history(":memory:")` with `now` = the latest requestedAt. Run it from `brain/` with `tests` on sys.path.
+
 2026-10-08 (later 109): #138 guide drafted at `docs/setup-guide.md` (README points to it), from app.py's popups and the Addon's strings. Covers install via the exe (SmartScreen, WoW folder, pool code), Scan / Reload / wait / Load, each tab in one line, Post/Search/right-click Bought/Budget, the two "Brain" chat lines, the `AzerothQuant Brain log` Start menu shortcut for feedback, update and uninstall. #138 stays open: its Acceptance is a guildie following it alone.
 
 Next, in order (target #146 by ~Oct 13):
