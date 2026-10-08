@@ -47,6 +47,16 @@ def db():
     conn.close()
 
 
+@pytest.fixture(params=["kept in memory", "kept in memory and the history", "restarted"])
+def next_pass_cache(request):
+    """The cache each pass gets: the watcher's one, kept in memory (and in the history, as
+    `brain watch` keeps it), or a restarted Brain's, with only what the history kept (#145)."""
+    if request.param == "restarted":
+        return lambda: FairValueCache(keep_in_history=True)
+    cache = FairValueCache(keep_in_history=request.param != "kept in memory")
+    return lambda: cache
+
+
 def assert_kept_pass_matches_a_fresh_one(conn, config, cache: FairValueCache) -> None:
     """One pass with the kept cache, as `brain watch` makes it after an import, must give
     what a pass with nothing kept does."""
@@ -99,20 +109,22 @@ def test_a_kept_pass_matches_a_fresh_one_as_scans_and_character_reads_arrive(see
 
 
 @pytest.mark.parametrize("seed", range(10))
-def test_a_kept_pass_matches_a_fresh_one_after_an_older_scan_is_inserted(seed, db, config):
+def test_a_kept_pass_matches_a_fresh_one_after_an_older_scan_is_inserted(
+    seed, db, config, next_pass_cache
+):
     rng = random.Random(seed)
     scans = cheap_flip_scans(rng, scans=8)
-    cache = FairValueCache()
     import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
     rematched = 0
     for s in rng.sample(scans, len(scans)):
         rematched += import_scans(db, [s], Era.BETA, config).scans_rematched
-        assert_kept_pass_matches_a_fresh_one(db, config, cache)
+        assert_kept_pass_matches_a_fresh_one(db, config, next_pass_cache())
     assert rematched
 
 
-def test_a_kept_pass_matches_a_fresh_one_when_a_pooled_scan_is_replaced(db, config):
-    cache = FairValueCache()
+def test_a_kept_pass_matches_a_fresh_one_when_a_pooled_scan_is_replaced(
+    db, config, next_pass_cache
+):
     import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
     import_scans(
         db, [scan(T0, row(), row(item="item:2592::::::::20:1490", unit=300))], Era.BETA, config
@@ -121,12 +133,12 @@ def test_a_kept_pass_matches_a_fresh_one_when_a_pooled_scan_is_replaced(db, conf
         T0 + 20 * MINUTE, row(), row(item="item:2592::::::::20:1490", quantity=5, unit=200)
     )
     import_pooled_scans(db, [("pool-1", pooled)], Era.BETA, config)
-    assert_kept_pass_matches_a_fresh_one(db, config, cache)
+    assert_kept_pass_matches_a_fresh_one(db, config, next_pass_cache())
 
     # Rolled back, and another from the same second in its place before the next pass.
     roll_back_pooled(db, ["pool-1"], config)
     import_pooled_scans(db, [("pool-2", scan(T0 + 20 * MINUTE, row()))], Era.BETA, config)
-    assert_kept_pass_matches_a_fresh_one(db, config, cache)
+    assert_kept_pass_matches_a_fresh_one(db, config, next_pass_cache())
 
 
 def test_a_kept_pass_matches_a_fresh_one_when_known_recipes_or_skills_change(db, config):

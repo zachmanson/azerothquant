@@ -1330,10 +1330,16 @@ def pool_syncer(
     return PoolSyncer(config, pool, clock=clock, now=now, announce=announce)
 
 
+def watch_fair_value_cache() -> FairValueCache:
+    """The watcher's cache: kept for as long as it runs, so each pass only computes the new
+    Scans' Fair Values (#105), and in the history, so a restart doesn't compute them all
+    again either (#145)."""
+    return FairValueCache(keep_in_history=True)
+
+
 def _watch(config: Config) -> int:
     watcher = Watcher(settle_seconds=SETTLE_SECONDS)
-    # Kept for as long as the watcher runs, so each pass only computes the new Scans' (#105).
-    fair_value_cache = FairValueCache()
+    fair_value_cache = watch_fair_value_cache()
     pool_sync = pool_syncer(config, fair_value_cache=fair_value_cache)
     folders = ", ".join(str(i.path) for i in config.installs)
     log.info("Watching %s in %s (Ctrl+C to stop)", SAVEDVARIABLES_FILE, folders)

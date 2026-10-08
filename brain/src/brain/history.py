@@ -11,6 +11,7 @@ Each Auction House mail is stored once too, however many Mailbox Reads it shows 
 mail stays in the inbox until taken, so each Read is matched against the one before.
 """
 
+import json
 import logging
 import math
 import os
@@ -70,6 +71,15 @@ CREATE TABLE IF NOT EXISTS scan_dropped_item (
     scan_id INTEGER NOT NULL REFERENCES scan (id),
     item_id INTEGER NOT NULL,
     PRIMARY KEY (scan_id, item_id)
+);
+
+-- A Scan's Fair Values, kept so a restarted Brain doesn't work them out again (#145).
+-- `worked_out_with` names the code and config that made them; a re-match deletes them
+-- with their Scan. One row a Scan: Fair Values worked out another way replace it.
+CREATE TABLE IF NOT EXISTS scan_fair_values (
+    scan_id INTEGER PRIMARY KEY REFERENCES scan (id),
+    worked_out_with TEXT NOT NULL,
+    fair_values TEXT NOT NULL  -- JSON: {item key: Fair Value}
 );
 
 -- Every Pooled Scan downloaded into the Archive, imported or not, so a pull skips it and a
@@ -811,6 +821,7 @@ def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
         conn.execute(f"DELETE FROM {table} WHERE scan_id IN ({tail})", in_tail)
     # Not in _SEEN_IN_A_SCAN: it belongs to the Scan alone, with no Listing to rewind.
     conn.execute(f"DELETE FROM scan_dropped_item WHERE scan_id IN ({tail})", in_tail)
+    conn.execute(f"DELETE FROM scan_fair_values WHERE scan_id IN ({tail})", in_tail)
     conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
 
 
@@ -1833,6 +1844,30 @@ def scan_stamps(conn: sqlite3.Connection, market: Market) -> list[ScanStamp]:
         _market_params(market),
     )
     return [(at, scan_id, source, pool_id) for at, scan_id, source, pool_id in rows]
+
+
+def kept_fair_values(
+    conn: sqlite3.Connection, scan_id: int, worked_out_with: str
+) -> dict[str, float] | None:
+    """The Fair Values `keep_fair_values` kept for the Scan, or None."""
+    row = conn.execute(
+        "SELECT fair_values FROM scan_fair_values WHERE scan_id = ? AND worked_out_with = ?",
+        (scan_id, worked_out_with),
+    ).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def keep_fair_values(
+    conn: sqlite3.Connection, scan_id: int, worked_out_with: str, values: dict[str, float]
+) -> None:
+    """Keep the Scan's Fair Values, worked out with `worked_out_with`, in place of any it
+    had, so `kept_fair_values` finds them after a restart (#145)."""
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO scan_fair_values (scan_id, worked_out_with, fair_values)"
+            " VALUES (?, ?, ?)",
+            (scan_id, worked_out_with, json.dumps(values)),
+        )
 
 
 _MAIL_COLUMNS = (

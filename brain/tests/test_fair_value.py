@@ -191,6 +191,42 @@ def test_a_pass_keeps_only_the_scans_the_last_pass_used(db, monkeypatch):
     assert calls == [T0, T0 + 20 * MINUTE, T0]
 
 
+# --- Fair Values kept in the history across a Brain restart (#145) ---
+
+
+def test_a_restarted_brain_reuses_the_fair_values_it_kept_in_the_history(db, monkeypatch):
+    run(db, scan(T0, row(unit=100)), scan(T0 + 20 * MINUTE, row(unit=120)))
+    calls = counting_supply_at(monkeypatch)
+    before = FairValueCache(keep_in_history=True)
+    first = before.fair_values(db, MARKET, CONFIG, T0)
+
+    restarted = FairValueCache(keep_in_history=True)
+
+    assert restarted.fair_values(db, MARKET, CONFIG, T0) == first == {LINEN_KEY: 100}
+    assert restarted.fair_values(db, MARKET, CONFIG, T0 + 20 * MINUTE) == {LINEN_KEY: 120}
+    assert calls == [T0, T0 + 20 * MINUTE]
+
+
+def test_a_restarted_brain_works_out_again_what_another_config_or_version_kept(db, monkeypatch):
+    run(db, scan(T0, row(unit=1), row(quantity=12, unit=100), row(quantity=7, unit=120)))
+    FairValueCache(keep_in_history=True).fair_values(db, MARKET, CONFIG, T0)
+    calls = counting_supply_at(monkeypatch)
+    whole = dataclasses.replace(CONFIG, fair_value_slice_share=1.0, fair_value_outlier_share=0)
+    cut = dataclasses.replace(whole, fair_value_outlier_share=0.5)
+
+    assert FairValueCache(keep_in_history=True).fair_values(db, MARKET, whole, T0) == {
+        LINEN_KEY: 2041 / 20
+    }
+    assert FairValueCache(keep_in_history=True).fair_values(db, MARKET, cut, T0) == {
+        LINEN_KEY: 2040 / 19
+    }
+    monkeypatch.setattr("brain.fair_value.FAIR_VALUE_VERSION", 999)
+    assert FairValueCache(keep_in_history=True).fair_values(db, MARKET, CONFIG, T0) == {
+        LINEN_KEY: 100
+    }
+    assert calls == [T0, T0, T0]
+
+
 def test_a_pass_loads_a_markets_listings_once_and_the_next_pass_sees_new_scans(db):
     # #141: the Valuer and the Beta Prior share one load of the Market's every Listing.
     run(db, scan(T0, row(unit=100)))

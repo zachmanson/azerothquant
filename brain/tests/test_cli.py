@@ -24,6 +24,7 @@ from brain.cli import (
     run_recommend,
     run_replay,
     savedvariables_files,
+    watch_fair_value_cache,
     watch_step,
 )
 from brain.config import Config, Era, Install
@@ -249,6 +250,27 @@ def test_watch_keeps_its_fair_value_cache_from_one_pass_to_the_next(tmp_path, mo
     watch_step(config, watcher, fair_value_cache=cache)  # it has settled: import
 
     assert passed == [cache]
+
+
+def test_a_restarted_watch_loads_the_fair_values_the_last_one_worked_out(tmp_path, monkeypatch):
+    # The first pass after a PC restart doesn't work out every Scan's Fair Values again (#145).
+    install_with_savedvariables(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+
+    def watch_from_start() -> None:
+        watcher = Watcher(settle_seconds=0)
+        cache = watch_fair_value_cache()
+        watch_step(config, watcher, fair_value_cache=cache)  # sees the file for the first time
+        watch_step(config, watcher, fair_value_cache=cache)  # it has settled: import
+
+    watch_from_start()
+    worked_out = []
+    monkeypatch.setattr(
+        "brain.fair_value.supply_at", lambda *args, **kw: worked_out.append(args) or {}
+    )
+    watch_from_start()
+
+    assert worked_out == []
 
 
 FRIEND_SCAN_AT = 1_790_000_600  # between the fixture's two Scans

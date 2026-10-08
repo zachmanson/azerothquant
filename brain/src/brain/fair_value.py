@@ -10,10 +10,33 @@ from collections.abc import Callable
 from statistics import median
 
 from brain.config import Config
-from brain.history import Listing, Market, ScanStamp, listings, scan_stamps, scan_times, supply_at
+from brain.history import (
+    Listing,
+    Market,
+    ScanStamp,
+    keep_fair_values,
+    kept_fair_values,
+    listings,
+    scan_stamps,
+    scan_times,
+    supply_at,
+)
 from brain.timings import Timings, timed
 
 Supply = list[tuple[int, int]]  # (unit buyout, quantity), in any order
+
+# Bump it whenever a change to `fair_value` or `supply_at` changes what a Scan's Fair Values
+# come to, so a Brain doesn't load ones the old code kept in the history (#145).
+FAIR_VALUE_VERSION = 1
+
+
+def _worked_out_with(config: Config) -> str:
+    """What a Scan's Fair Values kept in the history were worked out with: the code's
+    version and the config fields `fair_value` reads."""
+    return (
+        f"v{FAIR_VALUE_VERSION} slice {config.fair_value_slice_share!r}"
+        f" outlier {config.fair_value_outlier_share!r}"
+    )
 
 
 def fair_value(supply: Supply, config: Config) -> float | None:
@@ -64,9 +87,14 @@ class FairValueCache:
     anything else worked out from the Listings, for the rest of the pass only.
 
     And it keeps what Sell Rate takes from each Observation Window's two Scans
-    (`kept_for_window`), so a new Scan only adds its own window to the tally (#142)."""
+    (`kept_for_window`), so a new Scan only adds its own window to the tally (#142).
 
-    def __init__(self) -> None:
+    With `keep_in_history`, as `brain watch` makes it, each Scan's Fair Values are also
+    kept in the history, so a restarted Brain loads them rather than working them all out
+    again (#145)."""
+
+    def __init__(self, keep_in_history: bool = False) -> None:
+        self._keep_in_history = keep_in_history
         self._last_pass: dict[_ScanKey, dict[str, float]] = {}
         self._this_pass: dict[_ScanKey, dict[str, float]] = {}
         self._scan_only_last_pass: dict[tuple[Market, tuple], object] = {}
@@ -79,8 +107,8 @@ class FairValueCache:
         # pass has checked against them.
         self._stamps: dict[Market, list[ScanStamp]] = {}
         self._checked: set[Market] = set()
-        # Set by the caller for a pass: the Fair Values computed, not found here, are timed
-        # in it (#131).
+        # Set by the caller for a pass: the Fair Values computed or loaded from the history,
+        # not found here, are timed in it (#131).
         self.timings: Timings | None = None
 
     def start_pass(self) -> None:
@@ -149,8 +177,21 @@ class FairValueCache:
                 self._this_pass[key] = self._last_pass[key]
             else:
                 with timed(self.timings, "Fair Values"):
-                    self._this_pass[key] = fair_values(conn, market, config, at=at)
+                    self._this_pass[key] = self._kept_or_worked_out(conn, market, config, at)
         return self._this_pass[key]
+
+    def _kept_or_worked_out(
+        self, conn: sqlite3.Connection, market: Market, config: Config, at: int
+    ) -> dict[str, float]:
+        scan_id = next((id_ for at_, id_, _, _ in self._stamps[market] if at_ == at), None)
+        if not self._keep_in_history or scan_id is None:
+            return fair_values(conn, market, config, at=at)
+        worked_out_with = _worked_out_with(config)
+        values = kept_fair_values(conn, scan_id, worked_out_with)
+        if values is None:
+            values = fair_values(conn, market, config, at=at)
+            keep_fair_values(conn, scan_id, worked_out_with, values)
+        return values
 
     def kept_for_window(
         self,
