@@ -160,27 +160,29 @@ def test_a_pull_carries_on_from_where_the_last_one_ended(db, config, pool):
     assert len(scan_times(db, MARKET)) == 4
 
 
-def test_the_first_pull_backfills_only_the_last_30_days(db, config, pool):
+def test_the_first_pull_backfills_only_the_last_14_days(db, config, pool):
+    # The longest window the Decision Engine reads: an older Scan only makes the guildie's
+    # first pull longer (#159).
     now = T0 + 40 * DAY
-    pool.upload(Era.BETA, strip_scan(scan(now - 31 * DAY)))
-    pool.upload(Era.BETA, strip_scan(scan(now - 29 * DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(now - 15 * DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(now - 13 * DAY)))
 
     report = pull(db, pool, config, now=now)
 
     assert report.pulled == 1
-    assert scan_times(db, MARKET) == [now - 29 * DAY]
+    assert scan_times(db, MARKET) == [now - 13 * DAY]
 
 
 def test_a_pull_since_a_date_goes_further_back(db, config, pool):
     now = T0 + 40 * DAY
-    pool.upload(Era.BETA, strip_scan(scan(now - 31 * DAY)))
-    pool.upload(Era.BETA, strip_scan(scan(now - 29 * DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(now - 15 * DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(now - 13 * DAY)))
     pull(db, pool, config, now=now)
 
-    report = pull(db, pool, config, now=now, since=now - 35 * DAY)
+    report = pull(db, pool, config, now=now, since=now - 20 * DAY)
 
     assert report.pulled == 1
-    assert scan_times(db, MARKET) == [now - 31 * DAY, now - 29 * DAY]
+    assert scan_times(db, MARKET) == [now - 15 * DAY, now - 13 * DAY]
 
 
 def test_a_rolled_back_pooled_scan_leaves_the_archive_and_the_history_is_rematched(

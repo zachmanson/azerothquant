@@ -33,6 +33,10 @@ log = logging.getLogger(__name__)
 
 DAY_SECONDS = 24 * 3600
 
+# A pull with this many Pooled Scans to import on one page takes long enough (~4 s each)
+# that the player's own Scan, waiting behind it, would look lost: the Addon is told (#159).
+CATCHING_UP_SCANS = 10
+
 
 @dataclass
 class SyncReport:
@@ -112,12 +116,14 @@ def pull(
     config: Config,
     now: int,
     since: int | None = None,
+    catching_up: Callable[[], None] | None = None,
 ) -> SyncReport:
     """Download and import what other members added to the pool since the last pull, and
     take out what it rolled back.
 
     The first pull reaches back pool_backfill_days from `now`; `since` (Unix time) reaches
-    back to then instead, going over the whole index again.
+    back to then instead, going over the whole index again. `catching_up` is called once,
+    before the downloads, if a page has CATCHING_UP_SCANS or more to import.
     """
     report = SyncReport()
     cursor = pool_cursor(conn)
@@ -130,14 +136,24 @@ def pull(
     try:
         while True:
             page = pool.list_since(start)
-            for entry in sorted(page.entries, key=lambda e: e.requested_at):
-                market = Market(entry.realm, entry.faction, entry.era)
-                if (
+            wanted = [
+                entry
+                for entry in sorted(page.entries, key=lambda e: e.requested_at)
+                if not (
                     entry.mine
                     or (oldest is not None and entry.requested_at < oldest)
-                    or has_pooled_scan(conn, entry.id, market, entry.requested_at)
-                ):
-                    continue
+                    or has_pooled_scan(
+                        conn,
+                        entry.id,
+                        Market(entry.realm, entry.faction, entry.era),
+                        entry.requested_at,
+                    )
+                )
+            ]
+            if catching_up is not None and len(wanted) >= CATCHING_UP_SCANS:
+                catching_up()
+                catching_up = None
+            for entry in wanted:
                 raw = pool.fetch(entry.id)
                 if not _matches(raw, entry):
                     report.rejected += 1
@@ -195,11 +211,15 @@ class PoolSyncer:
         pool: Pool,
         clock: Callable[[], float] = time.monotonic,
         now: Callable[[], float] = time.time,
+        announce: Callable[[int | None, str | None], None] | None = None,
     ):
+        """`announce(catching_up_since, problem)` tells the Addon a long pull started (at
+        that Unix time) or, with None, that it ended, along with the pool's problem."""
         self.config = config
         self.pool = pool
         self.clock = clock
         self.now = now
+        self.announce = announce
         # Due straight away, so a watcher that just started catches up.
         self.due_at = clock()
         self.unreachable = False
@@ -226,6 +246,13 @@ class PoolSyncer:
 
     def _run(self, do_push: bool, do_pull: bool) -> None:
         report = SyncReport()
+        announced = False
+
+        def catching_up() -> None:
+            nonlocal announced
+            announced = True
+            self._announce(int(self.now()))
+
         try:
             self.config.history_path.parent.mkdir(parents=True, exist_ok=True)
             with closing(open_history(self.config.history_path)) as conn:
@@ -233,17 +260,42 @@ class PoolSyncer:
                 if do_push:
                     report.merge(push(conn, self.pool, self.config))
                 if do_pull:
-                    report.merge(pull(conn, self.pool, self.config, now=int(self.now())))
+                    report.merge(
+                        pull(
+                            conn,
+                            self.pool,
+                            self.config,
+                            now=int(self.now()),
+                            catching_up=catching_up,
+                        )
+                    )
                     self.due_at = self.clock() + self.config.pool_sync_seconds
         except Exception:
             log.exception("Syncing with the Scan Pool failed; will try again")
+        else:
+            # A push with nothing to push never calls the pool, so only a pull says it's back.
+            if report.failed:
+                self.unreachable = True
+            elif do_pull:
+                self.unreachable = False
+            if any(
+                (
+                    report.pushed,
+                    report.pulled,
+                    report.rejected,
+                    report.rematched,
+                    report.rolled_back,
+                )
+            ):
+                log.info(report.summary())
+        # However the pull ended, the Addon mustn't go on saying one is running.
+        if announced:
+            self._announce(None)
+
+    def _announce(self, catching_up_since: int | None) -> None:
+        if self.announce is None:
             return
-        # A push with nothing to push never calls the pool, so only a pull says it's back.
-        if report.failed:
-            self.unreachable = True
-        elif do_pull:
-            self.unreachable = False
-        if any(
-            (report.pushed, report.pulled, report.rejected, report.rematched, report.rolled_back)
-        ):
-            log.info(report.summary())
+        try:
+            self.announce(catching_up_since, self.problem)
+        except Exception:
+            log.exception("Couldn't tell the Addon about the pull from the Scan Pool")

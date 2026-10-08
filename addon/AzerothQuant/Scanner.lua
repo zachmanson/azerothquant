@@ -286,7 +286,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       db.scans = db.scans or {}
       db.nextScanId = db.nextScanId or 1
       -- Recommendations.lua has loaded by now (it's in the TOC), as has SavedVariables.
-      Nudge.atLogin(AzerothQuantRecommendations, Chat.say)
+      Nudge.atLogin(AzerothQuantRecommendations, Chat.say, GetServerTime())
       local pruned = Prune.importedScans(db.scans, AzerothQuantRecommendations)
       if pruned > 0 then
         Chat.debug(string.format("Deleted %d Scans the Brain has imported (or has newer ones for their Market).", pruned))
@@ -300,7 +300,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         end
         reloadReady = true
         return DataAddon.canLoad() and "Load" or "Reload"
-      end, Chat.say)
+      end, Chat.say, Nudge.catchingUp(AzerothQuantRecommendations, GetServerTime()))
       if savedAtLoad > 0 and not behindAtLoad then
         Chat.debug(string.format("%d saved Scan%s not imported by the Brain yet. With brain watch running"
           .. " (scripts\\play.bat), Load (or Reload) once it's done.", savedAtLoad, savedAtLoad == 1 and "" or "s"))
@@ -381,8 +381,11 @@ ns.Scanner = {
         savedAtLoad = savedAtLoad + 1
       end
     end
-    behindAtLoad = Nudge.brainBehind(db.scans, GetServerTime()) ~= nil
-    reloadReady = not fresh
+    local now = GetServerTime()
+    -- While the Brain is catching up, Reload would only show the same table (#159).
+    local catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now)
+    behindAtLoad = not catchingUp and Nudge.brainBehind(db.scans, now) ~= nil
+    reloadReady = not fresh and not catchingUp
   end,
   addPulse = addPulse,
   setPulsing = setPulsing,

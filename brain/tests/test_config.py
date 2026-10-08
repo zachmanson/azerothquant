@@ -492,7 +492,7 @@ def test_the_scan_pool_is_off_unless_configured(tmp_path):
     assert config.pool_url is None and config.pool_key is None
     assert config.pool_admin_secret is None
     assert config.pool_sync_seconds == 5 * 60
-    assert config.pool_backfill_days == 30
+    assert config.pool_backfill_days == 14
     assert config.pool_min_completeness == 0.8
     assert config.pool_completeness_window == 10
 

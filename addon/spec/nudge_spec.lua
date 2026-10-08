@@ -112,6 +112,34 @@ describe("Nudge.afterLoad", function()
     assert.are.same({ "Your Scan from 7 min ago hasn't reached the Brain. Is AzerothQuant Brain running?"
       .. " Start it from the Start menu." }, w.lines)
   end)
+
+  it("while the Brain is catching up on the pool, neither asks after it nor promises it's done (#159)", function()
+    local w = world()
+
+    local behind = Nudge.afterLoad({ { savedAt = NOW - 7 * MIN } }, NOW, w.after, w.pulse, w.say, true)
+
+    assert.is_false(behind)
+    assert.are.same({}, w.timers)
+    assert.are.same({}, w.lines)
+  end)
+end)
+
+describe("Nudge.catchingUp", function()
+  local NOW = 2000000
+
+  it("is catching up while the Brain's long pull started under 15 minutes ago", function()
+    assert.is_true(Nudge.catchingUp({ brain = { catchingUpSince = NOW - 15 * MIN + 1 } }, NOW))
+  end)
+
+  it("stops trusting a pull that started 15 minutes ago or more: the Brain was likely closed mid-pull", function()
+    assert.is_false(Nudge.catchingUp({ brain = { catchingUpSince = NOW - 15 * MIN } }, NOW))
+  end)
+
+  it("isn't catching up with no pull running, or before the Brain has ever run", function()
+    assert.is_false(Nudge.catchingUp({ brain = { version = "0.2.0" } }, NOW))
+    assert.is_false(Nudge.catchingUp({}, NOW))
+    assert.is_false(Nudge.catchingUp(nil, NOW))
+  end)
 end)
 
 describe("Nudge.stampSaved", function()
@@ -152,13 +180,26 @@ describe("Nudge.brainBehind", function()
 end)
 
 describe("Nudge.atLogin", function()
+  local NOW = 2000000
+
   local function said(recommendations)
     local lines = {}
     Nudge.atLogin(recommendations, function(line)
       lines[#lines + 1] = line
-    end)
+    end, NOW)
     return lines
   end
+
+  it("says the Brain is downloading recent Scans while it catches up on the pool (#159)", function()
+    local recommendations = { brain = { version = "0.2.0", catchingUpSince = NOW - 2 * MIN } }
+
+    assert.are.same({ "AzerothQuant is downloading recent Scans. This takes a few minutes."
+      .. " Type /reload after that to see recommendations." }, said(recommendations))
+  end)
+
+  it("says nothing of a pull that started too long ago to still be running", function()
+    assert.are.same({}, said({ brain = { version = "0.2.0", catchingUpSince = NOW - 15 * MIN } }))
+  end)
 
   it("says the Brain app is needed when it has never run: the shipped stub has no brain status", function()
     local never = { "AzerothQuant needs its Brain app to make recommendations. See the setup guide." }

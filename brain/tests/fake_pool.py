@@ -10,7 +10,9 @@ class FakePool:
     """The Worker's contract (pool/README.md) in memory. `fail` makes every call raise as a
     network error would; `busy` Markets answer a push as rate limited."""
 
-    def __init__(self):
+    def __init__(self, page_size: int = 2):
+        # Small pages by default, so paging gets exercised.
+        self.page_size = page_size
         self.scans: dict[str, tuple[Era, dict, str]] = {}  # id -> (era, Scan, uploader)
         # id -> the headers (realm, faction, requestedAt) that differ from the body
         self.header_overrides: dict[str, dict] = {}
@@ -50,7 +52,7 @@ class FakePool:
         self._maybe_fail()
         self.listed_since.append(cursor)
         start = cursor or 0
-        page = self.events[start : start + 2]  # small pages, so paging gets exercised
+        page = self.events[start : start + self.page_size]
         entries = []
         rolled_back = []
         for kind, pool_id in page:

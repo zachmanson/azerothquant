@@ -62,6 +62,8 @@ Some handy things:
 
 **Chat says "Your Scan from X min ago hasn't reached the Brain. Is AzerothQuant Brain running?"** The Brain isn't running. Open the Start menu, click **AzerothQuant Brain**, then Reload in game.
 
+**Chat says "AzerothQuant is downloading recent Scans".** With a guild code, the Brain downloads recent scans the first time it runs, and after a long break. It takes a few minutes. Keep playing, then Reload.
+
 **Chat says "AzerothQuant needs its Brain app".** The Brain was never set up on this PC. Go back to step 1.
 
 **The button says Reload again instead of Load.** You clicked too early. Reload once more and wait the minute.

@@ -355,6 +355,71 @@ def test_the_addon_hears_the_pool_is_down_until_a_sync_works_again(tmp_path):
     assert "problem" not in read_recommendations(tmp_path / "wow")["brain"]
 
 
+def _a_pool_with_friend_scans(tmp_path, count):
+    """A fresh install with the Addon, and `count` Pooled Scans waiting in the pool, as a
+    guildie's first pull finds it. Returns the config, the pool, the watcher's syncer, and
+    the Addon's brain status in Recommendations.lua each time a Scan was downloaded."""
+    install_with_savedvariables(tmp_path / "wow")
+    install_addon(tmp_path / "wow")
+    config = config_for(tmp_path, Install(tmp_path / "wow", Era.BETA))
+    pool = FakePool(page_size=count)
+    fixture = parse_savedvariables(FIXTURE.read_text(encoding="utf-8"))["AzerothQuantDB"]
+    for i in range(count):
+        pool.upload(
+            Era.BETA, strip_scan({**fixture["scans"][0], "requestedAt": FRIEND_SCAN_AT + i})
+        )
+    seen = []
+    fetch = pool.fetch
+
+    def fetch_and_look(pool_id):
+        written = addon_folder(Install(tmp_path / "wow", Era.BETA)) / FILE_NAME
+        seen.append(read_recommendations(tmp_path / "wow")["brain"] if written.exists() else {})
+        return fetch(pool_id)
+
+    pool.fetch = fetch_and_look
+    syncer = pool_syncer(config, pool, clock=lambda: 0.0, now=lambda: FRIEND_SCAN_AT + 3600)
+    return config, pool, syncer, seen
+
+
+def test_a_long_pull_tells_the_addon_the_brain_is_catching_up_until_it_ends(tmp_path):
+    # A guildie's first pull takes minutes: their Scan waits behind it, so the Addon says
+    # why rather than ask whether the Brain is running (#159).
+    config, _, syncer, seen = _a_pool_with_friend_scans(tmp_path, 10)
+    watcher = Watcher(settle_seconds=3600)  # the player's file never settles here
+
+    watch_step(config, watcher, pool_sync=syncer)  # nothing to import: the first sync
+
+    assert [b.get("catchingUpSince") for b in seen] == [FRIEND_SCAN_AT + 3600] * 10
+    assert "catchingUpSince" not in read_recommendations(tmp_path / "wow")["brain"]
+
+
+def test_a_short_pull_never_says_the_brain_is_catching_up(tmp_path):
+    config, _, syncer, seen = _a_pool_with_friend_scans(tmp_path, 9)
+
+    watch_step(config, Watcher(settle_seconds=3600), pool_sync=syncer)
+
+    assert len(seen) == 9
+    assert not any("catchingUpSince" in b for b in seen)
+
+
+def test_a_long_pull_that_fails_still_stops_saying_the_brain_is_catching_up(tmp_path):
+    config, pool, syncer, seen = _a_pool_with_friend_scans(tmp_path, 10)
+    fetch = pool.fetch
+
+    def fail_after_three(pool_id):
+        if len(seen) == 3:
+            pool.fail = True
+        return fetch(pool_id)
+
+    pool.fetch = fail_after_three
+
+    watch_step(config, Watcher(settle_seconds=3600), pool_sync=syncer)
+
+    brain = read_recommendations(tmp_path / "wow")["brain"]
+    assert "catchingUpSince" not in brain
+    assert brain["problem"] == "Couldn't reach the guild scan server. Using your own Scans for now."
+
+
 def test_watch_logs_what_it_pushed_pulled_rejected_and_rematched(tmp_path, caplog):
     config, pool = _watching_with_a_pool(tmp_path)
     run_import(config, savedvariables_files(config))

@@ -138,13 +138,16 @@ def render(
     beta_priors: Mapping[Market, BetaPrior] | None = None,
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
     problem: str | None = None,
+    catching_up_since: int | None = None,
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
         by_realm.setdefault(market.realm, {})[market.faction] = requested_at
-    brain: dict[str, str] = {"version": __version__}
+    brain: dict[str, str | int] = {"version": __version__}
     if problem:  # a Lua table can't hold nil
         brain["problem"] = problem
+    if catching_up_since is not None:
+        brain["catchingUpSince"] = catching_up_since
     return _HEADER + assignment(
         GLOBAL_NAME,
         {
@@ -371,10 +374,12 @@ def write_recommendations(
     beta_priors: Mapping[Market, BetaPrior] | None = None,
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
     problem: str | None = None,
+    catching_up_since: int | None = None,
 ) -> Path | None:
     """Write the install's Recommendations.lua from the history and the Recommendations of
-    its Era's Markets, with their Beta Priors and the Brain's status (its version, and the
-    problem to tell the player, if any); None if the Addon isn't installed there."""
+    its Era's Markets, with their Beta Priors and the Brain's status (its version, the
+    problem to tell the player, if any, and when a long pull started, if one is running);
+    None if the Addon isn't installed there."""
     folder = addon_folder(install)
     if not folder.is_dir():
         return None
@@ -387,6 +392,7 @@ def write_recommendations(
         beta_priors,
         post_duration_hours,
         problem,
+        catching_up_since,
     )
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.

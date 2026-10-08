@@ -250,9 +250,10 @@ def _write_recommendations(
     fair_value_cache: FairValueCache | None = None,
     timings: Timings | None = None,
     problem: str | None = None,
+    catching_up_since: int | None = None,
 ) -> None:
     """Rewrite every install's Recommendations.lua from the history, with `problem` for
-    the Addon to tell the player.
+    the Addon to tell the player, and `catching_up_since` while a long pull runs (#159).
 
     Every install, not only those just imported: it is cheap, and it also fixes a file
     a previous write couldn't replace (say the client had it open).
@@ -284,7 +285,13 @@ def _write_recommendations(
         for install in config.installs:
             try:
                 path = write_recommendations(
-                    conn, install, markets, beta_priors, config.post_duration_hours, problem
+                    conn,
+                    install,
+                    markets,
+                    beta_priors,
+                    config.post_duration_hours,
+                    problem,
+                    catching_up_since,
                 )
             except (OSError, sqlite3.Error) as e:
                 log.error("Couldn't write Recommendations for %s: %s", install.path, e)
@@ -1288,16 +1295,46 @@ def make_pool(config: Config) -> Pool | None:
     return HttpPool(config.pool_url, config.pool_key)
 
 
-def pool_syncer(config: Config) -> PoolSyncer | None:
-    pool = make_pool(config)
-    return PoolSyncer(config, pool) if pool is not None else None
+def pool_syncer(
+    config: Config,
+    pool: Pool | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    now: Callable[[], float] = time.time,
+    fair_value_cache: FairValueCache | None = None,
+) -> PoolSyncer | None:
+    """The watcher's PoolSyncer, which tells the Addon when a long pull starts and ends;
+    None when the pool is off. `pool`, `clock` and `now` stand in for the real ones in
+    tests. `fair_value_cache` is the watcher's, so the import after a long pull reuses the
+    Fair Values its rewrite computed."""
+    pool = pool or make_pool(config)
+    if pool is None:
+        return None
+
+    def announce(catching_up_since: int | None, problem: str | None) -> None:
+        started = time.monotonic()
+        with closing(open_history(config.history_path)) as conn:
+            _write_recommendations(
+                conn,
+                config,
+                fair_value_cache=fair_value_cache,
+                problem=problem,
+                catching_up_since=catching_up_since,
+            )
+        # After a long pull, this is the Decision Engine's first pass over what it brought.
+        log.info(
+            "Told the Addon a long pull from the Scan Pool %s, in %.1fs",
+            "started" if catching_up_since is not None else "ended",
+            time.monotonic() - started,
+        )
+
+    return PoolSyncer(config, pool, clock=clock, now=now, announce=announce)
 
 
 def _watch(config: Config) -> int:
     watcher = Watcher(settle_seconds=SETTLE_SECONDS)
     # Kept for as long as the watcher runs, so each pass only computes the new Scans' (#105).
     fair_value_cache = FairValueCache()
-    pool_sync = pool_syncer(config)
+    pool_sync = pool_syncer(config, fair_value_cache=fair_value_cache)
     folders = ", ".join(str(i.path) for i in config.installs)
     log.info("Watching %s in %s (Ctrl+C to stop)", SAVEDVARIABLES_FILE, folders)
     if pool_sync is not None:

@@ -34,8 +34,8 @@
 # pool_admin_secret = '<ADMIN_SECRET>'
 # How often `brain watch` pulls, besides right before each import. Defaults to 5.
 # pool_sync_minutes = 5
-# How far back the first pull reaches. Defaults to 30.
-# pool_backfill_days = 30
+# How far back the first pull reaches. Defaults to 14, the longest window the Brain reads.
+# pool_backfill_days = 14
 # A Pooled Scan with fewer Listings than pool_min_completeness (0 to 1) of the median of its
 # Market's last pool_completeness_window (at least 3) Scans is most likely cut short: it's
 # archived, not imported. Your own Scans are never turned away. Default to 0.8 and 10.

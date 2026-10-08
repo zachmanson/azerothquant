@@ -79,8 +79,13 @@ end
 -- returns which button that is: "Load", "Reload", or nil when Load was already clicked)
 -- and says so in chat once (#71, #106). "The Brain should be done" would be a false
 -- promise when it's behind, so it's one or the other. `after` and `say` are C_Timer.After
--- and the chat line. Returns whether the Brain is behind.
-function Nudge.afterLoad(scans, now, after, ready, say)
+-- and the chat line. While the Brain is catchingUp (Nudge.catchingUp), it does neither:
+-- the Scans wait behind its pull, and atLogin already said so. Returns whether the Brain
+-- is behind.
+function Nudge.afterLoad(scans, now, after, ready, say, catchingUp)
+  if catchingUp then
+    return false
+  end
   local behind = Nudge.brainBehind(scans, now)
   if behind then
     local minutes = math.max(1, math.floor(behind / 60))
@@ -104,13 +109,33 @@ Nudge.NEVER_RUN_LINE = "AzerothQuant needs its Brain app to make recommendations
 Nudge.PROBLEM_TAIL = " If this keeps happening, send the Brain log (Start menu > AzerothQuant Brain log)"
   .. " to whoever gave you the Brain."
 
+-- A long pull from the Scan Pool (a guildie's first) keeps the Brain from importing for
+-- minutes, so it writes brain.catchingUpSince when one starts (#159). One older than this
+-- is from a Brain closed mid-pull: past it, the Addon checks on the Brain as usual.
+Nudge.CATCHING_UP_FOR = 15 * 60
+Nudge.CATCHING_UP_LINE = "AzerothQuant is downloading recent Scans. This takes a few minutes."
+  .. " Type /reload after that to see recommendations."
+
+-- With AzerothQuantRecommendations (nil if it didn't load): whether the Brain is busy
+-- with a long pull at `now`.
+function Nudge.catchingUp(recommendations, now)
+  local since = recommendations and recommendations.brain and recommendations.brain.catchingUpSince
+  return since ~= nil and now - since < Nudge.CATCHING_UP_FOR
+end
+
 -- At login (and /reload), with AzerothQuantRecommendations (nil if it didn't load): says
--- in chat that the Brain has never run, or the problem it wrote, or nothing.
-function Nudge.atLogin(recommendations, say)
+-- in chat that the Brain has never run, or that it's catching up, or the problem it
+-- wrote, or nothing.
+function Nudge.atLogin(recommendations, say, now)
   local brain = recommendations and recommendations.brain
   if not brain then
     say(Nudge.NEVER_RUN_LINE)
-  elseif brain.problem then
+    return
+  end
+  if Nudge.catchingUp(recommendations, now) then
+    say(Nudge.CATCHING_UP_LINE)
+  end
+  if brain.problem then
     say(brain.problem .. Nudge.PROBLEM_TAIL)
   end
 end
