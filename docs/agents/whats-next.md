@@ -1,3 +1,15 @@
+2026-10-07 (later 103): Addon batch built and pushed (088ee4b): #150 part (a) + #144 packed rows. Both stay open until the in-game check (steps on #150's comment; #144's comment adds the file-size check). The Addon saves `droppedItemIDs` (from `GetReplicateItemInfo` return 17) and `packedListings` ("itemString,quantity,buyout,timeLeft;..."). Own rows stay tables in `listings`. The Brain leaves dropped items out of both Observation Windows touching that Scan (`scan_dropped_item`, `_ends_of_windows`). `pool.strip_scan` folds own rows into the sorted packed string (ADR-0026). The parser's plain-run regex took one real 73k-row Scan from 4.4 s to 0.11 s. `item_id_of` moved to `scan.py`. Review leftover, deferred to the gap and noted on #150: a left-out item still gets the window's hours (`window_hours` is per Market), which pushes its Sell Rate toward 0. That's the safe side. Fix it with per-item hours if #153's data shows the same items dropping often.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): the #150/#144 check. The chat line "N dropped (M items)" must show M > 0 when N > 0. Import works, and the SavedVariables file is smaller. With what fits of #85. If M = 0, return 17 is nil and #150 (a) needs another itemID source.
+2. #149 Brain-side Pooled body checks (build while waiting on the PC).
+3. #138 guide, then #146 PoC (the rest of #85 rides along).
+4. Gap, Oct 21 to Nov 4: same as later 102, plus #150's per-item hours.
+
+- Gotchas: same as later 101, plus:
+  - Packed format lives in three places that must agree: `Scan.lua` (build), `scan._packed_row` (read), `pool._strip_packed` (strip). Item strings never contain `,` or `;`.
+  - Python edit scripts: open files with `encoding="utf-8"` (cp1252 default fails on some test files). Bash heredocs still mangle backslashes, so write the script with the Write tool.
+
 2026-10-06 (later 102): Grilled #149-#153 and #155 against the Oct 20 PoC. **Rule: before Oct 20 only what needs the game or would spoil the #146 PoC; Brain-only work goes in the Oct 21 to Nov 4 gap** (no game, but the Brain and the archive work; guildies reinstall for Live anyway). Decisions are commented on each issue. Facts found: all 66 own Scans have `dropped_rows > 0` (avg ~2.5k of ~74k), so #150's "skip windows next to dropped-row Scans" was impossible; it became (a) the Addon records dropped rows' itemIDs (`Scanner.lua:159` discards `GetReplicateItemInfo` return 17) + (c) a Brain resurrection check in the gap. Own Listings with mail (122 sold, 38 cancelled, 48 expired) are enough for #153 now. #146's speed check is now "record, don't block" (with the pool on, most passes are new-Scan passes at ~19 s), and #147's zero-history in-game check was added to it.
 
 Next, in order (target #146 by ~Oct 13):
