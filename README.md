@@ -2,6 +2,8 @@
 
 A personal Auction House trading system for World of Warcraft: Forever. See `CONTEXT.md` for the domain language and `docs/adr/` for the design decisions.
 
+For guildies: `docs/setup-guide.md` is the install and first-Scan guide.
+
 - `addon/AzerothQuant/`: the in-game **Addon** (Lua). Logic lives in plain-Lua modules with no WoW API calls, so it runs under `busted`. Only thin glue files touch the WoW API.
 - `addon/spec/`: busted specs for those modules.
 - `brain/`: the offline **Brain** (Python), tested with `pytest` and linted/formatted with `ruff`.

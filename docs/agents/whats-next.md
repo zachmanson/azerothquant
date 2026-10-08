@@ -1,3 +1,12 @@
+2026-10-08 (later 109): #138 guide drafted at `docs/setup-guide.md` (README points to it), from app.py's popups and the Addon's strings. Covers install via the exe (SmartScreen, WoW folder, pool code), Scan / Reload / wait / Load, each tab in one line, Post/Search/right-click Bought/Budget, the two "Brain" chat lines, the `AzerothQuant Brain log` Start menu shortcut for feedback, update and uninstall. #138 stays open: its Acceptance is a guildie following it alone.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts, same steps as later 108's item 1. Read the guide while there and fix anything that doesn't match the screen (Scan button spot, the "Load out of date AddOns" line, whether the window opens next to the AH).
+2. #146 PoC (the rest of #85 rides along). The guildie in it follows `docs/setup-guide.md`; that run is #138's Acceptance.
+3. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 108, plus: the repo is private, so guildies can't open the guide or the Release on GitHub. Send them the exe and the guide (paste or file). The guide says Post only: Cancel from ADR-0016 isn't built. Keep it in step with any change to app.py popups, Nudge.lua lines or tab names.
+
 2026-10-08 (later 108): #156 part (2), the Addon re-read, built (6983547). Issue stays open for the in-game check of both parts. After the main read, `Scanner.lua` calls GetItemInfo on each dropped row's itemID (`Scan.missingItemIDs`), waits for `GET_ITEM_INFO_RECEIVED` on all of them or 15 s (`REREAD_CAP_SECONDS`), then `Scan.reread` reads the dropped rows' links again in one pass. A link whose itemID isn't the row's is refused (the list can change under the wait). AH closed mid-wait: re-reads what it can (`GetReplicateItemLink` is pcall'd, unknown whether the list survives the close) and saves. Chat line: "Scan #N saved: X Listings (re-read N of M dropped rows in X s), ...".
 
 Next, in order (target #146 by ~Oct 13):
