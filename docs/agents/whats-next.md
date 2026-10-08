@@ -1,3 +1,12 @@
+2026-10-07 (later 105): #144/#150 (a) in-game check passed. Scan 68 in game (67 in the history): 70,893 Listings, 7,925 dropped (2,804 items), and `scan_dropped_item` has the 2,804. Parse 5.6-11 s -> 0.4 s. File 4.4 -> 3.3 MB (packed string ~36 bytes/row, not the 1.2 MB estimated). Load fills normally. #144 closed, #150 commented ((a) done; (c) + per-item hours still for the gap). **New: #156.** The current-market picture trusts a Scan with dropped rows. Fishing Rack (279965): the Scan kept 3 of 7 price levels, so the Brain said post at 39s 44c under 65 units at ~30s, and buy only 9. The user also thinks the table is too thin for 41g (6 Shopping List rows); check in the same diagnosis.
+
+Next, in order (target #146 by ~Oct 13):
+1. #156: diagnose, grill the fix (drop latest-Scan-dropped items from the Shopping List vs. re-query dropped itemIDs in the Addon), build. Before #146: guildies would see wrong rows.
+2. #138 guide, then #146 PoC (the rest of #85 rides along).
+3. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 103, plus: `brain recommend` takes >3 min now. Read the Shopping List from `Interface/AddOns/AzerothQuant_Data/Recommendations.lua` instead. `brain watch` was restarted 21:06 on ef446a1.
+
 2026-10-07 (later 104): #149 built and closed. `pool_sync.pull` now leaves out a Pooled Scan whose body's realm, faction or requestedAt differs from its index entry (`_matches`). It's neither archived nor imported, so `brain rebuild` can't bring it back. It counts under `rejected`. There's no era check: the body has no era and is imported under the entry's. "Not later than the upload time" holds because the Worker rejects a header more than 10 min past the upload by its own clock, and the body must now equal the header. A pull-time check against the PC clock was built, then dropped in review: a PC clock running slow would have dropped real Scans for good, since the cursor moves past them. Accepted gap: a bad body archived before this change still freezes its Market on every rebuild. Before the PoC there was a single uploader, so this is unlikely. If it ever happens, delete that file from `pool/`. ADR-0026 and CONTEXT.md (**Pooled Scan**) now say this. `FakePool.upload(header_overrides=...)` makes the index disagree with the body.
 
 Next, in order (target #146 by ~Oct 13):
