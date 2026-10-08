@@ -1,0 +1,539 @@
+<!doctype html>
+<!--
+  PROTOTYPE for #158, throwaway. Not part of the Addon.
+  Question: what should the Recommendation Table look like? Three structurally different
+  layouts of the same data, switchable with ?variant=A|B|C (or the arrow keys), next to a
+  stand-in Auction House. The loop bar sets the Scan / Reload / Load state so each
+  layout's "next step" can be judged in every state. Rows are sample data shaped like
+  Recommendations.lua, values from the in-game screenshots on #136.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#158 Table Layouts</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #15110c;
+    --panel2: #1d1810;
+    --inset: #0a0907;
+    --border: #5b4a2c;
+    --border-hi: #8a7140;
+    --gold: #ffd100;
+    --text: #e8e2d4;
+    --dim: #9a917f;
+    --green: #1eff00;
+    --red: #ff4040;
+    --blue: #4aa8ff;
+    --row-hover: rgba(255, 209, 0, 0.08);
+    --row-stripe: rgba(255, 255, 255, 0.025);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg) radial-gradient(circle at 30% 20%, #1c2230, #07080b 70%);
+    color: var(--text); font: 13px/1.35 "Segoe UI", Arial, sans-serif; min-height: 100vh;
+    overflow: auto;
+  }
+  .stage { display: flex; gap: 10px; padding: 20px 20px 120px; align-items: flex-start; min-width: 1800px; }
+  .ah {
+    width: 600px; height: 640px; flex: none; border: 2px solid #3a3a3a; border-radius: 6px;
+    background: #121212; color: #777; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; font-size: 15px;
+  }
+  .ah .scanbtn { font-size: 13px; }
+  /* WoW-ish frame */
+  .frame {
+    position: relative; background: linear-gradient(#1d1810, #120f0a); border: 2px solid var(--border);
+    border-radius: 6px; box-shadow: 0 0 0 1px #000, 0 8px 30px rgba(0,0,0,.6); flex: none;
+  }
+  .titlebar {
+    height: 30px; display: flex; align-items: center; padding: 0 10px 0 64px; color: var(--gold);
+    font-weight: 600; letter-spacing: .3px; border-bottom: 1px solid #000;
+    background: linear-gradient(#2a2216, #1a150e);
+  }
+  .portrait {
+    position: absolute; left: -8px; top: -8px; width: 58px; height: 58px; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #c9a24a, #5a3d10 70%); border: 3px solid #8a7140;
+    display: grid; place-items: center; color: #1a1205; font-weight: 800; font-size: 18px;
+  }
+  .close { margin-left: auto; width: 20px; height: 20px; border-radius: 3px; background: #6b1a12; color: #fff;
+    display: grid; place-items: center; font-size: 12px; border: 1px solid #000; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 24px; padding: 0 12px;
+    background: linear-gradient(#8e1b10, #5c0f08); color: var(--gold); border: 1px solid #000; border-radius: 3px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18); font: 600 12px "Segoe UI", sans-serif; cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { filter: brightness(1.25); }
+  .btn[disabled] { filter: grayscale(1) brightness(.6); cursor: default; }
+  .btn.big { height: 34px; font-size: 14px; padding: 0 18px; }
+  .btn.pulse { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 2px var(--gold), 0 0 14px 2px rgba(255,209,0,.6); } }
+  .input { height: 22px; width: 60px; background: #000; color: var(--text); border: 1px solid #444; border-radius: 2px; padding: 0 5px; }
+  label.small { color: var(--gold); font-size: 11px; }
+  .inset { background: var(--inset); border: 1px solid #000; box-shadow: inset 0 0 0 1px #2c2418; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th {
+    position: sticky; top: 0; z-index: 1; text-align: left; font-weight: 600; color: var(--gold); font-size: 12px;
+    background: linear-gradient(#2c2416, #1d170e); border-bottom: 1px solid #000; border-right: 1px solid #000;
+    padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  }
+  td { padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  tbody tr:nth-child(even) { background: var(--row-stripe); }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.sel { background: rgba(255,209,0,.16); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .icon { display: inline-block; width: 18px; height: 18px; border: 1px solid #000; border-radius: 2px; vertical-align: -4px; margin-right: 6px; }
+  .q-green { color: var(--green); } .q-blue { color: var(--blue); } .q-white { color: #fff; } .q-purple { color: #c070ff; }
+  .g::after { content: "g"; color: var(--gold); margin-right: 3px; }
+  .s::after { content: "s"; color: #c0c0c0; margin-right: 3px; }
+  .c::after { content: "c"; color: #c87533; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 11px; border: 1px solid; }
+  .tag.Craft { color: #f0b040; border-color: #6a4a10; }
+  .tag.Sell { color: #6fd06f; border-color: #285a28; }
+  .tag.Vendor { color: #bbb; border-color: #555; }
+  .tag.Disenchant { color: #c070ff; border-color: #4a2a70; }
+  .muted { color: var(--dim); }
+  .help { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--dim);
+    color: var(--dim); font-size: 10px; margin-left: 4px; cursor: help; }
+
+  /* bottom tabs (A) */
+  .tabs-bottom { display: flex; gap: 3px; padding-left: 12px; position: absolute; top: 100%; }
+  .tab {
+    padding: 6px 14px 7px; background: linear-gradient(#1a150e, #2a2216); border: 2px solid var(--border); border-top: none;
+    border-radius: 0 0 6px 6px; color: var(--gold); cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap;
+  }
+  .tab.on { background: linear-gradient(#3a2e1a, #2a2216); color: #fff; padding-bottom: 9px; }
+  .tab .count { color: var(--dim); font-weight: 400; margin-left: 4px; }
+  /* steps */
+  .steps { display: flex; align-items: center; gap: 6px; }
+  .step { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; }
+  .step .dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #555; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+  .step.done .dot { background: #1e4a1e; border-color: #3a8a3a; color: #9f9; }
+  .step.now { color: #fff; }
+  .step.now .dot { background: var(--gold); color: #000; border-color: var(--gold); }
+  .arrow { color: #555; }
+  .bar { height: 6px; background: #000; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, #a07a10, var(--gold)); }
+  .statusline { font-size: 12px; }
+  .warn { color: #ff9a3a; }
+
+  /* tooltip */
+  #tip {
+    position: fixed; pointer-events: none; z-index: 50; max-width: 300px; padding: 7px 9px; display: none;
+    background: rgba(8, 10, 20, .96); border: 1px solid #5a6a8a; border-radius: 4px; color: #fff; font-size: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.6);
+  }
+  #tip b { color: var(--gold); display: block; margin-bottom: 2px; }
+  #tip .sub { color: var(--green); }
+
+  /* prototype chrome, NOT part of the design */
+  .proto {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 100; display: flex; gap: 10px;
+    align-items: center; background: #fff; color: #111; border-radius: 999px; padding: 6px 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5); font: 13px system-ui, sans-serif;
+  }
+  .proto button { border: 0; background: #eee; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  .proto button.on { background: #111; color: #fff; }
+  .proto .sep { width: 1px; height: 20px; background: #ccc; }
+  .proto b { min-width: 210px; text-align: center; }
+  .note { position: fixed; top: 8px; right: 14px; color: #888; font: 12px system-ui; max-width: 460px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="note">PROTOTYPE #158, throwaway. ← → switch layouts. The white bar is the prototype, not the design. Hover anything.</div>
+<div class="stage" id="stage"></div>
+<div id="tip"></div>
+<div class="proto" id="proto"></div>
+
+<script>
+// ---------- sample data (shaped like Recommendations.lua) ----------
+const ICON = ["#7a5a2a", "#2a5a7a", "#5a2a7a", "#2a7a3a", "#7a2a2a", "#6a6a2a"];
+const shopping = [
+  { item: "Craftsman's Writ: Minor Recombobulator", q: "q-blue", action: "Craft", qty: 3895, max: [0, 4, 10], post: [18, 50, 0], profit: [203, 86, 12], perClick: [6, 58, 50], perDay: [40, 12, 0], roi: "38%", cost: [535, 0, 0], beta: [2, 74, 50], note: "Needs 2 reagents. Crafted by Thalor." },
+  { item: "Waylaid Crate: Jewelcrafting", q: "q-green", action: "Sell", qty: 40, max: [12, 0, 0], post: [19, 99, 0], profit: [96, 40, 0], perClick: [2, 41, 0], perDay: [32, 0, 0], roi: "20%", cost: [480, 0, 0], beta: [14, 2, 0], note: "Sells in about 3 days." },
+  { item: "Shimmering Dust", q: "q-white", action: "Sell", qty: 200, max: [0, 85, 0], post: [1, 20, 0], profit: [42, 10, 0], perClick: [0, 21, 5], perDay: [21, 5, 0], roi: "29%", cost: [170, 0, 0], beta: [0, 98, 0], note: "" },
+  { item: "Runed Copper Rod", q: "q-white", action: "Vendor", qty: 18, max: [0, 9, 0], post: null, profit: [5, 43, 99], perClick: [0, 30, 22], perDay: null, roi: "33%", cost: [1, 62, 0], beta: null, note: "A merchant pays 39s each." },
+  { item: "Lesser Healing Potion", q: "q-white", action: "Craft", qty: 120, max: [0, 15, 0], post: [0, 72, 0], profit: [38, 0, 0], perClick: [0, 31, 66], perDay: [19, 0, 0], roi: "61%", cost: [62, 0, 0], beta: [0, 55, 0], note: "Crafted by Mira." },
+  { item: "Silk Cloth", q: "q-white", action: "Sell", qty: 400, max: [0, 22, 0], post: [0, 35, 0], profit: [31, 0, 0], perClick: [0, 7, 75], perDay: [15, 50, 0], roi: "35%", cost: [88, 0, 0], beta: [0, 30, 0], note: "Sells in about 2 days." },
+  { item: "Greater Mystic Wand", q: "q-green", action: "Craft", qty: 6, max: [3, 0, 0], post: [22, 0, 0], profit: [28, 74, 0], perClick: [4, 79, 0], perDay: [14, 37, 0], roi: "22%", cost: [104, 0, 0], beta: [21, 0, 0], note: "Needs 1 reagent you hold." },
+  { item: "Iron Bar", q: "q-white", action: "Sell", qty: 60, max: [0, 48, 0], post: [0, 90, 0], profit: [21, 0, 0], perClick: [1, 5, 0], perDay: [10, 50, 0], roi: "40%", cost: [28, 80, 0], beta: [0, 82, 0], note: "" },
+];
+const holdings = [
+  { item: "Shimmering Dust", q: "q-white", action: "Sell", qty: 85, price: [1, 20, 0], profit: [96, 0, 0], roi: "41%", note: "Good time to sell.", beta: [0, 98, 0] },
+  { item: "Linen Cloth", q: "q-white", action: "Vendor", qty: 230, price: [0, 0, 13], profit: [0, 29, 90], roi: "", note: "Not selling on the AH.", beta: null },
+  { item: "Greater Magic Essence", q: "q-green", action: "Sell", qty: 12, price: [6, 10, 0], profit: [69, 12, 0], roi: "", note: "Price may be off. Check the AH.", beta: [5, 80, 0] },
+  { item: "Silver Ore", q: "q-white", action: "Sell", qty: 40, price: [0, 95, 50], profit: [36, 30, 0], roi: "12%", note: "", beta: [0, 90, 0] },
+];
+const other = {
+  "Flips to Craft": 5, "Flips to Disenchant": 3, "Prediction buys": 2, "Buy Under": 11,
+};
+const TABS = ["Holdings", "Shopping List", "Flips to Craft", "Flips to Disenchant", "Prediction buys", "Buy Under"];
+const TAB_TIPS = {
+  "Holdings": "What you already own, and the best way to turn each into gold: sell it on the AH, or sell it to a merchant.",
+  "Shopping List": "Things to buy on the AH right now that should make a profit. The best options are at the top.",
+  "Flips to Craft": "Buy the materials, craft the item, and sell it for more than the materials cost.",
+  "Flips to Disenchant": "Buy gear, disenchant it, and sell the materials for more than the gear cost.",
+  "Prediction buys": "Items expected to go up in price soon. Riskier: these are guesses.",
+  "Buy Under": "Price limits: if you see one of these on the AH at or under this price, it's a good buy.",
+};
+const COL_TIPS = {
+  "Item": "The item. Hover a row for the details.",
+  "Action": "What to do with it once you have it: Sell on the AH, Vendor (sell to a merchant), or Craft something with it.",
+  "Qty": "How many to buy.",
+  "Max price": "The most to pay for one. Skip any listing above this.",
+  "Post at": "The price to list each one at when you sell it.",
+  "Profit": "Gold you should make in total, after the AH's cut.",
+  "Per click": "Profit for each listing you buy. Big numbers here mean less clicking.",
+  "Per day": "Profit per day, counting how long it takes to sell.",
+  "ROI": "Profit as a share of what you spend. 38% means 38g back on every 100g.",
+  "Cost": "Gold you need to buy it all.",
+  "Beta": "A rougher price guess used while there isn't much data yet.",
+  "Note": "Anything else worth knowing about this row.",
+  "Price": "What one is worth right now.",
+};
+function money(m, cls) {
+  if (!m) return '<span class="muted">-</span>';
+  const [g, s, c] = m;
+  let out = "";
+  if (g) out += `<span class="g">${g}</span>`;
+  if (s || g) out += `<span class="s">${s}</span>`;
+  if (c) out += `<span class="c">${c}</span>`;
+  return `<span class="${cls || ""}">${out || '<span class="c">0</span>'}</span>`;
+}
+function icon(i) { return `<span class="icon" style="background:${ICON[i % ICON.length]}"></span>`; }
+function rowTip(r) {
+  return `<b>${r.item}</b><span class="sub">${r.action}: ${r.qty} at most ${money(r.max || r.price)} each</span><br>Profit ${money(r.profit)} after the AH cut.${r.note ? "<br>" + r.note : ""}<br><span class="muted">Right-click when bought.</span>`;
+}
+
+// ---------- the Scan / Reload / Load loop state ----------
+// What the Addon can know, mapped to one next step. Wait times are sped up 10x here.
+const LOOP = {
+  fresh:    { step: 1, title: "Scan the Auction House", line: "Open the Auction House and click Scan. It takes about a minute.", btn: "Scan", where: "ah" },
+  scanning: { step: 1, title: "Scanning...", line: "Keep the Auction House open until the Scan is saved.", btn: "Scanning...", disabled: true },
+  scanned:  { step: 2, title: "Send your Scan to the Brain", line: "Scan saved. Reload to hand it to the Brain app.", btn: "Reload", pulse: true },
+  waiting:  { step: 3, title: "The Brain is working", line: "The Brain is reading your Scan. About a minute.", btn: "Wait...", disabled: true, bar: true },
+  ready:    { step: 3, title: "New recommendations are ready", line: "Click Load to see what to buy.", btn: "Load", pulse: true },
+  current:  { step: 4, title: "Up to date", line: "These are from your Scan 3 min ago. You can Scan again in 12:00.", btn: "Scan (12:00)", disabled: true },
+  behind:   { step: 3, warn: true, title: "The Brain hasn't picked up your Scan", line: "Is AzerothQuant Brain running? Start it from the Start menu, then Reload.", btn: "Reload" },
+  catching: { step: 3, title: "Downloading guild Scans", line: "First start: the Brain is downloading recent Scans. A few minutes. Reload after that.", btn: "Reload", bar: true },
+};
+const STEP_NAMES = ["Scan", "Reload", "Load"];
+const STEP_TIPS = [
+  "Scan reads every listing on the Auction House. You can Scan once every 15 minutes.",
+  "Reload saves your Scan so the Brain app can read it. WoW only saves on a reload or logout.",
+  "Load shows the Brain's new recommendations without another reload. Works once per reload.",
+];
+let loop = "scanned";
+let waitPct = 0;
+let tab = "Shopping List";
+let selRow = 0;
+let autoLoad = true;
+
+function stepsHtml(compact) {
+  const L = LOOP[loop];
+  return `<div class="steps">${STEP_NAMES.map((n, i) => {
+    const k = i + 1;
+    const cls = L.step > k || loop === "current" ? "done" : L.step === k ? "now" : "";
+    return `<div class="step ${cls}" data-tip="<b>Step ${k}: ${n}</b>${STEP_TIPS[i]}"><span class="dot">${cls === "done" ? "✓" : k}</span>${compact ? "" : n}</div>${k < 3 ? '<span class="arrow">›</span>' : ""}`;
+  }).join("")}</div>`;
+}
+function nextBtn(big) {
+  const L = LOOP[loop];
+  const tip = L.btn.startsWith("Scan") ? STEP_TIPS[0] : L.btn === "Reload" ? STEP_TIPS[1] : L.btn === "Load" ? STEP_TIPS[2] : "Nothing to click yet: the Brain is still working.";
+  if (L.where === "ah") return `<span class="muted" style="font-size:12px">Scan is on the Auction House ←</span>`;
+  return `<button class="btn ${big ? "big" : ""} ${L.pulse ? "pulse" : ""}" ${L.disabled ? "disabled" : ""} data-act="next" data-tip="<b>${L.btn}</b>${tip}">${L.btn}</button>`;
+}
+function barHtml() {
+  const L = LOOP[loop];
+  return L.bar ? `<div class="bar" style="margin-top:6px"><i style="width:${waitPct}%"></i></div>` : "";
+}
+function settingsHtml() {
+  return `<label class="small" data-tip="<b>Days to sell</b>The most days you're willing to wait for something to sell. Leave blank for no limit.">Days to sell <span class="help">?</span></label>
+    <input class="input" style="width:40px" placeholder="any" data-tip="<b>Days to sell</b>Type a number of days, then Enter.">
+    <label class="small" data-tip="<b>Budget</b>The most gold to spend on any one buy. Leave blank to use all your gold.">Budget (g) <span class="help">?</span></label>
+    <input class="input" placeholder="all" data-tip="<b>Budget</b>Type gold, like 250, then Enter.">`;
+}
+
+// ---------- the table ----------
+function columnsFor(t, slim) {
+  if (t === "Holdings") return slim ? ["Item", "Action", "Qty", "Profit", "Note"] : ["Item", "Action", "Qty", "Price", "Profit", "ROI", "Beta", "Note"];
+  return slim ? ["Item", "Action", "Qty", "Max price", "Profit", "Note"]
+    : ["Item", "Action", "Qty", "Max price", "Post at", "Profit", "Per click", "Per day", "ROI", "Cost", "Beta", "Note"];
+}
+const WIDTH = { Item: 250, Action: 80, Qty: 55, "Max price": 95, "Post at": 95, Profit: 110, "Per click": 90, "Per day": 90, ROI: 50, Cost: 95, Beta: 90, Price: 95, Note: null };
+function cell(r, c) {
+  switch (c) {
+    case "Item": return `<span class="${r.q}">${r.item}</span>`;
+    case "Action": return `<span class="tag ${r.action}">${r.action}</span>`;
+    case "Qty": return r.qty;
+    case "Max price": return money(r.max);
+    case "Price": return money(r.price);
+    case "Post at": return money(r.post);
+    case "Profit": return money(r.profit);
+    case "Per click": return money(r.perClick);
+    case "Per day": return money(r.perDay);
+    case "ROI": return r.roi || '<span class="muted">-</span>';
+    case "Cost": return money(r.cost);
+    case "Beta": return money(r.beta);
+    case "Note": return `<span class="${/off/.test(r.note) ? "warn" : "muted"}">${r.note}</span>`;
+  }
+}
+function rowsFor(t) {
+  if (t === "Holdings") return holdings;
+  if (t === "Shopping List") return shopping;
+  return shopping.slice(0, other[t] || 3);
+}
+function tableHtml(t, slim, opts = {}) {
+  const cols = columnsFor(t, slim);
+  const rows = rowsFor(t);
+  const isNum = c => !["Item", "Action", "Note"].includes(c);
+  const colgroup = cols.map(c => `<col style="${WIDTH[c] && !(slim && c === "Item") ? "width:" + WIDTH[c] + "px" : ""}">`).join("");
+  if (!LOOP[loop] || (loop === "fresh" && opts.emptyWhenFresh)) {
+    return `<div style="padding:60px;text-align:center"><div style="color:var(--gold);font-size:16px;margin-bottom:8px">No recommendations yet</div><div class="muted">Open the Auction House and click Scan to get started.</div></div>`;
+  }
+  return `<table><colgroup>${colgroup}</colgroup><thead><tr>${cols.map(c => `<th class="${isNum(c) ? "num" : ""}" data-tip="<b>${c}</b>${COL_TIPS[c] || ""}<br><span class=muted>Click to sort.</span>">${c}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r, i) => `<tr class="${opts.select && i === selRow ? "sel" : ""}" data-row="${i}" data-tip="${rowTip(r).replace(/"/g, "&quot;")}">${cols.map(c => `<td class="${isNum(c) ? "num" : ""}">${c === "Item" ? icon(i) : ""}${cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function headerLines() {
+  return `<div class="statusline"><span style="color:#fff">Thunderhorn Alliance</span> <span class="muted">· Scan 3 min ago · 8 options · gold on hand 1,240g</span></div>`;
+}
+function rowActions() {
+  return `<button class="btn" data-tip="<b>Post</b>Lists the selected item in your bags on the AH at the Post at price. Nothing is listed without this click.">Post</button>
+    <button class="btn" data-tip="<b>Search</b>Searches the AH for the selected item so you can buy it.">Search</button>`;
+}
+
+// ---------- Variant A: Wider classic ----------
+// Today's frame, 1150 px wide. A step strip with one Next button replaces the lone
+// Reload/Load button. Settings move to the bottom bar. Tabs stay at the bottom.
+function variantA() {
+  const L = LOOP[loop];
+  return `<div class="frame" style="width:1150px;height:640px">
+    <div class="portrait">AQ</div>
+    <div class="titlebar">AzerothQuant Recommendations<span class="close" data-tip="Close. /aq recs opens it again.">✕</span></div>
+    <div style="display:flex;align-items:center;gap:14px;padding:8px 12px 6px 64px">
+      ${stepsHtml()}
+      <div style="flex:1;min-width:0">
+        <div class="statusline ${L.warn ? "warn" : ""}" style="color:${L.warn ? "" : "#fff"}">${L.line}</div>${barHtml()}
+      </div>
+      ${nextBtn()}
+    </div>
+    <div style="padding:0 12px 6px">${headerLines()}</div>
+    <div class="inset" style="position:absolute;left:8px;right:8px;top:92px;bottom:40px;overflow:auto">${tableHtml(tab, false, { emptyWhenFresh: true })}</div>
+    <div style="position:absolute;left:12px;right:12px;bottom:8px;display:flex;gap:8px;align-items:center">
+      ${rowActions()}<span style="flex:1"></span>${settingsHtml()}
+    </div>
+    <div class="tabs-bottom">${TABS.map(t => `<div class="tab ${t === tab ? "on" : ""}" data-tab="${t}" data-tip="<b>${t}</b>${TAB_TIPS[t]}">${t}<span class="count">${rowsFor(t).length}</span></div>`).join("")}</div>
+  </div>`;
+}
+
+// ---------- Variant B: Sidebar ----------
+// Tabs become a left list with a one-line plain description each, so new players read
+// what each is. The loop is a card at the top of the sidebar with one big button.
+function variantB() {
+  const L = LOOP[loop];
+  return `<div class="frame" style="width:1180px;height:640px;display:flex;flex-direction:column">
+    <div class="portrait">AQ</div>
+    <div class="titlebar">AzerothQuant<span class="muted" style="font-weight:400;margin-left:10px">${headerLines().replace(/<\/?div[^>]*>/g, "")}</span><span class="close">✕</span></div>
+    <div style="display:flex;flex:1;min-height:0">
+      <div style="width:250px;flex:none;border-right:1px solid #000;padding:12px 10px;display:flex;flex-direction:column;gap:10px;background:#120f0a">
+        <div class="inset" style="padding:10px;border-radius:4px;${L.warn ? "box-shadow:inset 0 0 0 1px #ff9a3a" : ""}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">${stepsHtml(true)}<span class="muted" style="font-size:11px">Step ${Math.min(L.step, 3)} of 3</span></div>
+          <div style="color:${L.warn ? "#ff9a3a" : "var(--gold)"};font-weight:600;margin-bottom:3px">${L.title}</div>
+          <div class="muted" style="font-size:12px;margin-bottom:8px">${L.line}</div>
+          ${barHtml()}
+          <div style="margin-top:8px">${nextBtn(true).replace('class="btn', 'style="width:100%" class="btn')}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          ${TABS.map(t => `<div data-tab="${t}" data-tip="<b>${t}</b>${TAB_TIPS[t]}" style="padding:7px 9px;border-radius:4px;cursor:pointer;${t === tab ? "background:rgba(255,209,0,.12);box-shadow:inset 3px 0 0 var(--gold)" : ""}">
+            <div style="display:flex;justify-content:space-between"><span style="color:${t === tab ? "#fff" : "var(--gold)"};font-weight:600">${t}</span><span class="muted">${rowsFor(t).length}</span></div>
+            <div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${TAB_TIPS[t]}</div></div>`).join("")}
+        </div>
+        <div style="margin-top:auto;display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:center">${settingsHtml()}</div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <div style="padding:10px 12px 6px;display:flex;align-items:center;gap:8px">
+          <div style="color:var(--gold);font-size:15px;font-weight:600">${tab}</div>
+          <div class="muted" style="font-size:12px">${TAB_TIPS[tab]}</div>
+          <span style="flex:1"></span>${rowActions()}
+        </div>
+        <div class="inset" style="flex:1;margin:0 8px 8px;overflow:auto">${tableHtml(tab, false, { emptyWhenFresh: true })}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- Variant C: Focus + details ----------
+// Fewer columns (Item, Action, Qty, Max price, Profit, Note); a click shows the rest in
+// a details pane with the row's buttons. The loop is a full-width banner that only
+// takes space when there's something to do, and the Load happens by itself.
+function variantC() {
+  const L = LOOP[loop];
+  const rows = rowsFor(tab);
+  const r = rows[Math.min(selRow, rows.length - 1)];
+  const quiet = loop === "current";
+  const banner = quiet
+    ? `<div style="display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px" class="muted" data-tip="<b>Up to date</b>${L.line}">✓ ${L.line}</div>`
+    : `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:${L.warn ? "linear-gradient(90deg,#3a1a08,#1d1810)" : "linear-gradient(90deg,#3a2e10,#1d1810)"};border-bottom:1px solid #000">
+        <div style="font-size:22px;color:${L.warn ? "#ff9a3a" : "var(--gold)"}">${L.warn ? "!" : "➜"}</div>
+        <div style="flex:1;min-width:0">
+          <div style="color:${L.warn ? "#ff9a3a" : "var(--gold)"};font-weight:600">${loop === "waiting" && autoLoad ? "The Brain is working. New recommendations will show by themselves." : L.title}</div>
+          <div class="muted" style="font-size:12px">${loop === "waiting" && autoLoad ? "About a minute. Keep playing." : L.line}</div>${barHtml()}
+        </div>
+        ${loop === "waiting" && autoLoad ? "" : nextBtn(true)}
+      </div>`;
+  const detail = !r ? "" : `<div class="inset" style="width:300px;flex:none;margin:0 8px 8px 0;padding:12px;overflow:auto">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">${icon(selRow)}<span class="${r.q}" style="font-weight:600;white-space:normal">${r.item}</span></div>
+      <div style="margin-bottom:10px"><span class="tag ${r.action}">${r.action}</span> <span class="muted">${r.note || ""}</span></div>
+      ${[["Buy", r.qty + " at most " + money(r.max || r.price) + " each", "Qty"], ["Post at", money(r.post || r.price), "Post at"], ["Profit", money(r.profit), "Profit"], ["Per click", money(r.perClick), "Per click"], ["Per day", money(r.perDay), "Per day"], ["ROI", r.roi || "-", "ROI"], ["Cost", money(r.cost), "Cost"], ["Beta guess", money(r.beta), "Beta"]]
+        .map(([k, v, c]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #1a1610" data-tip="<b>${k}</b>${COL_TIPS[c] || ""}"><span class="muted">${k}</span><span>${v}</span></div>`).join("")}
+      <div style="display:flex;gap:6px;margin-top:12px">${rowActions()}</div>
+    </div>`;
+  return `<div class="frame" style="width:1100px;height:640px;display:flex;flex-direction:column">
+    <div class="portrait">AQ</div>
+    <div class="titlebar">AzerothQuant<span class="close">✕</span></div>
+    <div style="display:flex;gap:2px;padding:6px 10px 0 64px;border-bottom:1px solid var(--border)">
+      ${TABS.map(t => `<div data-tab="${t}" data-tip="<b>${t}</b>${TAB_TIPS[t]}" style="padding:6px 12px;cursor:pointer;border-radius:5px 5px 0 0;font-weight:600;font-size:12px;${t === tab ? "background:#2a2216;color:#fff;box-shadow:inset 0 2px 0 var(--gold)" : "color:var(--gold)"}">${t} <span class="muted" style="font-weight:400">${rowsFor(t).length}</span></div>`).join("")}
+    </div>
+    ${banner}
+    <div style="padding:6px 12px;display:flex;align-items:center;gap:8px">${headerLines()}<span style="flex:1"></span>${settingsHtml()}</div>
+    <div style="flex:1;min-height:0;display:flex;gap:8px">
+      <div class="inset" style="flex:1;min-width:0;margin:0 0 8px 8px;overflow:auto">${tableHtml(tab, true, { select: true, emptyWhenFresh: true })}</div>
+      ${detail}
+    </div>
+  </div>`;
+}
+
+// ---------- Variant D: the user's mix (C + every number column) ----------
+// C's tabs, banner and auto-Load. The table keeps every number column but drops Note;
+// the side pane shows the hovered row (a click pins it) with its Note first.
+let hoverRow = null;
+function variantD() {
+  const L = LOOP[loop];
+  const rows = rowsFor(tab);
+  const i = hoverRow !== null ? hoverRow : Math.min(selRow, rows.length - 1);
+  const r = rows[i];
+  const cols = columnsFor(tab, false).filter(c => c !== "Note");
+  const isNum = c => !["Item", "Action"].includes(c);
+  const W = { ...WIDTH, Item: 230, Action: 72, Qty: 50, "Max price": 88, "Post at": 88, Profit: 100, "Per click": 84, "Per day": 84, ROI: 46, Cost: 88, Beta: 84, Price: 88 };
+  const tableW = cols.reduce((s, c) => s + W[c], 0);
+  const quiet = loop === "current";
+  const waitingAuto = loop === "waiting" && autoLoad;
+  const banner = quiet
+    ? `<div style="padding:4px 12px;font-size:12px" class="muted">✓ ${L.line}</div>`
+    : `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:${L.warn ? "linear-gradient(90deg,#3a1a08,#1d1810)" : "linear-gradient(90deg,#3a2e10,#1d1810)"};border-bottom:1px solid #000">
+        <div style="font-size:22px;color:${L.warn ? "#ff9a3a" : "var(--gold)"}">${L.warn ? "!" : "➜"}</div>
+        <div style="flex:1;min-width:0">
+          <div style="color:${L.warn ? "#ff9a3a" : "var(--gold)"};font-weight:600">${waitingAuto ? "The Brain is working. New recommendations will show by themselves." : L.title}</div>
+          <div class="muted" style="font-size:12px">${waitingAuto ? "About a minute. Keep playing." : L.line}</div>${barHtml()}
+        </div>${waitingAuto ? "" : nextBtn(true)}</div>`;
+  const table = loop === "fresh"
+    ? `<div style="padding:60px;text-align:center"><div style="color:var(--gold);font-size:16px;margin-bottom:8px">No recommendations yet</div><div class="muted">Open the Auction House and click Scan to get started.</div></div>`
+    : `<table style="width:${tableW}px"><colgroup>${cols.map(c => `<col style="width:${W[c]}px">`).join("")}</colgroup>
+      <thead><tr>${cols.map(c => `<th class="${isNum(c) ? "num" : ""}" data-tip="<b>${c}</b>${COL_TIPS[c] || ""}<br><span class=muted>Click to sort.</span>">${c}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map((row, k) => `<tr class="${k === selRow ? "sel" : ""}" data-row="${k}" data-hover="${k}">${cols.map(c => `<td class="${isNum(c) ? "num" : ""}">${c === "Item" ? icon(k) : ""}${cell(row, c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const pane = !r || loop === "fresh" ? `<div class="inset" style="width:260px;flex:none;margin:0 8px 8px 0;padding:12px" ><span class="muted">Hover a row to see more about it here.</span></div>`
+    : `<div class="inset" style="width:260px;flex:none;margin:0 8px 8px 0;padding:12px;overflow:auto">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">${icon(i)}<span class="${r.q}" style="font-weight:600;white-space:normal">${r.item}</span></div>
+      <div style="margin-bottom:10px"><span class="tag ${r.action}">${r.action}</span>${hoverRow !== null && hoverRow !== selRow ? ' <span class="muted" style="font-size:11px">(hovered)</span>' : ""}</div>
+      <div style="color:var(--gold);font-size:11px;margin-bottom:2px">Note</div>
+      <div style="margin-bottom:10px;white-space:normal" class="${/off/.test(r.note) ? "warn" : ""}">${r.note || '<span class="muted">Nothing extra.</span>'}</div>
+      <div style="color:var(--gold);font-size:11px;margin-bottom:2px">Where it comes from</div>
+      <div class="muted" style="font-size:12px;margin-bottom:10px;white-space:normal">${r.action === "Craft" ? "Buy the reagents, craft it, then post it at the Post at price." : r.action === "Vendor" ? "Buy it, then sell it to any merchant." : "Buy it, then post it at the Post at price."}<br>Right-click the row once you've bought it.</div>
+      <div style="display:flex;gap:6px">${rowActions()}</div>
+    </div>`;
+  return `<div class="frame" style="width:${tableW + 300}px;height:640px;display:flex;flex-direction:column">
+    <div class="portrait">AQ</div>
+    <div class="titlebar">AzerothQuant<span class="close">✕</span></div>
+    <div style="display:flex;gap:2px;padding:6px 10px 0 64px;border-bottom:1px solid var(--border)">
+      ${TABS.map(t => `<div data-tab="${t}" data-tip="<b>${t}</b>${TAB_TIPS[t]}" style="padding:6px 12px;cursor:pointer;border-radius:5px 5px 0 0;font-weight:600;font-size:12px;${t === tab ? "background:#2a2216;color:#fff;box-shadow:inset 0 2px 0 var(--gold)" : "color:var(--gold)"}">${t} <span class="muted" style="font-weight:400">${rowsFor(t).length}</span></div>`).join("")}
+    </div>
+    ${banner}
+    <div style="padding:6px 12px;display:flex;align-items:center;gap:8px">${headerLines()}<span style="flex:1"></span>${settingsHtml()}</div>
+    <div style="flex:1;min-height:0;display:flex;gap:8px">
+      <div class="inset" style="flex:1;min-width:0;margin:0 0 8px 8px;overflow:auto">${table}</div>
+      ${pane}
+    </div>
+    <div style="position:absolute;bottom:-22px;left:0;font:11px system-ui;color:#888">Frame ${tableW + 300} px wide. 1920 px screen minus the AH (about 800 px) leaves about 1100.</div>
+  </div>`;
+}
+
+const VARIANTS = {
+  A: ["Wider classic", variantA],
+  B: ["Sidebar", variantB],
+  C: ["Focus + details", variantC],
+  D: ["C + all columns, Note on the side", variantD],
+};
+const params = new URLSearchParams(location.search);
+let variant = VARIANTS[params.get("variant")] ? params.get("variant") : "A";
+
+function render() {
+  const L = LOOP[loop];
+  document.getElementById("stage").innerHTML = `
+    <div class="ah"><div style="color:#aaa">Auction House (stand-in)</div>
+      <button class="btn scanbtn ${loop === "fresh" ? "pulse" : ""}" ${loop === "fresh" ? "" : "disabled"} data-act="scan"
+        data-tip="<b>Scan</b>${STEP_TIPS[0]}">${loop === "scanning" ? "Scanning..." : loop === "fresh" ? "Scan" : "Scan (12:00)"}</button></div>
+    ${VARIANTS[variant][1]()}`;
+  const keys = Object.keys(VARIANTS);
+  document.getElementById("proto").innerHTML = `
+    <button data-cycle="-1">←</button><b>${variant} (${VARIANTS[variant][0]})</b><button data-cycle="1">→</button>
+    <span class="sep"></span><span>Loop:</span>
+    ${Object.keys(LOOP).map(k => `<button class="${k === loop ? "on" : ""}" data-loop="${k}">${k}</button>`).join("")}
+    ${"CD".includes(variant) ? `<span class="sep"></span><label><input type="checkbox" data-auto ${autoLoad ? "checked" : ""}> auto-Load</label>` : ""}`;
+}
+let timer;
+function setLoop(k) {
+  loop = k; waitPct = 0; clearInterval(timer);
+  if (k === "scanning") timer = setTimeout(() => setLoop("scanned"), 1500);
+  if (k === "waiting" || k === "catching") {
+    timer = setInterval(() => {
+      waitPct += 100 / 70; // 70 s, at 10x
+      if (waitPct >= 100) { clearInterval(timer); setLoop(k === "waiting" ? ("CD".includes(variant) && autoLoad ? "current" : "ready") : "fresh"); return; }
+      render();
+    }, 100);
+  }
+  render();
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-cycle],[data-loop],[data-tab],[data-act],[data-row],[data-auto]");
+  if (!t) return;
+  if (t.dataset.cycle) {
+    const keys = Object.keys(VARIANTS);
+    variant = keys[(keys.indexOf(variant) + Number(t.dataset.cycle) + keys.length) % keys.length];
+    history.replaceState(null, "", "?variant=" + variant); render();
+  } else if (t.dataset.loop) setLoop(t.dataset.loop);
+  else if (t.dataset.tab) { tab = t.dataset.tab; selRow = 0; render(); }
+  else if (t.dataset.act === "scan") setLoop("scanning");
+  else if (t.dataset.act === "next") {
+    const b = LOOP[loop].btn;
+    setLoop(b === "Reload" ? "waiting" : b === "Load" ? "current" : loop);
+  } else if (t.dataset.row) { selRow = Number(t.dataset.row); render(); }
+  else if (t.hasAttribute("data-auto")) { autoLoad = t.checked; render(); }
+});
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input,textarea,[contenteditable]")) return;
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    document.querySelector(`[data-cycle="${e.key === "ArrowLeft" ? -1 : 1}"]`).click();
+  }
+});
+const tip = document.getElementById("tip");
+document.addEventListener("mouseover", e => {
+  if (variant !== "D") return;
+  const tr = e.target.closest("[data-hover]");
+  const next = tr ? Number(tr.dataset.hover) : null;
+  if (next !== hoverRow) { hoverRow = next; render(); }
+});
+document.addEventListener("mousemove", e => {
+  const t = e.target.closest("[data-tip]");
+  if (!t) { tip.style.display = "none"; return; }
+  tip.innerHTML = t.dataset.tip;
+  tip.style.display = "block";
+  const x = Math.min(e.clientX + 16, innerWidth - tip.offsetWidth - 8);
+  const y = Math.min(e.clientY + 16, innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+setLoop(loop);
+</script>
+</body>
+</html>
