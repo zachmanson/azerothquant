@@ -3,7 +3,10 @@
 Next, in order (target #146 by ~Oct 13):
 1. In game (user, by ~Oct 11): #156 both parts, same steps as later 108's item 1. Read the guide while there and fix anything that doesn't match the screen (Scan button spot, the "Load out of date AddOns" line, whether the window opens next to the AH).
 2. #146 PoC (the rest of #85 rides along). The guildie in it follows `docs/setup-guide.md`; that run is #138's Acceptance.
-3. Gap, Oct 21 to Nov 4: same as later 103.
+3. #158 UI rework (filed 2026-10-08, core): ui-ux-pro-max, `/prototype` layouts, grill the Scan/Reload/Load loop, then slices. #136 (wider table, now core) is its first slice.
+4. #145 (keep Fair Values across a restart, now core): a guildie's first Scan after booting the PC waits ~30 s extra.
+5. #134 Cancel button: wanted before Nov 4, after the PoC.
+6. Gap, Oct 21 to Nov 4: same as later 103.
 
 - Gotchas: same as later 108, plus: the repo is private, so guildies can't open the guide or the Release on GitHub. Send them the exe and the guide (paste or file). The guide says Post only: Cancel from ADR-0016 isn't built. Keep it in step with any change to app.py popups, Nudge.lua lines or tab names.
 
