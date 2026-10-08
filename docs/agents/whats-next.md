@@ -1,3 +1,13 @@
+2026-10-07 (later 106): #156 diagnosed and grilled (decisions on the issue's last comment). Root cause: `recommend.py` never reads `scan_dropped_item`, so the latest Scan's partial ladder is taken as the whole market. Thin table: NOT #150 (a). With Scan 67's drop list deleted, the 10 rows are identical. As of Scan 66 it's 23 rows. Partial Scans make fake price gaps, and the Shopping List picks those first: 6 of Scan 67's 10 rows are dropped items, and 3 more Crafts buy a dropped reagent. So #150 (b) is back: the Addon re-reads dropped rows (15 s cap), with a Brain backstop. Filed #157 (Brain still writes the old `addon/AzerothQuant/Recommendations.lua`, the 4k-line diff in git status).
+
+Next, in order (target #146 by ~Oct 13):
+1. #156 part (1): Brain backstop, TDD. Leave off the Shopping List the Flips to Sell/Vendor, Craft outputs and Disenchant sources the latest Scan dropped. Crafts that only buy a dropped reagent stay. Holdings note "Price may be off. Check the AH." First test: `selling_two_linen_an_hour(row(quantity=3, unit=10000), unit=19500, sale_events=3)` with the last Scan's `droppedRows=5, droppedItemIDs=[2589]` (sale_events=1 goes green by accident).
+2. #156 part (2): Addon re-read, TDD on a pure `Scan.lua` function (busted). Then the in-game check for both by ~Oct 11.
+3. #138 guide, then #146 PoC (the rest of #85 rides along).
+4. Gap, Oct 21 to Nov 4: same as later 103.
+
+- Gotchas: same as later 105, plus: an as-of-Scan recommend (`recommend_market(..., now=at, as_of=at, paid=False, loot_alert=False, buy_under=False)`) on a copy of `history.sqlite` takes ~50 s. That's the quick way to compare tables across Scans.
+
 2026-10-07 (later 105): #144/#150 (a) in-game check passed. Scan 68 in game (67 in the history): 70,893 Listings, 7,925 dropped (2,804 items), and `scan_dropped_item` has the 2,804. Parse 5.6-11 s -> 0.4 s. File 4.4 -> 3.3 MB (packed string ~36 bytes/row, not the 1.2 MB estimated). Load fills normally. #144 closed, #150 commented ((a) done; (c) + per-item hours still for the gap). **New: #156.** The current-market picture trusts a Scan with dropped rows. Fishing Rack (279965): the Scan kept 3 of 7 price levels, so the Brain said post at 39s 44c under 65 units at ~30s, and buy only 9. The user also thinks the table is too thin for 41g (6 Shopping List rows); check in the same diagnosis.
 
 Next, in order (target #146 by ~Oct 13):
