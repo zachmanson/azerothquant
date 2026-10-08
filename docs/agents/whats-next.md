@@ -5,8 +5,7 @@ Next, in order (target #146 by ~Oct 13):
 2. #156 passes: tag v0.2.0 and run #146's release steps (later 111's item 2).
 3. Meanwhile: #163 (hover text, last slice of #158). Then #145, #134, gap.
 
-- Gotchas: same as later 115, minus its #162 line, plus: the bash tool here turns `
-` inside heredocs into real newlines, so edit Python/Lua strings with the Edit tool. ADDON_LOADED for AzerothQuant no longer runs in DataAddon.lua: Scanner calls `DataAddon.atLoad(db)`.
+- Gotchas: same as later 115, minus its #162 line, plus: the bash tool here turns a backslash-n escape inside heredocs into a real newline, so edit Python/Lua strings with the Edit tool. ADDON_LOADED for AzerothQuant no longer runs in DataAddon.lua: Scanner calls `DataAddon.atLoad(db)`.
 
 2026-10-08 (later 115): #161 built (8ea6766), not closed: in-game check left (list on #161's last comment). Tabs on top (`PanelTopTabButtonTemplate` if the client has it, checked with `C_XMLUtil.GetTemplateInfo`; else the bottom template). A banner under them replaces the Reload/Load button and `waitingNote` (deleted): pure `NextStep.of(loop, now)` (new NextStep.lua, 12 busted cases) returns { title, line, button, action, enabled, pulse, warn, quiet }; the glue's `loopState()` in RecommendationFrame.lua gathers the loop each frame. Precedence: scanning > unsaved (Reload) > catching up > Brain not running (never ran or behind) > Brain working > Load/Reload > cooldown one-liner > open the AH > Scan. Scanner exposes `requestScan` and `ahOpen()`; 'Scan saved' and 'should be done' chat lines go out only while the frame is closed (`windowShown()` in Scanner.lua). When catching up ends mid-session, a timer sets `reloadReady`. 336 busted specs.
 
