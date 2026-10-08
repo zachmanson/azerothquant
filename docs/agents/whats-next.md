@@ -1,3 +1,12 @@
+2026-10-08 (later 115): #161 built (8ea6766), not closed: in-game check left (list on #161's last comment). Tabs on top (`PanelTopTabButtonTemplate` if the client has it, checked with `C_XMLUtil.GetTemplateInfo`; else the bottom template). A banner under them replaces the Reload/Load button and `waitingNote` (deleted): pure `NextStep.of(loop, now)` (new NextStep.lua, 12 busted cases) returns { title, line, button, action, enabled, pulse, warn, quiet }; the glue's `loopState()` in RecommendationFrame.lua gathers the loop each frame. Precedence: scanning > unsaved (Reload) > catching up > Brain not running (never ran or behind) > Brain working > Load/Reload > cooldown one-liner > open the AH > Scan. Scanner exposes `requestScan` and `ahOpen()`; 'Scan saved' and 'should be done' chat lines go out only while the frame is closed (`windowShown()` in Scanner.lua). When catching up ends mid-session, a timer sets `reloadReady`. 336 busted specs.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts (later 111's item 1), the guide read-through (#138), the #136, #160 and #161 checks (each on its last comment), and paste the last few `Import took` lines from the Brain log for #162.
+2. #156 passes: tag v0.2.0 and run #146's release steps (later 111's item 2).
+3. Meanwhile: #162 (auto-Load with 3 slots; needs a new ADR changing ADR-0021 first; timings wait on the `Import took` lines). Then #163, #145, #134, gap.
+
+- Gotchas: same as later 114, plus: the banner's layout constants (`TABS_TOP`, `BANNER_TOP`, `BANNER_HEIGHT`, `HEADER_ROW`) are guesses until the #161 check. #162 should add its orange 'took longer' state to `NextStep.of` and swap the Load state's 'should be ready' for 'are ready'.
+
 2026-10-08 (later 114): #160 built (d2fe1cc), not closed: in-game check left (list on #160's last comment). The Note column is gone from every tab. A side pane on the right of the frame (260 wide) shows the hovered row, else the selected one: Action, Note, a plain "what to do" line (`WHAT_TO_DO` per tab in RecommendationTable.lua), hidden/clipped values, then details. The row tooltip and #136's stopgap are gone. Post/Search sit in `pane.actions` and hide while the pane shows a row other than the selected one. Item now takes the slack (least 150). Hide order: Beta, Cost, ROI, Per click, Per day. Built rows carry `name`, `action`, `note`, `todo`, `details` (was `tooltip`). `RecommendationTable.paneText(row, values)` builds the pane text. 331 busted specs.
 
 Next, in order (target #146 by ~Oct 13):
