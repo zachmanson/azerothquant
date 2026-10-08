@@ -68,7 +68,8 @@ end
 -- plus firstUpdateAt (first REPLICATE_ITEM_LIST_UPDATE) and readAt (rows finished reading).
 -- Those two are diagnostic only (#15): they tell a throttled or slow Scan apart afterwards,
 -- but the Listings still stand as of requestedAt.
--- rows: one per replicate index, { link, count, buyout, timeLeft, owner }.
+-- rows: one per replicate index, { link, count, buyout, timeLeft, owner, itemID }. itemID is
+-- GetReplicateItemInfo's, there even when the link isn't.
 -- Own rows also get the item name from the link.
 -- playerName: UnitName("player"), to recognize the player's own Listings.
 -- sellPrice(itemID): the item's Vendor Price in copper (GetItemInfo's sellPrice), or nil
@@ -76,10 +77,18 @@ end
 -- itemInfo(itemID): { quality, itemLevel, classID, equipLoc } from GetItemInfo, or nil
 -- when the client hasn't loaded the item yet.
 -- Returns the Scan as stored in SavedVariables. buyout stays whole-auction; the Brain
--- divides by quantity for the unit buyout.
+-- divides by quantity for the unit buyout. The player's own rows are tables in listings,
+-- { itemString, quantity, buyout, timeLeft, own = true, name }. Everyone else's are packed
+-- into one string, packedListings = "itemString,quantity,buyout,timeLeft;..." (#144): one
+-- string per Scan instead of ~58k tables makes the file ~4x smaller and the Brain's parse
+-- ~50x faster. Item strings have no commas or semicolons; names can, so own rows stay tables.
 function Scan.build(request, rows, playerName, sellPrice, itemInfo)
-  local listings = {}
+  -- The player's own rows, as tables. Everyone else's go in packed (#144).
+  local listings, packed = {}, {}
   local droppedRows = 0
+  -- Each dropped row's item, once: the Brain leaves it out of the Observation Windows
+  -- this Scan touches, since a Listing missing here may not have sold (#150).
+  local droppedItemIDs, droppedLooked = {}, {}
   -- Vendor Price belongs to the itemID, so every suffix of an item shares one entry.
   -- 0 means a vendor won't buy it; the Brain decides what that means.
   local vendorPrices, looked = {}, {}
@@ -109,20 +118,29 @@ function Scan.build(request, rows, playerName, sellPrice, itemInfo)
       -- Item data never loaded. hasAllInfo = false alone is fine as long as the link is there
       -- (the link carries the itemID too).
       droppedRows = droppedRows + 1
+      if r.itemID and not droppedLooked[r.itemID] then
+        droppedLooked[r.itemID] = true
+        droppedItemIDs[#droppedItemIDs + 1] = r.itemID
+      end
     elseif r.buyout and r.buyout > 0 then
-      local own = r.owner ~= nil and r.owner == playerName
-      listings[#listings + 1] = {
-        -- Not the Item Key yet: the Brain derives that (itemID + bonus IDs) from this string.
-        itemString = item,
-        quantity = r.count,
-        buyout = r.buyout,
-        timeLeft = r.timeLeft,
-        -- The full Scan hides every seller except the player, so this is the only one kept.
-        own = own or nil,
-        -- Sale mail names the item but carries no Item Key, so an Outcome can only be
-        -- matched to its own Listing by name (#17). Other rows skip it to keep the Scan small.
-        name = own and itemName(r.link) or nil,
-      }
+      -- The full Scan hides every seller except the player, so own is the only one kept.
+      if r.owner ~= nil and r.owner == playerName then
+        listings[#listings + 1] = {
+          -- Not the Item Key yet: the Brain derives that (itemID + bonus IDs) from this string.
+          itemString = item,
+          quantity = r.count,
+          buyout = r.buyout,
+          timeLeft = r.timeLeft,
+          own = true,
+          -- Sale mail names the item but carries no Item Key, so an Outcome can only be
+          -- matched to its own Listing by name (#17).
+          name = itemName(r.link),
+        }
+      else
+        -- tostring: a missing field becomes a row the Brain can't read, not a lost Scan.
+        packed[#packed + 1] = table.concat(
+          { item, tostring(r.count), tostring(r.buyout), tostring(r.timeLeft) }, ",")
+      end
     end
   end
   return {
@@ -134,12 +152,21 @@ function Scan.build(request, rows, playerName, sellPrice, itemInfo)
     character = request.character,
     faction = request.faction,
     droppedRows = droppedRows,
+    droppedItemIDs = droppedItemIDs,
     listings = listings,
+    packedListings = table.concat(packed, ";"),
     vendorPrices = vendorPrices,
     vendorPricesMissing = vendorPricesMissing,
     itemInfo = infos,
     itemInfoMissing = itemInfoMissing,
   }
+end
+
+-- How many Listings a built Scan holds, own and packed.
+function Scan.listingCount(scan)
+  local _, separators = scan.packedListings:gsub(";", "")
+  local packed = scan.packedListings == "" and 0 or separators + 1
+  return #scan.listings + packed
 end
 
 ns.Scan = Scan

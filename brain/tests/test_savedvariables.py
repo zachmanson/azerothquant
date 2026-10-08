@@ -130,3 +130,23 @@ def test_parses_a_full_scan_in_linear_time():
 
     assert len(db["listings"]) == 10_000
     assert time.perf_counter() - start < 5
+
+
+def test_parses_a_scans_packed_rows_string_fast():
+    # #144: everyone else's rows come as one ~2 MB string per Scan. Read a character at a
+    # time it took ~0.8 s, most of what packing them saves.
+    packed = ";".join(["item:20744::::::::20:1490,1,600,2"] * 60_000)
+    text = f'AzerothQuantDB = {{\n\t["packedListings"] = "{packed}",\n}}\n'
+
+    start = time.perf_counter()
+    db = parse_savedvariables(text)["AzerothQuantDB"]
+
+    assert db["packedListings"] == packed
+    assert time.perf_counter() - start < 0.5
+
+
+def test_a_string_mixing_plain_runs_and_escapes_comes_out_whole():
+    # Escaped quotes, a backslash, a newline, é as decimal escapes of its UTF-8 bytes, and é.
+    text = r'a = "Sulfuras, Hand of \"Ragnaros\"\\\n\195\169 é;x"'
+
+    assert parse_savedvariables(text) == {"a": 'Sulfuras, Hand of "Ragnaros"\\\né é;x'}

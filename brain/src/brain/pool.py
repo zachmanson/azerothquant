@@ -82,6 +82,8 @@ def strip_scan(raw: dict) -> dict:
     Key comes out as it was."""
     stripped = copy.deepcopy(raw)
     stripped.pop("character", None)
+    if isinstance(stripped.get("packedListings"), str):
+        return _strip_packed(stripped)
     listings = stripped.get("listings")
     if isinstance(listings, list):
         for row in listings:
@@ -92,6 +94,25 @@ def strip_scan(raw: dict) -> dict:
             if isinstance(row.get("itemString"), str):
                 row["itemString"] = _strip_item_string(row["itemString"])
     return stripped
+
+
+def _strip_packed(stripped: dict) -> dict:
+    """A packed Scan (#144) keeps only the player's own rows as tables, so they'd stand out
+    even without the own flag. Every row goes into packedListings instead, sorted so their
+    place in the game's order doesn't give them away either."""
+    rows = [r for r in stripped["packedListings"].split(";") if r]
+    for row in stripped.get("listings") or []:
+        if isinstance(row, dict):
+            fields = (row.get(f) for f in ("itemString", "quantity", "buyout", "timeLeft"))
+            rows.append(",".join(str(f) for f in fields))
+    stripped["listings"] = []
+    stripped["packedListings"] = ";".join(sorted(_strip_packed_row(r) for r in rows))
+    return stripped
+
+
+def _strip_packed_row(row: str) -> str:
+    item_string, sep, rest = row.partition(",")
+    return _strip_item_string(item_string) + sep + rest
 
 
 def _strip_item_string(item_string: str) -> str:

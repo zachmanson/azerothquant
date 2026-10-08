@@ -27,6 +27,21 @@ local function row(overrides)
   return r
 end
 
+-- Everyone else's rows, unpacked from packedListings as the Brain reads them (#144).
+local function others(scan)
+  local result = {}
+  for packed in scan.packedListings:gmatch("[^;]+") do
+    local itemString, quantity, buyout, timeLeft = packed:match("^([^,]*),([^,]*),([^,]*),([^,]*)$")
+    result[#result + 1] = {
+      itemString = itemString,
+      quantity = tonumber(quantity),
+      buyout = tonumber(buyout),
+      timeLeft = tonumber(timeLeft),
+    }
+  end
+  return result
+end
+
 describe("Scan.marketFaction", function()
   -- UnitGUID("npc") format: Creature-0-<server>-<instance>-<zone>-<npcID>-<spawn>
   it("is Neutral at a neutral auctioneer, whatever the player's faction", function()
@@ -58,6 +73,7 @@ describe("Scan.build", function()
     assert.are.equal("Kash-Patel", scan.character)
     assert.are.equal("Alliance", scan.faction)
     assert.are.same({}, scan.listings)
+    assert.are.equal("", scan.packedListings)
     assert.are.equal(0, scan.droppedRows)
   end)
 
@@ -77,18 +93,38 @@ describe("Scan.build", function()
     assert.are.equal(1790000000, scan.requestedAt)
   end)
 
+  it("packs everyone else's rows into one string, and keeps the player's own as tables", function()
+    -- #144: one string per Scan parses ~50x faster in the Brain and makes the file ~4x
+    -- smaller. Own rows carry the item name, which can have a comma in it, so they stay tables.
+    local rows = {
+      row({ count = 20, buyout = 1940, timeLeft = 4 }),
+      row({ owner = "Kash" }),
+      row({ link = NATURE_PROT, count = 1, buyout = 5000, timeLeft = 2 }),
+    }
+
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    assert.are.equal("item:2680::::::::20:1490,20,1940,4;item:9768::::::::20:1490::1:1:12743,1,5000,2",
+      scan.packedListings)
+    assert.are.equal(1, #scan.listings)
+    assert.is_true(scan.listings[1].own)
+    assert.are.equal("Spiced Wolf Meat", scan.listings[1].name)
+    assert.are.equal(3, Scan.listingCount(scan))
+    assert.are.equal(0, Scan.listingCount(Scan.build(REQUEST, {}, "Kash")))
+  end)
+
   it("keeps the compact item string from the link", function()
     local scan = Scan.build(REQUEST, { row(), row({ link = NATURE_PROT }) }, "Kash")
 
-    assert.are.equal("item:2680::::::::20:1490", scan.listings[1].itemString)
-    assert.are.equal("item:9768::::::::20:1490::1:1:12743", scan.listings[2].itemString)
+    assert.are.equal("item:2680::::::::20:1490", others(scan)[1].itemString)
+    assert.are.equal("item:9768::::::::20:1490::1:1:12743", others(scan)[2].itemString)
   end)
 
   it("keeps the whole-auction buyout, quantity and time-left bucket as the game gives them", function()
     -- Linen Cloth x20 @ 1940c is 97c/unit; the Brain does that division, not the Addon.
     local scan = Scan.build(REQUEST, { row({ count = 20, buyout = 1940, timeLeft = 4 }) }, "Kash")
 
-    local listing = scan.listings[1]
+    local listing = others(scan)[1]
     assert.are.equal(20, listing.quantity)
     assert.are.equal(1940, listing.buyout)
     assert.are.equal(4, listing.timeLeft)
@@ -105,8 +141,8 @@ describe("Scan.build", function()
 
     local scan = Scan.build(REQUEST, rows, "Kash")
 
-    assert.are.equal(1, #scan.listings)
-    assert.are.equal(280, scan.listings[1].buyout)
+    assert.are.equal(1, #others(scan))
+    assert.are.equal(280, others(scan)[1].buyout)
     -- droppedRows is only for missing item data, not for rows with no price.
     assert.are.equal(0, scan.droppedRows)
   end)
@@ -122,9 +158,28 @@ describe("Scan.build", function()
 
     local scan = Scan.build(REQUEST, rows, "Kash")
 
-    assert.are.equal(1, #scan.listings)
-    assert.are.equal(1111, scan.listings[1].buyout)
+    assert.are.equal(1, #others(scan))
+    assert.are.equal(1111, others(scan)[1].buyout)
     assert.are.equal(2, scan.droppedRows)
+  end)
+
+  it("records the itemIDs of dropped rows once each, when the game gave them", function()
+    -- #150: GetReplicateItemInfo's itemID is there even when the link isn't, so the Brain
+    -- can leave those items out of the Observation Windows this Scan touches.
+    local function dropped(itemID)
+      local r = row({ itemID = itemID })
+      r.link = nil
+      return r
+    end
+    local noID = row()
+    noID.link = nil
+    local rows = { dropped(2589), dropped(2589), dropped(4306), noID, row({ itemID = 2680 }) }
+
+    local scan = Scan.build(REQUEST, rows, "Kash")
+
+    table.sort(scan.droppedItemIDs)
+    assert.are.same({ 2589, 4306 }, scan.droppedItemIDs)
+    assert.are.equal(4, scan.droppedRows)
   end)
 
   it("flags the player's own Listings", function()
@@ -136,10 +191,10 @@ describe("Scan.build", function()
 
     local scan = Scan.build(REQUEST, rows, "Kash")
 
+    assert.are.equal(1, #scan.listings)
     assert.is_true(scan.listings[1].own)
-    -- Left out rather than false: it saves a field on ~58k rows per Scan.
-    assert.is_nil(scan.listings[2].own)
-    assert.is_nil(scan.listings[3].own)
+    -- Everyone else's rows are packed, with no own flag.
+    assert.are.equal(2, #others(scan))
   end)
 
   it("records the item name on the player's own Listings only", function()
@@ -156,9 +211,9 @@ describe("Scan.build", function()
     assert.are.equal("Spiced Wolf Meat", scan.listings[1].name)
     -- A suffix item keeps its suffix, as the sale mail spells it.
     assert.are.equal("Scouting Belt of Nature Protection", scan.listings[2].name)
-    -- Left out on everyone else's rows, so the Scan barely grows.
-    assert.is_nil(scan.listings[3].name)
-    assert.is_nil(scan.listings[4].name)
+    -- Everyone else's rows are packed with no name, so the Scan barely grows.
+    assert.are.equal(2, #others(scan))
+    assert.are.equal("item:2680::::::::20:1490,10,280,3;item:2680::::::::20:1490,10,280,3", scan.packedListings)
   end)
 
   it("records each distinct item's Vendor Price once, by itemID", function()

@@ -101,6 +101,23 @@ def test_a_late_scan_is_merged_into_its_place_in_time(config, tmp_path):
     assert in_arrival_order(scans, config) == in_time_order(scans, tmp_path)
 
 
+def test_a_rematch_keeps_the_items_a_rewound_scan_dropped_rows_of(config, tmp_path):
+    # #150: the Scan at T0 + 40 min dropped Wool's rows, so the Wool missing from it never
+    # counts as sold, whatever order the Scans came in.
+    dropped_wool = scan(T0 + 40 * MINUTE, row(quantity=10, time_left=3))
+    dropped_wool["droppedRows"], dropped_wool["droppedItemIDs"] = 1, [2592]
+    scans = [
+        scan(T0, row(quantity=20), row(item=WOOL, unit=300)),
+        dropped_wool,
+        scan(T0 + 20 * MINUTE, row(quantity=15, time_left=3), row(item=WOOL, unit=300)),
+    ]
+
+    arrived = in_arrival_order(scans, config)
+
+    assert arrived == in_time_order(scans, tmp_path)
+    assert {e.item_key for e in arrived[2]} == {"2589"}
+
+
 def test_a_rematch_takes_back_own_from_a_listing_it_no_longer_matches_to_an_own_row(
     config, tmp_path
 ):

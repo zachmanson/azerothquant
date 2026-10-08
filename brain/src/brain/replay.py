@@ -51,7 +51,6 @@ from brain.recommend import (
     cheapest,
     deposit_of,
     exit_values,
-    item_id_of,
     lot_craft_results,
     market_bound,
     market_holdings,
@@ -59,6 +58,7 @@ from brain.recommend import (
     split_purchases,
     without,
 )
+from brain.scan import item_id_of
 
 
 class Policy(StrEnum):

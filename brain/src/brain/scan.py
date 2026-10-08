@@ -71,6 +71,12 @@ class ItemKey:
         return ":".join(str(n) for n in (self.item_id, *self.bonus_ids))
 
 
+def item_id_of(item_key: str) -> int:
+    """The itemID of a stored Item Key ("itemID" or "itemID:bonus1:..."): Vendor Price
+    belongs to it, not to the random suffix."""
+    return int(item_key.split(":", 1)[0])
+
+
 def _int_field(fields: list[str], index: int, item_string: str) -> int | None:
     """The field as an int, or None when it's empty or past the end (trailing ones get stripped)."""
     if index >= len(fields) or fields[index] == "":
@@ -134,6 +140,9 @@ class Scan:
     inexact_rows: int
     # Rows with an item string or field the Brain can't read.
     unreadable_rows: int
+    # The itemIDs of the dropped rows, where the game gave them (#150). Empty for Scans
+    # from before the Addon recorded them.
+    dropped_item_ids: frozenset[int] = frozenset()
 
     @classmethod
     def from_saved(cls, raw: object) -> "Scan":
@@ -146,12 +155,20 @@ class Scan:
         raw_listings = raw.get("listings", [])
         if not isinstance(raw_listings, list):
             raise ScanFormatError(f"Scan at {requested_at}: listings must be a sequence")
+        packed = raw.get("packedListings", "")
+        if not isinstance(packed, str):
+            raise ScanFormatError(f"Scan at {requested_at}: packedListings must be a string")
 
         rows = []
         inexact = unreadable = 0
-        for raw_row in raw_listings:
+        # The player's own rows are tables. Everyone else's are packed into one string
+        # since #144, and were tables before it, as Archived Scans still are.
+        item_keys: dict[str, str] = {}
+        readers = [(_row, r) for r in raw_listings]
+        readers += [(_packed_row, t) for t in packed.split(";") if t]
+        for read, raw_row in readers:
             try:
-                row = _row(raw_row)
+                row = read(raw_row, item_keys)
             except (ItemStringError, ScanFormatError):
                 unreadable += 1
                 continue
@@ -166,36 +183,86 @@ class Scan:
             dropped_rows=_required(raw, "droppedRows", int) if "droppedRows" in raw else 0,
             inexact_rows=inexact,
             unreadable_rows=unreadable,
+            dropped_item_ids=_dropped_item_ids(raw, requested_at),
             character=character,
             **header,
         )
 
 
-def _row(raw: object) -> ScanRow | None:
-    """The row as a ScanRow, or None when its unit buyout isn't whole copper."""
+def _dropped_item_ids(raw: dict, requested_at: int) -> frozenset[int]:
+    ids = raw.get("droppedItemIDs", [])
+    if not isinstance(ids, list) or not all(
+        isinstance(i, int) and not isinstance(i, bool) for i in ids
+    ):
+        raise ScanFormatError(f"Scan at {requested_at}: droppedItemIDs must be a list of itemIDs")
+    return frozenset(ids)
+
+
+def _row(raw: object, item_keys: dict[str, str]) -> ScanRow | None:
+    """The row as a ScanRow, or None when its unit buyout isn't whole copper.
+    `item_keys` caches each item string's Item Key: ~58k rows share ~5k."""
     if not isinstance(raw, dict):
         raise ScanFormatError(f"a Listing row must be a table, got {raw!r}")
-    item_key = ItemKey.from_item_string(_required(raw, "itemString", str))
-    quantity = _required(raw, "quantity", int)
-    buyout = _required(raw, "buyout", int)
-    time_left = _required(raw, "timeLeft", int)
-    if quantity <= 0 or buyout <= 0 or time_left not in TIME_LEFT_BUCKETS:
-        raise ScanFormatError(f"out-of-range field in Listing row {raw!r}")
-
-    unit = unit_buyout(buyout, quantity)
-    if unit is None:
-        return None
+    item_key = _item_key(_required(raw, "itemString", str), item_keys)
     # The Addon writes own = true or leaves it out.
     own = raw.get("own") is True
     name = raw.get("name")
+    return _checked_row(
+        item_key,
+        _required(raw, "quantity", int),
+        _required(raw, "buyout", int),
+        _required(raw, "timeLeft", int),
+        own,
+        # The Addon only names own rows; a name anywhere else is ignored, not an error.
+        name if own and isinstance(name, str) else None,
+        raw,
+    )
+
+
+def _packed_row(text: str, item_keys: dict[str, str]) -> ScanRow | None:
+    """One "itemString,quantity,buyout,timeLeft" row of packedListings, as `_row` reads a
+    table. Never own."""
+    fields = text.split(",")
+    if len(fields) != 4:
+        raise ScanFormatError(f"a packed Listing row needs 4 fields, got {text!r}")
+    item_string, quantity, buyout, time_left = fields
+    item_key = _item_key(item_string, item_keys)
+    # Digits only: int() would also take " 5", "+5" or "1_000", which the Addon never writes.
+    if not (quantity.isdecimal() and buyout.isdecimal() and time_left.isdecimal()):
+        raise ScanFormatError(f"a field isn't a number in packed Listing row {text!r}")
+    return _checked_row(
+        item_key, int(quantity), int(buyout), int(time_left), own=False, item_name=None, raw=text
+    )
+
+
+def _item_key(item_string: str, item_keys: dict[str, str]) -> str:
+    item_key = item_keys.get(item_string)
+    if item_key is None:
+        item_key = item_keys[item_string] = str(ItemKey.from_item_string(item_string))
+    return item_key
+
+
+def _checked_row(
+    item_key: str,
+    quantity: int,
+    buyout: int,
+    time_left: int,
+    own: bool,
+    item_name: str | None,
+    raw: object,
+) -> ScanRow | None:
+    if quantity <= 0 or buyout <= 0 or time_left not in TIME_LEFT_BUCKETS:
+        raise ScanFormatError(f"out-of-range field in Listing row {raw!r}")
+    unit = unit_buyout(buyout, quantity)
+    if unit is None:
+        return None
     return ScanRow(
-        item_key=str(item_key),
+        item_key=item_key,
         unit_buyout=unit,
         own=own,
         quantity=quantity,
         time_left=time_left,
-        # The Addon only names own rows; a name anywhere else is ignored, not an error.
-        item_name=name if own and isinstance(name, str) else None,
+        item_name=item_name,
     )
 
 

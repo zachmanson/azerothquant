@@ -1,6 +1,6 @@
 import pytest
 
-from brain.scan import ItemKey, ItemStringError, unit_buyout
+from brain.scan import ItemKey, ItemStringError, Scan, ScanRow, unit_buyout
 
 
 def test_item_key_ignores_the_scanning_characters_level_and_spec():
@@ -65,3 +65,64 @@ def test_unit_buyout_divides_the_whole_auction_buyout():
 
 def test_unit_buyout_that_is_not_whole_copper_is_flagged_not_rounded():
     assert unit_buyout(buyout=1941, quantity=20) is None
+
+
+# --- Scan.from_saved ---
+
+
+def saved_scan(**fields):
+    return {
+        "requestedAt": 1_790_000_000,
+        "realm": "Classic Beta PvP",
+        "faction": "Alliance",
+        "character": "Kash-Patel",
+        "droppedRows": 0,
+        **fields,
+    }
+
+
+def test_reads_packed_rows_and_own_rows_together():
+    # #144: everyone else's rows come as one string, the player's own as tables.
+    scan = Scan.from_saved(
+        saved_scan(
+            listings=[
+                {
+                    "itemString": "item:2589::::::::20:1490",
+                    "quantity": 5,
+                    "buyout": 500,
+                    "timeLeft": 4,
+                    "own": True,
+                    "name": "Linen Cloth",
+                }
+            ],
+            packedListings="item:2589::::::::20:1490,20,1940,4;item:9768::::::::20:1490::1:1:12743,1,5000,2",
+        )
+    )
+
+    assert set(scan.rows) == {
+        ScanRow("2589", 100, own=True, quantity=5, time_left=4, item_name="Linen Cloth"),
+        ScanRow("2589", 97, own=False, quantity=20, time_left=4),
+        ScanRow("9768:12743", 5000, own=False, quantity=1, time_left=2),
+    }
+
+
+def test_packed_rows_it_cannot_read_or_price_exactly_are_counted_not_kept():
+    scan = Scan.from_saved(
+        saved_scan(
+            packedListings=(
+                "item:2589,3,10,4;"  # 10 / 3 isn't whole copper
+                "item:2589,nil,100,4;"  # a field the Addon couldn't fill
+                "item:2589,1,100;"  # too few fields
+                "item:2589,+1,100,4;"  # int() would take it; the Addon never writes it
+                "item:2589,1,100,4"
+            )
+        )
+    )
+
+    assert scan.rows == (ScanRow("2589", 100, own=False, quantity=1, time_left=4),)
+    assert scan.inexact_rows == 1
+    assert scan.unreadable_rows == 3
+
+
+def test_an_empty_packed_string_is_no_rows():
+    assert Scan.from_saved(saved_scan(packedListings="")).rows == ()

@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS scan (
     UNIQUE (market_id, requested_at)
 );
 
+-- The items a Scan dropped rows of for missing item data (#150). Their Listings may
+-- have been missed rather than gone, so the Observation Windows either side of the Scan
+-- leave those items out.
+CREATE TABLE IF NOT EXISTS scan_dropped_item (
+    scan_id INTEGER NOT NULL REFERENCES scan (id),
+    item_id INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, item_id)
+);
+
 -- Every Pooled Scan downloaded into the Archive, imported or not, so a pull skips it and a
 -- rollback can find it (#122).
 CREATE TABLE IF NOT EXISTS pooled_scan (
@@ -800,6 +809,8 @@ def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
     )
     for table in _SEEN_IN_A_SCAN:
         conn.execute(f"DELETE FROM {table} WHERE scan_id IN ({tail})", in_tail)
+    # Not in _SEEN_IN_A_SCAN: it belongs to the Scan alone, with no Listing to rewind.
+    conn.execute(f"DELETE FROM scan_dropped_item WHERE scan_id IN ({tail})", in_tail)
     conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
 
 
@@ -829,6 +840,11 @@ def _insert_scan(
             len(scan.rows),
         ),
     ).lastrowid
+
+    conn.executemany(
+        "INSERT INTO scan_dropped_item (scan_id, item_id) VALUES (?, ?)",
+        [(scan_id, item_id) for item_id in sorted(scan.dropped_item_ids)],
+    )
 
     previous = _live_listings(conn, latest_id) if latest_id is not None else []
     gap = scan.requested_at - latest_at if latest_at is not None else 0
@@ -1769,6 +1785,21 @@ def scan_times(conn: sqlite3.Connection, market: Market) -> list[int]:
         _market_params(market),
     )
     return [at for (at,) in rows]
+
+
+def dropped_item_ids(conn: sqlite3.Connection, market: Market) -> dict[int, frozenset[int]]:
+    """The itemIDs each of the Market's Scans dropped rows of, by its requested_at. Scans
+    that dropped none, or didn't say which, are left out."""
+    rows = conn.execute(
+        "SELECT s.requested_at, d.item_id FROM scan_dropped_item d"
+        " JOIN scan s ON s.id = d.scan_id JOIN market m ON m.id = s.market_id"
+        f" WHERE {_MARKET_FILTER}",
+        _market_params(market),
+    )
+    result: dict[int, set[int]] = {}
+    for at, item_id in rows:
+        result.setdefault(at, set()).add(item_id)
+    return {at: frozenset(ids) for at, ids in result.items()}
 
 
 ScanStamp = tuple[int, int, str, str | None]  # requested_at, ID, source, pool ID if Pooled

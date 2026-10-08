@@ -139,9 +139,9 @@ local function finish(rows)
   db.nextScanId = db.nextScanId + 1
   pending, reading = nil, false
   refreshButton()
-  Chat.say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data, %d items with no Vendor Price yet."
-    .. " /reload to hand it to the Brain.",
-    scan.id, #scan.listings, scan.droppedRows, scan.vendorPricesMissing))
+  Chat.say(string.format("Scan #%d saved: %d Listings, %d dropped for missing item data (%d items),"
+    .. " %d items with no Vendor Price yet. /reload to hand it to the Brain.",
+    scan.id, Scan.listingCount(scan), scan.droppedRows, #scan.droppedItemIDs, scan.vendorPricesMissing))
 end
 
 local function readRows()
@@ -156,13 +156,15 @@ local function readRows()
     end
     local last = math.min(i + ROWS_PER_FRAME, n) - 1
     for index = i, last do
-      local _, _, count, _, _, _, _, _, _, buyout, _, _, _, owner = AH.GetReplicateItemInfo(index)
+      -- Return 17 is the itemID, there even when the link isn't loaded yet (#150).
+      local _, _, count, _, _, _, _, _, _, buyout, _, _, _, owner, _, _, itemID = AH.GetReplicateItemInfo(index)
       rows[#rows + 1] = {
         link = AH.GetReplicateItemLink(index),
         count = count,
         buyout = buyout,
         timeLeft = AH.GetReplicateItemTimeLeft(index),
         owner = owner,
+        itemID = itemID,
       }
     end
     i = last + 1

@@ -16,7 +16,15 @@ from itertools import pairwise
 
 from brain.config import Config
 from brain.fair_value import FairValueCache
-from brain.history import Listing, Market, listings, partial_sales, scan_times
+from brain.history import (
+    Listing,
+    Market,
+    dropped_item_ids,
+    listings,
+    partial_sales,
+    scan_times,
+)
+from brain.scan import item_id_of
 
 
 @dataclass(frozen=True, order=True)
@@ -213,7 +221,8 @@ class _EndsOfWindow:
     the Disappearances that could be sales, in the order of `listings`, and the Partial
     Sales seen at its end, as (Item Key, window end, unit buyout, units). Each Scan is
     matched only against the one before it, so these don't change until a re-match
-    imports those Scans again."""
+    imports those Scans again. Items either Scan dropped rows of are left out of both
+    (#150): a Listing missing from a Scan may only have been missed."""
 
     candidates: list[Disappearance]
     partial_sales: list[tuple[str, int, int, int]]
@@ -234,19 +243,25 @@ def _ends_of_windows(
     missing = {w.start: w for w in windows if w not in result}
     if not missing:
         return result
+    dropped = dropped_item_ids(conn, market)
+    left_out = {
+        w: dropped.get(w.start, frozenset()) | dropped.get(w.end, frozenset())
+        for w in missing.values()
+    }
     # A Listing last seen at a window's start is missing from the Scan at its end, the
     # next one.
     candidates: dict[ObservationWindow, list[Disappearance]] = defaultdict(list)
     for listing in seen:
         w = missing.get(listing.last_seen)
-        if w is not None:
+        if w is not None and item_id_of(listing.item_key) not in left_out[w]:
             d = _disappearance(listing, w.end, config)
             if not d.expiry_possible:
                 candidates[w].append(d)
-    missing_ends = {w.end for w in missing.values()}
+    by_end = {w.end: w for w in missing.values()}
     sales: dict[int, list[tuple[str, int, int, int]]] = defaultdict(list)
     for p in partial_sales(conn, market):
-        if p.seen_at in missing_ends:
+        w = by_end.get(p.seen_at)
+        if w is not None and item_id_of(p.item_key) not in left_out[w]:
             sales[p.seen_at].append((p.item_key, p.seen_at, p.unit_buyout, p.units_sold))
     for w in missing.values():
         result[w] = _EndsOfWindow(candidates[w], sales[w.end])

@@ -20,6 +20,9 @@ _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _NUMBER = re.compile(r"0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
 _DECIMAL_ESCAPE = re.compile(r"\d{1,3}")
 _ASSIGNMENT = re.compile(r"\s*=(?!=)")
+# A run of string characters that need no handling: a Scan's packed rows are one ~2 MB run
+# (#144), too slow to read a character at a time.
+_PLAIN_RUN = re.compile(r"[^\\\n\"']+")
 _SIMPLE_ESCAPES = {
     "n": b"\n",
     "t": b"\t",
@@ -146,6 +149,11 @@ class _Parser:
         while True:
             if self.pos >= len(self.text):
                 raise SavedVariablesError(f"line {self._line(start)}: unterminated string")
+            plain = _PLAIN_RUN.match(self.text, self.pos)
+            if plain:
+                out += plain.group().encode("utf-8")
+                self.pos = plain.end()
+                continue
             c = self.text[self.pos]
             if c == quote:
                 self.pos += 1

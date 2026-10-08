@@ -82,6 +82,7 @@ from brain.lots import (
 )
 from brain.mailbox import MailKind
 from brain.predictions import Prediction
+from brain.scan import item_id_of
 from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
 
 # A replay's stand-in for the own-Market Sell Rate (#84, ADR-0015): (Item Key, the cheapest
@@ -4014,9 +4015,3 @@ def _merged(a: tuple[ReagentBuy, ...], b: tuple[ReagentBuy, ...]) -> tuple[Reage
             )
         )
     return tuple(merged.values())
-
-
-def item_id_of(item_key: str) -> int:
-    """The itemID of a stored Item Key ("itemID" or "itemID:bonus1:..."): Vendor Price
-    belongs to it, not to the random suffix."""
-    return int(item_key.split(":", 1)[0])

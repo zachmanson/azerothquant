@@ -26,14 +26,15 @@ SILK = "item:4306::::::::20:1490"
 SILK_KEY = "4306"
 
 
-def scan(at, *rows, faction="Alliance"):
+def scan(at, *rows, faction="Alliance", dropped=()):
     return {
         "id": 1,
         "requestedAt": at,
         "realm": "Classic Beta PvP",
         "character": "Kash-Patel",
         "faction": faction,
-        "droppedRows": 0,
+        "droppedRows": len(dropped),
+        "droppedItemIDs": list(dropped),
         "listings": list(rows),
     }
 
@@ -260,6 +261,23 @@ def test_sale_events_are_counted_per_item_key(db):
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert evidence.event_counts() == {LINEN_KEY: 2, SILK_KEY: 1}
+
+
+def test_an_item_a_scan_dropped_rows_of_has_no_sale_events_in_the_windows_either_side(db):
+    # #150: the middle Scan missed linen's rows for unloaded item data. The linen gone at
+    # T0 + 20 min was missed, not sold, and the linen back at T0 + 40 min is no news either.
+    # Even the linen that did go in the second window can't be told apart, so it's left out.
+    run(
+        db,
+        scan(T0, *[row(unit=100) for _ in range(10)], row(item=SILK)),
+        scan(T0 + 20 * MINUTE, row(unit=110), dropped=[2589]),
+        # Stacks of 2, so nothing here pairs as a Repost of the linen gone at 110.
+        scan(T0 + 40 * MINUTE, *[row(unit=100, quantity=2) for _ in range(5)]),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.event_counts() == {SILK_KEY: 1}
 
 
 # --- Reposts ---

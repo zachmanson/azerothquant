@@ -73,6 +73,42 @@ def test_stripping_leaves_nothing_that_identifies_the_player_and_every_item_key_
     assert [(r.item_key, r.unit_buyout) for r in Scan.from_saved(stripped).rows] == before
 
 
+def test_stripping_a_packed_scan_hides_which_rows_were_the_players_own():
+    # #144: own rows are the only tables left in a packed Scan, and they sit where the game
+    # listed them. Stripped, every row is packed and sorted, so nothing marks them out.
+    raw = {
+        "requestedAt": 1_790_000_000,
+        "realm": "Classic Beta PvP",
+        "faction": "Alliance",
+        "character": "Kash-Patel",
+        "droppedRows": 1,
+        "droppedItemIDs": [4306],
+        "listings": [
+            {
+                "itemString": "item:9768::::::::20:1490::1:1:12743",
+                "quantity": 1,
+                "buyout": 5000,
+                "timeLeft": 2,
+                "own": True,
+                "name": "Scouting Belt of Nature Protection",
+            },
+        ],
+        "packedListings": "item:2589::::::::60:71,20,2000,4;item:2589::::::::60:71,5,600,3",
+    }
+
+    stripped = strip_scan(raw)
+
+    assert stripped["listings"] == []
+    assert stripped["packedListings"] == (
+        "item:2589:::::::::,20,2000,4;item:2589:::::::::,5,600,3;"
+        "item:9768:::::::::::1:1:12743,1,5000,2"
+    )
+    assert stripped["droppedItemIDs"] == [4306]
+    assert raw["listings"][0]["own"] is True
+    before = sorted((r.item_key, r.unit_buyout) for r in Scan.from_saved(raw).rows)
+    assert sorted((r.item_key, r.unit_buyout) for r in Scan.from_saved(stripped).rows) == before
+
+
 class _StubWorker(BaseHTTPRequestHandler):
     """Answers as the Worker in pool/README.md would, and remembers each request."""
 
