@@ -1,3 +1,13 @@
+2026-10-08 (later 112): #158 designed, no code. ui-ux-pro-max, /prototype (branch `prototype/158-table-layouts`, layout D won), grilled the loop; decisions on #158's comment. Tabs on top, a next-step banner with one Scan/Reload/Load button, every number column in the table, Note and Post/Search in a hover/pin side pane, resizable frame opening ~1100 px. Auto-Load, always on: the Brain writes 3 LoadOnDemand slots, the Addon tries at ~20/45/90 s after a reload (each LoadAddOn is one disk read). Slices filed: #136 → #160 → #161 → #162 (needs an ADR updating ADR-0021) → #163. #156 in-game results still pending.
+
+Next, in order (target #146 by ~Oct 13):
+1. In game (user, by ~Oct 11): #156 both parts as in later 111's item 1, plus the guide read-through (#138), plus **paste the last few `Import took` lines from the Brain log** (Start menu > AzerothQuant Brain log): they set #162's try times.
+2. #156 passes: tag v0.2.0 and run #146's release steps (later 111's item 2).
+3. Meanwhile, or after: #136 (slice 1 of #158), TDD. Then #160. Both may ride along with v0.2.0 if done before the tag; else they ship as an update.
+4. #161, #162, #163, then #145, #134, gap: as in later 109.
+
+- Gotchas: same as later 111, plus: the prototype isn't on main; `git switch prototype/158-table-layouts` to open it. `git stash list` has an old "pre-pull local changes 2026-09-28" stash: leave it, don't pop it by accident. `git stash push -- <path>` skips untracked files.
+
 2026-10-08 (later 111): #159 built and closed (e357536). Grilled: own-Scan-first, chunked and widening backfills all hit the late-Scan rule (an older Pooled Scan re-matches the tail within 48 h, else waits for `brain rebuild`), so the fix is "backfill first, and say so". A pull with >= 10 Pooled Scans to import on a page writes `brain.catchingUpSince` to Recommendations.lua first and rewrites without it when the pull ends, however it ends (logged: "Told the Addon a long pull ... ended, in X s"). The Addon (`Nudge.catchingUp`, trusted for 15 min) says "AzerothQuant is downloading recent Scans. This takes a few minutes. Type /reload after that to see recommendations." It shows no "Is the Brain running?" line and no Reload pulse. `pool_backfill_days` now defaults to 14. The setup guide has the line. The first pull is still 281 s on the 67 Beta Scans (all inside 14 days): the wait is honest now, not shorter. The cold Decision Engine pass is still unmeasured (the sim's 0 s isn't real: no installs or Holdings). Read it off the guildie's log in #146.
 
 Next, in order (target #146 by ~Oct 13):
