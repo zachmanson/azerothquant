@@ -2,7 +2,7 @@
 -- Market's Recommendations from AzerothQuantRecommendations, one section per bottom tab.
 -- All shaping happens in RecommendationTable.lua; this file only draws it and talks to the
 -- WoW API. It opens next to a faction Auction House (not a Neutral one, whose Market the
--- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, the tab
+-- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, size, the tab
 -- last picked and each Market's Budget and Days to Sell are saved in AzerothQuantDB;
 -- open/closed is not.
 --
@@ -21,6 +21,7 @@ local _, ns = ...
 local RecommendationTable = ns.RecommendationTable
 local BoughtMarks = ns.BoughtMarks
 local CraftChain = ns.CraftChain
+local ColumnLayout = ns.ColumnLayout
 local Money = ns.Money
 local Scan = ns.Scan
 local Scanner = ns.Scanner
@@ -35,40 +36,21 @@ local TooltipLines = ns.TooltipLines
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
 -- column headers). The Classic-era names (CharacterFrameTabButtonTemplate,
 -- WhoFrameColumnHeaderTemplate) are missing there.
-local WIDTH, HEIGHT = 915, 540
+-- The frame is resizable from its bottom-right corner, and its size is saved (#136). It
+-- opens at WIDTH, which fits beside the AH at 1920 px. MIN_WIDTH still fits the Shopping
+-- List once ColumnLayout has hidden Beta, Cost and ROI.
+local WIDTH, HEIGHT = 1100, 540
+local MIN_WIDTH, MIN_HEIGHT = 1000, 400
 local PORTRAIT = "Interface\\Icons\\INV_Misc_Coin_01"
 local INSET_TOP = -64 -- leaves room for the two header lines under the title bar
 local LINE_HEIGHT = 22
 local ICON_SIZE = 20
-local ICON_GAP = 6
+local ICON_GAP = ColumnLayout.ICON_WIDTH - ICON_SIZE
 local HEADER_HEIGHT = 24
 local SCROLL_LEFT = 6
 local SCROLLBAR_WIDTH = 30
--- The inset spans x 4 .. WIDTH-6; rows sit inside it, left of the scroll bar.
-local CONTENT_WIDTH = WIDTH - 10 - SCROLL_LEFT - SCROLLBAR_WIDTH
--- Per section, the width of each column after the icon but the last, which (Note, mostly)
--- gets the leftover width. The first is the item name.
-local COLUMN_WIDTHS = {
-  ["Holdings"] = { 230, 70, 50, 110, 110, 80 },
-  -- Per click, Per day and ROI after Profit (#98).
-  ["Shopping List"] = { 160, 45, 40, 80, 80, 90, 80, 80, 50, 80 },
-  ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95 },
-  -- Item, Way out, Listings, Profit, then Cost. It never has a Beta column (#89).
-  ["Flips to Disenchant"] = { 200, 330, 70, 110 },
-  ["Prediction buys"] = { 230, 150, 50, 120 },
-  ["Buy Under"] = { 230, 90, 250, 70, 110 },
-}
--- The same while the Brain writes a Beta Prior (#90): a Beta column before the Note (last
--- on Prediction buys, where it takes the leftover). "2g 74s 50c*" needs 85. The Shopping
--- List makes room from Item and the Note (a Flip's is mostly empty), and keeps Post at and
--- Cost at 85 too, since "5g 43s 99c" clipped at 75 in game; the Buy Under from its way out.
-local BETA_COLUMN_WIDTHS = {
-  ["Holdings"] = { 230, 70, 50, 110, 110, 80, 85 },
-  ["Shopping List"] = { 120, 40, 35, 75, 85, 80, 75, 75, 45, 85, 85 },
-  ["Flips to Craft"] = { 190, 60, 45, 95, 95, 95, 95, 85 },
-  ["Prediction buys"] = { 230, 150, 50, 120, 120 },
-  ["Buy Under"] = { 230, 90, 195, 70, 110, 85 },
-}
+-- The inset spans x 4 .. width-6; rows sit inside it, left of the scroll bar.
+local CONTENT_INSET = 10 + SCROLL_LEFT + SCROLLBAR_WIDTH
 local MAX_COLUMNS = 12
 local STRIPE_ALPHA = 0.04
 
@@ -113,26 +95,14 @@ local function nameOf(itemString)
   return (getItemInfo(itemString))
 end
 
--- A section's column widths, the last one taking what's left of the row.
-local function widthsFor(section)
-  local byTitle = COLUMN_WIDTHS
-  for _, name in ipairs(section.columns) do
-    if name == "Beta" then
-      byTitle = BETA_COLUMN_WIDTHS
-    end
-  end
-  local widths = {}
-  local used = ICON_SIZE + ICON_GAP
-  for c, w in ipairs(byTitle[section.title]) do
-    widths[c] = w
-    used = used + w
-  end
-  widths[#widths + 1] = CONTENT_WIDTH - used
-  return widths
+-- The width the rows get at the frame's current size.
+local function contentWidth()
+  return frame:GetWidth() - CONTENT_INSET
 end
 
--- The item, the row's tooltip lines, and any cell text clipped by its column. A row for
--- no one item (a Disenchant source group's Buy Under, #88) is titled by its first cell.
+-- The item, the row's tooltip lines, any cell text clipped by its column, and the columns
+-- too narrow a frame hid (#136), by name. A row for no one item (a Disenchant source
+-- group's Buy Under, #88) is titled by its first cell.
 local function showTooltip(line)
   GameTooltip:SetOwner(line, "ANCHOR_RIGHT")
   if line.itemString then
@@ -163,6 +133,9 @@ local function showTooltip(line)
     if text and not shown[text] and cell:IsTruncated() then
       GameTooltip:AddLine(text, 1, 1, 1, true)
     end
+  end
+  for _, hidden in ipairs(line.hidden or {}) do
+    GameTooltip:AddDoubleLine(hidden.name, hidden.text, 1, 0.82, 0, 1, 1, 1)
   end
   GameTooltip:Show()
 end
@@ -222,10 +195,11 @@ local function getLine(i)
   return line
 end
 
--- Lays out one line: for an item, its icon and then its cells in columns of the given
--- widths, striped on every other row. Otherwise one text spans the line (the empty-tab
--- line, "N more"). marks, for a row of a buy-side tab, are the Market's Bought marks.
-local function drawLine(i, texts, widths, font, item, justify, marks)
+-- Lays out one line: for an item, its icon and then its cells in the columns of layout
+-- (ColumnLayout.fit over columns, the section's column names), striped on every other
+-- row. Otherwise one text spans the line (the empty-tab line, "N more"). marks, for a row
+-- of a buy-side tab, are the Market's Bought marks.
+local function drawLine(i, texts, layout, font, item, justify, marks, columns)
   local line = getLine(i)
   line:ClearAllPoints()
   line:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * LINE_HEIGHT)
@@ -250,25 +224,47 @@ local function drawLine(i, texts, widths, font, item, justify, marks)
   else
     line.icon:Hide()
   end
+  -- Each cell's text, and its width (nil for one text across the line).
+  local placed, widths = {}, {}
+  if layout then
+    for k, p in ipairs(layout) do
+      placed[k], widths[k] = texts[p.column], p.width
+    end
+  else
+    placed[1] = texts[1]
+  end
   local x = ICON_SIZE + ICON_GAP
   for c, cell in ipairs(line.cells) do
-    local text = texts[c]
+    local text = placed[c]
     if text then
       cell:SetFontObject(font)
       cell:SetJustifyH(justify or "LEFT")
       cell:ClearAllPoints()
-      if widths then
+      if layout then
         cell:SetPoint("LEFT", line, "LEFT", x, 0)
         cell:SetWidth(widths[c] - 6)
         x = x + widths[c]
       else
         cell:SetPoint("LEFT", line, "LEFT", 0, 0)
-        cell:SetWidth(CONTENT_WIDTH)
+        cell:SetWidth(contentWidth())
       end
       cell:SetText(text)
       cell:Show()
     else
       cell:Hide()
+    end
+  end
+  -- What the layout left out, for the tooltip.
+  line.hidden = {}
+  if layout then
+    local onShow = {}
+    for _, p in ipairs(layout) do
+      onShow[p.column] = true
+    end
+    for c, name in ipairs(columns) do
+      if not onShow[c] and texts[c] and texts[c] ~= "" then
+        line.hidden[#line.hidden + 1] = { name = name, text = texts[c] }
+      end
     end
   end
   line:Show()
@@ -471,9 +467,10 @@ local function activeSort(section)
   return RecommendationTable.restoredSort(section, saved) or section.sort
 end
 
--- Gold column headers over the rows. A click sorts by that column (see nextSort).
-local function getHeader(c)
-  local header = headers[c]
+-- Gold column headers over the rows, pooled by place. A click sorts by the column the
+-- header is over (header.column, its place in the section's columns; see nextSort).
+local function getHeader(k)
+  local header = headers[k]
   if header then
     return header
   end
@@ -483,33 +480,35 @@ local function getHeader(c)
   header.arrow = header:CreateTexture(nil, "OVERLAY")
   header.arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
   header.arrow:SetSize(9, 8)
-  header:SetScript("OnClick", function()
+  header:SetScript("OnClick", function(self)
     if not shown then
       return
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    local sort = RecommendationTable.nextSort(shown, activeSort(shown), c)
+    local sort = RecommendationTable.nextSort(shown, activeSort(shown), self.column)
     db.recommendationSorts = db.recommendationSorts or {}
     db.recommendationSorts[shown.title] = RecommendationTable.savedSort(shown, sort)
     redraw()
   end)
-  headers[c] = header
+  headers[k] = header
   return header
 end
 
 -- The Item header also spans the icon, so headers line up with the cells below them. The
 -- sorted column's header gets an arrow: down for largest (or Z) first, up for smallest.
-local function drawHeaders(columns, widths, sort)
+local function drawHeaders(columns, layout, sort)
   local x = SCROLL_LEFT
-  for c = 1, MAX_COLUMNS do
-    if columns and columns[c] then
-      local header = getHeader(c)
-      local width = widths[c] + (c == 1 and (ICON_SIZE + ICON_GAP) or 0)
+  for k = 1, MAX_COLUMNS do
+    local p = layout and layout[k]
+    if p then
+      local header = getHeader(k)
+      local width = p.width + (k == 1 and (ICON_SIZE + ICON_GAP) or 0)
+      header.column = p.column
       header:ClearAllPoints()
       header:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", x, -4)
       header:SetWidth(width)
-      header:SetText(columns[c])
-      if sort and sort.column == c then
+      header:SetText(columns[p.column])
+      if sort and sort.column == p.column then
         header.arrow:ClearAllPoints()
         header.arrow:SetPoint("LEFT", header:GetFontString(), "RIGHT", 3, -2)
         if sort.descending then
@@ -523,8 +522,8 @@ local function drawHeaders(columns, widths, sort)
       end
       header:Show()
       x = x + width
-    elseif headers[c] then
-      headers[c]:Hide()
+    elseif headers[k] then
+      headers[k]:Hide()
     end
   end
 end
@@ -564,9 +563,9 @@ function redraw()
     GetMoney()
   )
   local n = 0
-  local function add(texts, widths, font, item, justify, rowMarks)
+  local function add(texts, layout, font, item, justify, rowMarks, columns)
     n = n + 1
-    drawLine(n, texts, widths, font, item, justify, rowMarks)
+    drawLine(n, texts, layout, font, item, justify, rowMarks, columns)
   end
 
   drawTabs(view)
@@ -584,16 +583,16 @@ function redraw()
     for _, section in ipairs(view.sections) do
       if section.title == selected then
         shown = section
-        local widths = widthsFor(section)
+        local layout = ColumnLayout.fit(section, contentWidth())
         local sort = activeSort(section)
         RecommendationTable.sort(section, sort)
-        drawHeaders(section.columns, widths, sort)
+        drawHeaders(section.columns, layout, sort)
         if section.empty then
           add({ section.empty }, nil, "GameFontDisable", nil, "CENTER")
         end
         for _, row in ipairs(section.rows) do
           local font = row.bought and "GameFontDisable" or "GameFontHighlight"
-          add(row.cells, widths, font, row, nil, section.markable and marks or nil)
+          add(row.cells, layout, font, row, nil, section.markable and marks or nil, section.columns)
         end
         if section.more then
           add({ section.more }, nil, "GameFontDisable")
@@ -653,7 +652,26 @@ local function savePosition()
   db.recommendationFrame = { point = point, relativePoint = relativePoint, x = x, y = y }
 end
 
+local function saveSize()
+  db.recommendationFrameSize = { width = frame:GetWidth(), height = frame:GetHeight() }
+end
+
+-- The widest the frame gets: the Craft Chain panel docked on its left still fits on screen,
+-- unless the screen is too narrow for even MIN_WIDTH beside it.
+local function maxWidth()
+  return math.max(MIN_WIDTH, UIParent:GetWidth() - PANEL_WIDTH - 2)
+end
+
+-- The saved size, kept inside the bounds and the screen, or WIDTH x HEIGHT.
+local function restoreSize()
+  local saved = db.recommendationFrameSize or { width = WIDTH, height = HEIGHT }
+  local width = math.max(MIN_WIDTH, math.min(saved.width, maxWidth()))
+  local height = math.max(MIN_HEIGHT, math.min(saved.height, UIParent:GetHeight()))
+  frame:SetSize(width, height)
+end
+
 local function restorePosition()
+  restoreSize()
   frame:ClearAllPoints()
   local saved = db.recommendationFrame
   if saved then
@@ -1117,6 +1135,35 @@ local function createFrame()
     frame.daysToSell.refresh()
     redraw()
   end)
+  -- Resizable from the corner grip (#136); the columns refit as it goes.
+  frame:SetResizable(true)
+  if frame.SetResizeBounds then
+    frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, maxWidth(), UIParent:GetHeight())
+  else
+    frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
+  end
+  frame:SetScript("OnSizeChanged", function()
+    if not content then
+      return
+    end
+    content:SetWidth(contentWidth())
+    queueRedraw()
+  end)
+  local grip = CreateFrame("Button", nil, frame)
+  grip:SetSize(14, 14)
+  grip:SetPoint("BOTTOMRIGHT", -1, 1) -- on the border, clear of the scroll bar
+  grip:SetFrameLevel(frame:GetFrameLevel() + 10)
+  grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+  grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  grip:SetScript("OnMouseDown", function()
+    frame:StartSizing("BOTTOMRIGHT")
+  end)
+  grip:SetScript("OnMouseUp", function()
+    frame:StopMovingOrSizing()
+    saveSize()
+    savePosition()
+  end)
   frame:Hide()
   tinsert(UISpecialFrames, "AzerothQuantRecommendationFrame") -- Escape closes it
   frame:SetPortraitToAsset(PORTRAIT)
@@ -1138,7 +1185,7 @@ local function createFrame()
   scroll:SetPoint("TOPLEFT", frame.Inset, "TOPLEFT", SCROLL_LEFT, -4 - HEADER_HEIGHT - 2)
   scroll:SetPoint("BOTTOMRIGHT", frame.Inset, "BOTTOMRIGHT", -SCROLLBAR_WIDTH, 6)
   content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(CONTENT_WIDTH, 1)
+  content:SetSize(contentWidth(), 1)
   scroll:SetScrollChild(content)
 
   createTabs()

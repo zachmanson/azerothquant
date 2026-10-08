@@ -27,6 +27,7 @@ Nudge.lua
 DisenchantGroup.lua
 BoughtMarks.lua
 RecommendationTable.lua
+ColumnLayout.lua
 CraftChain.lua
 TooltipLines.lua
 BuyUnderMatch.lua
