@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: AzerothQuant
 ## Notes: Records Auction House data for the azerothquant Brain and shows its Recommendations. Never buys, bids or cancels; posts only when the Post button is clicked.
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: AzerothQuantDB
 
 # Written by the Brain (never edit). It must exist when the client starts, since new
