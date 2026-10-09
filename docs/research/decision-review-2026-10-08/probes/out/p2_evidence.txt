@@ -1,0 +1,21 @@
+Scans: 69 over 294 h (12.3 days)
+Observation Windows (gap <= 60 min): 37, 14.1 h in all
+  by day: 09-27 6.3h, 09-28 3.0h, 09-29 3.0h, 09-30 0.5h, 10-03 0.8h, 10-08 0.4h
+  gaps > 60 min: 31, covering 280 h unobserved
+
+Other players' Listings gone between two Scans: 1370892
+  in window: 198527
+  long gap: 1172365
+  ('in window', "can't have expired"): 102560
+  ('in window', 'expiry possible'): 95967
+  ('long gap', "can't have expired"): 75182
+  ('long gap', 'expiry possible'): 1097183
+
+Sale Events (whole history, default rules): 29058 over 14.1 h, Item Keys 7235; reposts 12150
+Sale Events with no 1.2x Fair Value cap: 29989 (+931), units 1039458 vs 984915
+Dearest unit of each Sale Event (no cap) vs Fair Value of the Scan before: <=1.0x 23593, 1.0-1.2x 4270, 1.2-1.5x 1073, 1.5-2x 522, >2x 531
+
+Long-gap disappearances that can't have expired (not reposts checked): 75182 Listings, 587197 units
+
+Sell Rate range (14 d): 14.1 h watched, 29058 Sale Events, 7235 Item Keys; >=3 events: 3332, >=5: 1850, >=10: 613
+  of them in the last 7 days: 2659 Sale Events (1.2 h watched)

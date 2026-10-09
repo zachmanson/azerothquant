@@ -1,0 +1,14 @@
+Classic Beta PvP Alliance (beta): provisional, Beta never decides
+  Item   Bought            Units  Post at      Sold at     Days  Grade
+  8350   2026-09-29 15:10  1      5g 16s 99c   5g 17s 00c  0.01  1g 74s 15c
+  11175  2026-10-01 20:43  3      2g 09s 73c                     pending
+  13114  2026-10-04 20:31  2      20g 54s 99c                    pending
+  13114  2026-10-06 21:52  2      16g 99s 99c                    pending
+Graded Flips: 1 graded, 1 paid off, realized/expected Profit 106.1%, price/Post at 100.0% (median), sold within horizon 100.0%, median days to sell 0.01
+64 Purchases (70g 61s 19c) not named by the Brain, counted as For Use
+Crafts recorded: 43 (6 with a costed output)
+
+Flips to Craft
+  Item  Recipe  Bought            Units  Post at  Sold at  Days  Grade
+  4305  3839    2026-10-02 17:59         31s 29c                 pending
+Graded Flips to Craft: none yet

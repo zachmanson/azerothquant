@@ -1,0 +1,4 @@
+effort 500c: Craft 2 rows (profit 0.50g on 4.55g), Disenchant 2 rows (profit 0.81g on 2.49g), Sell 2 rows (profit 1.03g on 1.15g)
+effort 200c: Craft 3 rows (profit 2.45g on 10.68g), Disenchant 4 rows (profit 2.53g on 6.75g), Sell 3 rows (profit 1.05g on 1.25g)
+effort 100c: Craft 3 rows (profit 3.64g on 12.78g), Disenchant 4 rows (profit 11.20g on 37.89g), Sell 4 rows (profit 1.09g on 1.35g), Vendor 2 rows (profit 0.15g on 1.61g)
+effort   0c: Craft 4 rows (profit 5.44g on 16.11g), Disenchant 7 rows (profit 56.01g on 123.37g), Sell 4 rows (profit 1.13g on 1.35g), Vendor 4 rows (profit 0.32g on 1.82g)

@@ -1,0 +1,11 @@
+Units sold (sale-like records): 1914037
+Price over the cheapest other ask then up:
+  at the cheapest   1228991  64%
+  <=5% above         279263  15%
+  5-20% above        286218  15%
+  >20% above         119565  6%
+Distinct cheaper price levels a buyer went through first:
+  0 cheaper price levels  1228991  64%
+  1                        281721  15%
+  2-3                      193970  10%
+  4+                       209355  11%

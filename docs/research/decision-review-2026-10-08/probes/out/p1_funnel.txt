@@ -1,0 +1,33 @@
+Scan 1791498219, gold 404356, spend 404356, window hours 14.1
+Shopping List baseline: {'Craft': (2, 5022), 'Disenchant': (2, 8142), 'Sell': (2, 10252)}  (6 rows)
+Buy Unders: 195  listed now: 9
+
+Item Keys with other players' Listings: 6213
+First failed Check (the Brain's own order):
+  Sale Events      5379
+  Flip margin      832
+  made the list    2
+
+Each Check alone (an Item Key can fail several):
+  no price to post at (nothing else listed): 3200
+  Sale Events at/above post price < 3: 5379  (of which 0 Sale Events: 4808)
+  room < held + needs:                     5379
+  margin: cheapest ask above clear-at price: 6207
+  demand cut to 'since cheap stock went up':  495
+  clearing run is a wall (needs > 1 unit):  3
+  cheapest ask clears margin at its way-out value: 6
+  ...of those, failing Sale Events: 3, failing room: 3
+
+Item Keys on sale with any Sale Event in 14 days: 3249; with >=3: 1943
+
+Shopping List with one gate relaxed (kind: rows, expected profit in copper):
+  baseline                                       {'Craft': (2, 5022), 'Disenchant': (2, 8142), 'Sell': (2, 10252)}
+  min Sale Events 3 -> 1                         {'Craft': (2, 5022), 'Disenchant': (4, 48987), 'Sell': (7, 67139)}
+  no cheap-stock cutoff                          {'Craft': (2, 5022), 'Disenchant': (2, 8142), 'Sell': (23, 907779)}
+  Flip priors -> Holdings priors (3 h, 1 event)  {'Craft': (2, 10872), 'Disenchant': (2, 8142), 'Sell': (2, 10252)}
+  margin 10%/1s -> 0%/0c                         {'Craft': (6, 62562), 'Disenchant': (2, 8688), 'Sell': (5, 10661)}
+  margin 10%/1s -> 5%/0c                         {'Craft': (6, 54522), 'Disenchant': (2, 8615), 'Sell': (3, 10349)}
+  deposits off                                   {'Craft': (2, 10872), 'Disenchant': (2, 8142), 'Sell': (2, 10252)}
+  dropped rows ignored                           {'Craft': (2, 5022), 'Disenchant': (2, 8142), 'Sell': (2, 10252)}
+  undercut 1c -> 0c (match)                      {'Craft': (2, 5044), 'Disenchant': (2, 8150), 'Sell': (2, 10256)}
+  ALL of the above (margin 0)                    {'Craft': (6, 82304), 'Disenchant': (4, 73269), 'Sell': (98, 7102743)}

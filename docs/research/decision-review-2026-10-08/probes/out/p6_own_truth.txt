@@ -1,0 +1,5 @@
+Own Listings that went missing: 212; matched to a mail: 107
+  Brain rule: gap <= 1 h, can't have expired: {'no mail matched': 5, 'sold': 7, 'cancelled': 5}  -> sold share of matched 58%
+  Wider rule: gap <= 12 h, can't have expired: {'no mail matched': 18, 'sold': 27, 'cancelled': 9, 'expired': 3}  -> sold share of matched 69%
+  Gap 1-12 h only, can't have expired: {'cancelled': 4, 'sold': 20, 'no mail matched': 13, 'expired': 3}  -> sold share of matched 74%
+  Expiry possible (any gap): {'no mail matched': 87, 'sold': 20, 'expired': 38, 'cancelled': 10}  -> sold share of matched 29%

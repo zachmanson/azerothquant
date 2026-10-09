@@ -1,0 +1,140 @@
+Latest Scan: 36 recipes known; Flips to Craft made: 2
+What stopped each recipe's first Flip to Craft step:
+   24  margin, output Vendored (no Sell room)
+    8  margin
+    2  no step (reagents can't be had, or nothing to buy)
+    2  made
+
+  output  qty  post_at  room  events(all/at post)  gold  profit  needs  stop
+     4315   1    0.28g  160   12/11      0.18g    0.03g   0.02g  made
+     4305   1    0.12g 3366   29/29      0.08g    0.01g   0.01g  made
+     2997   1    0.03g 9030   33/32      0.02g    0.01g   0.01g  margin
+   279981   1    0.01g   52   22/4       0.00g    0.01g   0.01g  margin
+   279967   1    0.01g  125   22/4       0.01g    0.01g   0.01g  margin
+     2996   1    0.01g 22072   33/31      0.01g    0.00g   0.01g  margin
+   253664   1    0.12g  192    7/7       0.06g   -0.00g   0.01g  margin
+   247789   1    0.01g  162   13/13      0.00g   -0.00g   0.01g  margin, output Vendored (no Sell room)
+     2576   1        -    0   12/0       0.01g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+   279973   1    0.00g   66    5/5       0.01g   -0.01g   0.01g  margin
+    10045   1    0.01g   37    5/5       0.01g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+     2570   1        -    0    2/0       0.01g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+     4344   1    0.01g  102   15/15      0.01g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+     6218   1        -    0    0/0       0.01g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+     4343   1    0.04g   51    9/8       0.02g   -0.01g   0.01g  margin, output Vendored (no Sell room)
+     6238   1    0.04g  107    5/4       0.03g   -0.02g   0.01g  margin, output Vendored (no Sell room)
+   247786   3    0.00g 4748   27/27      0.02g   -0.02g   0.01g  margin
+   279976   1        -    0    3/0       0.03g   -0.03g   0.01g  margin, output Vendored (no Sell room)
+    20744   1    0.05g  394   15/14      0.04g   -0.03g   0.01g  margin, output Vendored (no Sell room)
+     2578   1    0.04g  105   12/12      0.06g   -0.04g   0.01g  margin, output Vendored (no Sell room)
+     4240   1        -    0   16/0       0.08g   -0.05g   0.01g  margin, output Vendored (no Sell room)
+    11287   1    0.01g  873   16/16      0.06g   -0.06g   0.01g  margin, output Vendored (no Sell room)
+     2587   1        -    0   13/0       0.09g   -0.07g   0.01g  margin, output Vendored (no Sell room)
+    11288   1    0.03g  294    9/9       0.11g   -0.11g   0.01g  margin, output Vendored (no Sell room)
+     6385   1        -    0    6/0       0.15g   -0.13g   0.02g  margin, output Vendored (no Sell room)
+     6339   1        -    0    0/0       0.45g   -0.50g   0.04g  margin, output Vendored (no Sell room)
+     4311   1    0.19g   54    7/7       0.84g   -0.71g   0.08g  margin
+   253667   1        -    0   10/0       3.78g   -3.28g   0.38g  margin, output Vendored (no Sell room)
+   253895   1        -    0    0/0       7.62g   -7.62g   0.76g  margin, output Vendored (no Sell room)
+   253907   1        -    0    0/0       7.67g   -7.67g   0.77g  margin, output Vendored (no Sell room)
+   253943   1        -    0    0/0       7.54g   -8.43g   0.75g  margin, output Vendored (no Sell room)
+   253919   1        -    0    0/0      11.32g  -11.32g   1.13g  margin, output Vendored (no Sell room)
+   253931   1        -    0    0/0      11.22g  -12.11g   1.12g  margin, output Vendored (no Sell room)
+   253955   1        -    0    0/0      15.58g  -16.69g   1.56g  margin, output Vendored (no Sell room)
+     2679   1        -    0    9/0           -        -       -  no step (reagents can't be had, or nothing to buy)
+     2681   1        -    0   23/0           -        -       -  no step (reagents can't be had, or nothing to buy)
+
+Disenchant source groups with Listings whose best way out is Disenchant: 16
+  (2, 'armor', 36, 40)         listed 233  cheapest   0.34g  mats   0.64g (by Sell 0.64g)  - effort 0.05g  margin needs 0.03g  bought 5
+  (3, 'armor', 26, 30)         listed  62  cheapest   0.22g  mats   0.42g (by Sell 0.42g)  - effort 0.05g  margin needs 0.02g  bought 1
+  (2, 'armor', 16, 20)         listed 1523  cheapest   0.03g  mats   0.07g (by Sell 0.07g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'weapon', 6, 15)         listed 365  cheapest   0.03g  mats   0.07g (by Sell 0.07g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'armor', 21, 25)         listed 1292  cheapest   0.08g  mats   0.10g (by Sell 0.10g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'weapon', 16, 20)        listed 250  cheapest   0.10g  mats   0.12g (by Sell 0.12g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'armor', 5, 15)          listed 1922  cheapest   0.03g  mats   0.04g (by Sell 0.04g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'armor', 26, 30)         listed 284  cheapest   0.14g  mats   0.08g (by Sell 0.08g)  - effort 0.05g  margin needs 0.01g  bought 0
+  (2, 'weapon', 31, 35)        listed   4  cheapest   0.70g  mats   0.10g (by Sell 0.10g)  - effort 0.05g  margin needs 0.07g  bought 0
+  (2, 'armor', 41, 45)         listed  29  cheapest   2.48g  mats   1.59g (by Sell 1.59g)  - effort 0.05g  margin needs 0.25g  bought 0
+  (3, 'armor', 31, 35)         listed  11  cheapest   1.05g  mats   0.16g (by Sell 0.16g)  - effort 0.05g  margin needs 0.10g  bought 0
+  (2, 'weapon', 26, 30)        listed  17  cheapest   1.48g  mats   0.26g (by Sell 0.26g)  - effort 0.05g  margin needs 0.15g  bought 0
+  (3, 'armor', 36, 40)         listed   8  cheapest   8.00g  mats   5.68g (by Sell 5.68g)  - effort 0.05g  margin needs 0.80g  bought 0
+  (3, 'weapon', 26, 30)        listed  11  cheapest   5.45g  mats   0.42g (by Sell 0.42g)  - effort 0.05g  margin needs 0.55g  bought 0
+  (3, 'weapon', 36, 40)        listed   8  cheapest  11.00g  mats   5.68g (by Sell 5.68g)  - effort 0.05g  margin needs 1.10g  bought 0
+  (3, 'armor', 41, 45)         listed   2  cheapest  15.00g  mats   7.60g (by Sell 7.60g)  - effort 0.05g  margin needs 1.50g  bought 0
+Enchanting skills: {'Kash-Patel': 150}
+
+Rows per Scan (Sell, Craft, Disenchant): as is | margin 0 + min 1 Sale Event
+  1790439570  (0, 0, 0)  |  (0, 0, 0)
+  1790469577  (11, 0, 0)  |  (11, 0, 0)
+  1790475481  (3, 0, 0)  |  (3, 0, 0)
+  1790488520  (9, 0, 0)  |  (9, 0, 0)
+  1790524206  (2, 0, 0)  |  (2, 0, 0)
+  1790525861  (5, 0, 0)  |  (10, 2, 0)
+  1790526883  (11, 0, 0)  |  (32, 5, 0)
+  1790527807  (10, 0, 0)  |  (41, 4, 1)
+  1790529035  (7, 0, 0)  |  (39, 4, 0)
+  1790530700  (9, 0, 0)  |  (36, 5, 0)
+  1790532021  (17, 0, 0)  |  (54, 5, 0)
+  1790533497  (13, 2, 0)  |  (62, 7, 1)
+  1790534398  (10, 1, 0)  |  (47, 5, 0)
+  1790535313  (11, 0, 1)  |  (58, 6, 2)
+  1790537588  (12, 1, 0)  |  (58, 5, 0)
+  1790538959  (15, 1, 0)  |  (58, 6, 0)
+  1790540166  (10, 1, 1)  |  (56, 6, 1)
+  1790546387  (11, 3, 0)  |  (70, 6, 0)
+  1790547370  (11, 1, 0)  |  (46, 6, 0)
+  1790549320  (21, 1, 1)  |  (61, 5, 1)
+  1790550331  (16, 1, 0)  |  (57, 4, 0)
+  1790551641  (13, 1, 0)  |  (61, 6, 0)
+  1790553125  (17, 0, 0)  |  (64, 0, 0)
+  1790624386  (24, 0, 0)  |  (76, 2, 0)
+  1790625457  (17, 0, 0)  |  (44, 2, 0)
+  1790626367  (10, 0, 0)  |  (40, 4, 0)
+  1790633066  (17, 2, 0)  |  (58, 8, 0)
+  1790636133  (8, 2, 0)  |  (48, 6, 0)
+  1790637137  (6, 1, 0)  |  (25, 5, 0)
+  1790638062  (10, 1, 0)  |  (43, 5, 0)
+  1790638963  (1, 2, 0)  |  (35, 5, 0)
+  1790650161  (8, 1, 0)  |  (46, 4, 0)
+  1790651138  (5, 1, 0)  |  (40, 5, 0)
+  1790652057  (7, 1, 0)  |  (37, 5, 0)
+  1790653231  (10, 2, 0)  |  (33, 5, 0)
+  1790654682  (10, 2, 1)  |  (41, 5, 1)
+  1790700485  (14, 1, 0)  |  (71, 3, 0)
+  1790701385  (6, 1, 0)  |  (25, 3, 1)
+  1790703052  (11, 1, 0)  |  (52, 4, 1)
+  1790708878  (11, 2, 1)  |  (64, 5, 1)
+  1790709956  (7, 0, 0)  |  (42, 3, 0)
+  1790712491  (7, 1, 0)  |  (13, 2, 0)
+  1790725241  (16, 0, 0)  |  (68, 4, 0)
+  1790726236  (10, 0, 0)  |  (35, 3, 1)
+  1790728581  (8, 0, 0)  |  (54, 4, 1)
+  1790734183  (17, 1, 0)  |  (64, 4, 0)
+  1790792830  (20, 1, 0)  |  (80, 5, 0)
+  1790817131  (17, 3, 0)  |  (72, 5, 0)
+  1790818960  (5, 1, 0)  |  (29, 6, 0)
+  1790901667  (26, 2, 0)  |  (63, 7, 0)
+  1790958095  (38, 4, 0)  |  (78, 9, 0)
+  1790970551  (54, 6, 0)  |  (77, 11, 0)
+  1791056768  (32, 2, 0)  |  (66, 7, 0)
+  1791058841  (11, 2, 0)  |  (46, 8, 0)
+  1791065622  (23, 0, 0)  |  (63, 1, 0)
+  1791066551  (10, 0, 0)  |  (47, 2, 0)
+  1791136012  (30, 0, 0)  |  (73, 2, 0)
+  1791142687  (28, 1, 0)  |  (77, 6, 0)
+  1791150867  (32, 3, 0)  |  (77, 12, 0)
+  1791155154  (30, 0, 0)  |  (74, 5, 0)
+  1791160118  (29, 1, 0)  |  (72, 4, 1)
+  1791238678  (5, 1, 0)  |  (14, 6, 1)
+  1791255055  (23, 4, 0)  |  (68, 9, 0)
+  1791323507  (25, 4, 0)  |  (78, 10, 1)
+  1791330414  (20, 2, 0)  |  (78, 7, 0)
+  1791337536  (28, 3, 0)  |  (76, 11, 0)
+  1791423207  (2, 2, 0)  |  (15, 3, 0)
+  1791496932  (4, 1, 1)  |  (52, 6, 1)
+  1791498219  (2, 2, 2)  |  (16, 6, 4)
+as is     Sell/Vendor mean 14.2  zero in 1/69 Scans  max 54
+as is     Craft       mean 1.2  zero in 24/69 Scans  max 6
+as is     Disenchant  mean 0.1  zero in 62/69 Scans  max 2
+loosened  Sell/Vendor mean 49.0  zero in 1/69 Scans  max 80
+loosened  Craft       mean 4.8  zero in 6/69 Scans  max 12
+loosened  Disenchant  mean 0.3  zero in 53/69 Scans  max 4

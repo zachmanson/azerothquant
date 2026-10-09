@@ -1,0 +1,7 @@
+Sale-like records: 171051 (2037202 units); reposts paired off: 28695
+  gone     gap 1-12h    58635 records   519620 units
+  gone     gap <=1h     89454 records   797330 units
+  partial  gap 1-12h    11660 records   352954 units
+  partial  gap <=1h      9391 records   242181 units
+  partial  gap >12h      1911 records   125117 units
+  priced over 1.2x Fair Value (the Brain's Probable Sale cap): 11341
