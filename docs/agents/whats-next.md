@@ -1,3 +1,12 @@
+2026-10-10 (later 122): no code. In-game checks done. #162 closed: items 1-3, 5 and 6 passed, item 4 FAILED. Brain off, Scan, Reload showed 'took longer' (banner + chat), not 'Brain not running'. Filed #176 (needs-triage, options a/b/c on it): `Nudge.brainBehind` needs savedAt 130 s old, the last try is at 90 s, and nothing checks again. Import took with a new Scan: 29-36 s, slowest 53 s (#155), so {20, 45, 90} stays. #163 closed: tooltips good per user, guide sections 2-4 match the screen. Also seen: the first Scan after ~18 h away (10-10 17:00) gave a 2-row Shopping List (16:44 gave 9). That's #175's pattern, a fresh example.
+
+Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
+1. #175: diagnose what empties the list after a day away (diagnosing-bugs). Start from the Item Keys passing at 10-06 21:45 and failing at 10-07 21:33; the 10-10 17:00 Scan is another case.
+2. #176: pick a/b/c (small, Addon only, busted).
+3. Then #156/#146 release steps; #167 before any of #169-#171 (and #168 after #170/#171).
+
+- Gotchas: same as later 121. brain watch was restarted 2026-10-10 17:03 (window titled 'brain watch').
+
 2026-10-08 (later 121): #168 grilled, built TDD and checked, then NOT committed: ADR-0031 committed as rejected (numbers in it and on #168, patch in #168's comment). Rule tried: old Sale Events/units/window hours count at w = exp(-max(0, E - n)) x 0.5^(age/24 h), with the 3-Sale-Event minimum on the raw count. p4 `brain` (last_buy=1790818960) went from -13.1g/-1.4g to -29.5g/-26.2g, worst trade -6.6 to -11.1g. p5: rows after gaps barely moved (5/2/4/2 to 5/2/7/6) while mid-week rows grew (10-03: 11 to 41). So the after-gap collapse isn't mainly the cutoff (the review's §2.1 was wrong there): filed #175 to diagnose it. #168 is parked behind #170/#171.
 
 Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
