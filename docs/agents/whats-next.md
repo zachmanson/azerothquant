@@ -1,3 +1,14 @@
+2026-10-11 (later 126): In-game checks PASSED, #156 and #176 closed (results on each). #156: "re-read 4920 of 7854 dropped rows in 0.2 s" (cap fine); the AH-closed-partway check can't be done by hand at 0.2 s (busted covers it); the latest Scan's 830 dropped items are all off the Shopping List. #176: 'Brain is working' then 'Brain not running' + the chat line, no 'took longer'; table caught up after the Brain restarted. **v0.2.0 tagged and released** (CI built the exe). brain watch restarted 14:11 in its own window.
+
+#146 is parked until the user says the guildie is free. When they do: anything merged after v0.2.0 means bumping the version (Brain `__version__` + Addon .toc; the CI release job fails if the tag and `__version__` differ), tagging v0.2.x and giving the guildie THAT exe. Then: download the exe and check it starts, `brain pool key add <guildie>`, user uploads exe + `docs/setup-guide.md` to Drive and DMs the link + key, then #146's Checks.
+
+Next, in order (PoC by Oct 20):
+1. User: close #175 (not a bug) or say otherwise.
+2. #167: backtest yardstick in replay (needs-triage: grill first), then #168-#171 per #166's order.
+3. #146 when the guildie is free (above).
+
+- Gotchas: same as later 124. Recommendations.lua in the working tree is still Brain-written dev data: never commit it.
+
 2026-10-11 (later 125): #176 built (c9b7ab2), option (b), not closed: in-game check left (on #176's last comment). After every Data slot try is stale with Scans waiting, Scanner keeps tryState "trying" (banner: Brain is working) until new pure `Nudge.behindIn(scans, now)` says the oldest saved Scan counts as behind, then rechecks `brainBehind` (skipped while catching up): behind -> behindAtLoad + `Nudge.behindLine` in chat, else reloadReady. 'Took longer' state, line and `Scanner.tookLonger` deleted (a slow Brain and an off one look the same). ADR-0030 got a dated line, the setup guide's 'took longer' entry removed. 346 busted specs.
 
 Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
