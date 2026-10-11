@@ -1,3 +1,5 @@
+2026-10-11 (later 124): no code. Filed #177 (needs-triage, later): Addon shows which of my live Listings have been undercut, display only. It's the first half of #134 (commented there). Queue below unchanged.
+
 2026-10-11 (later 123): #175 diagnosed, no code change. Not about the day away, and not a code bug: on thin Scans the cheap-stock cutoff (ADR-0028/0029) takes nearly every candidate. With it off, the low Scans return to 23-30 passing. It also takes ~20 on good Scans. One-offs: 10-07 21:33 was Dropped rows (the last Scan before 6983547), and 10-05 18:17 is a replay artifact (gold pinned before the session's first Character Read). The market's raw cheap outliers don't dip after gaps. Full numbers on #175's comment. Probes in `docs/research/issue-175-probes/`. ADR-0031 got a correction line ("isn't mainly the cutoff" was wrong). #175 left open for the user to close as not-a-bug.
 
 Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
