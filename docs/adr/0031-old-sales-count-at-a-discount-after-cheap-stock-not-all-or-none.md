@@ -42,6 +42,7 @@ Checked on the outside review's history copy (69 Beta Scans) with its probes. HE
 
   That's far past the review's ~5g noise band. Loosening the cutoff added buys on the Scans between gaps (10-03: 11 → 41 rows), and they lost money. That fits the review's own finding that loosening without sizing does worst.
 - **Rows per Scan** (`p5`): the mean rose from 14.2 to 20.0, but the Scans after a day away barely moved: 10-05 18:17 stayed at 5, 10-07 21:33 at 2, and 10-08 18:02 / 18:23 went from 4 / 2 to 7 / 6. So the collapse after a gap isn't mainly the cutoff, as the review thought (§2.1). At 10-07 21:33 under this rule, 5,848 Item Keys fail the minimum of Sale Events on the raw count, which the cutoff doesn't touch, 949 fail the Flip margin and 14 fail on dropped rows (#156).
+- **Correction (2026-10-11, #175):** "isn't mainly the cutoff" was wrong. This rule kept a 24 h half-life on the stretch's age, so old stretches still cut. With the cutoff fully off, the thin Scans come back (10-08 18:23: 2 -> 23 passing, 10-10 17:00: 2 -> 25). The low Scans aren't tied to gaps either. See #175.
 - **LME** (unit test only): the week's sellable units went from 3027 to 527, 17% (w = 0.119).
 
 The weighting may still be the right shape once buys are sized by expected value and capped (#170, #171). Revisit it there, and only measured against the backtest yardstick (#167).

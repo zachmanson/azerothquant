@@ -1,0 +1,28 @@
+10-02 12:21 gap   0.0h rows 42 sell 31 pass 38 keys  5738 askUnderClear  43 +se  42 fails {'Sale Events': 4272, 'Flip margin': 1417, 'Budget': 9, 'Room': 2}
+10-02 15:49 gap   3.5h rows 60 sell 40 pass 54 keys  5817 askUnderClear  52 +se  52 fails {'Flip margin': 1385, 'Sale Events': 4365, 'Budget': 9, 'Room': 3, 'Row cap': 1}
+10-03 15:46 gap  23.9h rows 34 sell 19 pass 32 keys  6350 askUnderClear  23 +se  23 fails {'Flip margin': 1213, 'Sale Events': 5101, 'Room': 3, 'Budget': 1}
+10-03 16:20 gap   0.6h rows 13 sell  4 pass 11 keys  6375 askUnderClear  13 +se   4 fails {'Flip margin': 1248, 'Sale Events': 5116}
+10-03 18:13 gap   1.9h rows 24 sell 11 pass 23 keys  6686 askUnderClear  15 +se  12 fails {'Sale Events': 5375, 'Flip margin': 1287, 'Budget': 1}
+10-03 18:29 gap   0.3h rows 11 sell  6 pass 10 keys  6670 askUnderClear  12 +se   8 fails {'Sale Events': 5346, 'Flip margin': 1314}
+10-04 13:46 gap  19.3h rows 31 sell 22 pass 30 keys  6626 askUnderClear  31 +se  28 fails {'Flip margin': 1190, 'Sale Events': 5400, 'Room': 5, 'Budget': 1}
+10-04 15:38 gap   1.9h rows 30 sell 21 pass 28 keys  6438 askUnderClear  30 +se  25 fails {'Sale Events': 5250, 'Flip margin': 1156, 'Room': 3, 'Budget': 1}
+10-04 17:54 gap   2.3h rows 36 sell 25 pass 32 keys  6057 askUnderClear  31 +se  27 fails {'Sale Events': 4926, 'Flip margin': 1097, 'Room': 2}
+10-04 19:05 gap   1.2h rows 31 sell 28 pass 30 keys  5701 askUnderClear  32 +se  31 fails {'Flip margin': 1073, 'Sale Events': 4596, 'Room': 2}
+10-04 20:28 gap   1.4h rows 31 sell 28 pass 29 keys  5697 askUnderClear  34 +se  31 fails {'Flip margin': 1061, 'Sale Events': 4605, 'Room': 2}
+10-05 18:17 gap  21.8h rows  6 sell  1 pass  5 keys  5253 askUnderClear  17 +se  14 fails {'Sale Events': 4394, 'Flip margin': 841, 'Budget': 11, 'Room': 2}
+10-05 22:50 gap   4.5h rows 27 sell 12 pass 23 keys  6508 askUnderClear  16 +se  16 fails {'Sale Events': 5467, 'Flip margin': 1014, 'Budget': 3, 'Room': 1}
+10-06 17:51 gap  19.0h rows 30 sell 23 pass 25 keys  6757 askUnderClear  34 +se  30 fails {'Sale Events': 5665, 'Flip margin': 1060, 'Budget': 4, 'Room': 3}
+10-06 19:46 gap   1.9h rows 23 sell 16 pass 20 keys  6817 askUnderClear  27 +se  23 fails {'Sale Events': 5717, 'Flip margin': 1074, 'Budget': 4, 'Room': 2}
+10-06 21:45 gap   2.0h rows 32 sell 20 pass 28 keys  6608 askUnderClear  27 +se  26 fails {'Sale Events': 5537, 'Flip margin': 1037, 'Budget': 4, 'Room': 2}
+10-07 21:33 gap  23.8h rows  4 sell  1 pass  2 keys  6828 askUnderClear  14 +se  13 fails {'Sale Events': 5869, 'Flip margin': 945, 'Dropped rows': 11, 'Room': 1}
+10-08 18:02 gap  20.5h rows  6 sell  3 pass  4 keys  6124 askUnderClear   8 +se   6 fails {'Sale Events': 5291, 'Flip margin': 827, 'Dropped rows': 2}
+10-08 18:23 gap   0.4h rows  6 sell  2 pass  2 keys  6213 askUnderClear   6 +se   3 fails {'Sale Events': 5379, 'Flip margin': 832}
+10-09 18:02 gap  23.6h rows 23 sell  8 pass 22 keys  7466 askUnderClear  20 +se  14 fails {'Sale Events': 6531, 'Flip margin': 907, 'Dropped rows': 5, 'Room': 1}
+10-09 20:51 gap   2.8h rows 11 sell 10 pass 10 keys  7196 askUnderClear  18 +se  16 fails {'Sale Events': 6305, 'Flip margin': 875, 'Dropped rows': 4, 'Room': 2}
+10-09 21:49 gap   1.0h rows  2 sell  1 pass  1 keys  7087 askUnderClear   6 +se   1 fails {'Sale Events': 6175, 'Flip margin': 910, 'Dropped rows': 1}
+10-10 16:44 gap  18.9h rows  9 sell  6 pass  9 keys  7259 askUnderClear  12 +se  12 fails {'Sale Events': 6290, 'Flip margin': 954, 'Budget': 1, 'Dropped rows': 5}
+10-10 17:00 gap   0.3h rows  3 sell  1 pass  2 keys  7329 askUnderClear   6 +se   2 fails {'Sale Events': 6360, 'Flip margin': 966, 'Dropped rows': 1}
+10-10 17:20 gap   0.3h rows  7 sell  2 pass  5 keys  7362 askUnderClear   4 +se   2 fails {'Sale Events': 6360, 'Flip margin': 997}
+10-10 17:38 gap   0.3h rows 20 sell  5 pass 18 keys  7367 askUnderClear   7 +se   6 fails {'Sale Events': 6329, 'Flip margin': 1017, 'Dropped rows': 3}
+10-11 00:03 gap   6.4h rows 20 sell 12 pass 16 keys  7204 askUnderClear  20 +se  18 fails {'Sale Events': 6191, 'Flip margin': 991, 'Dropped rows': 5, 'Budget': 1}
+10-11 12:03 gap  12.0h rows 21 sell 21 pass 21 keys  7378 askUnderClear  31 +se  27 fails {'Sale Events': 6351, 'Flip margin': 1000, 'Dropped rows': 5, 'Room': 1}

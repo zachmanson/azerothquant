@@ -1,3 +1,12 @@
+2026-10-11 (later 123): #175 diagnosed, no code change. Not about the day away, and not a code bug: on thin Scans the cheap-stock cutoff (ADR-0028/0029) takes nearly every candidate. With it off, the low Scans return to 23-30 passing. It also takes ~20 on good Scans. One-offs: 10-07 21:33 was Dropped rows (the last Scan before 6983547), and 10-05 18:17 is a replay artifact (gold pinned before the session's first Character Read). The market's raw cheap outliers don't dip after gaps. Full numbers on #175's comment. Probes in `docs/research/issue-175-probes/`. ADR-0031 got a correction line ("isn't mainly the cutoff" was wrong). #175 left open for the user to close as not-a-bug.
+
+Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
+1. User: close #175 (not a bug) or say otherwise. Whether the cutoff leaves too few rows belongs to #167's backtest yardstick, then #170/#171.
+2. #176: pick a/b/c (small, Addon only, busted).
+3. Then #156/#146 release steps; #167 before any of #169-#171 (and #168 after #170/#171).
+
+- Gotchas: same as later 122. Replays with `recommend_market(..., as_of=now)` pin gold and Holdings to before the Scan, so a session's first Scan can show a Budget collapse the live import never saw. Use a fresh history copy for each cutoff/observation variant (the Fair Value cache persists in it).
+
 2026-10-10 (later 122): no code. In-game checks done. #162 closed: items 1-3, 5 and 6 passed, item 4 FAILED. Brain off, Scan, Reload showed 'took longer' (banner + chat), not 'Brain not running'. Filed #176 (needs-triage, options a/b/c on it): `Nudge.brainBehind` needs savedAt 130 s old, the last try is at 90 s, and nothing checks again. Import took with a new Scan: 29-36 s, slowest 53 s (#155), so {20, 45, 90} stays. #163 closed: tooltips good per user, guide sections 2-4 match the screen. Also seen: the first Scan after ~18 h away (10-10 17:00) gave a 2-row Shopping List (16:44 gave 9). That's #175's pattern, a fresh example.
 Later the same evening: #140 closed (crates stack, no bug). #85: #38 and #50 PASS (logged there). Shopping List rows that evening: 16:44 9, 17:00 2, 17:20 5, 17:38 18 (on #175). #155 has a 58.5 s Decision Engine pass. #164: user picked (a), now ready-for-agent.
 
