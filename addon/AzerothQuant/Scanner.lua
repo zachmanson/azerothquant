@@ -54,13 +54,13 @@ local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
 local behindAtLoad = false -- it should have imported some long ago, so brain watch is off (#104)
--- The Data slot tries since load (ADR-0030): nil when none were started, else "trying",
--- "fresh" (one caught up) or "stale" (every slot was).
+-- The Data slot tries since load (ADR-0030): nil when none were started, else "trying"
+-- (incl. the wait to see if the Brain is behind, #176), "fresh" (one caught up) or "stale"
+-- (every slot was).
 local tryState
 local onDataLoad -- the Recommendation frame's redraw, after a try kept a newer copy
 
 local READY_LINE = "New recommendations are ready. /aq recs to see them."
-local TOOK_LONGER_LINE = "The Brain took longer than usual. Reload to try again."
 
 local function cancel(timer)
   if timer then
@@ -348,10 +348,26 @@ local function tryDataSlots()
       if not windowShown() then
         Chat.say(READY_LINE)
       end
-    else
-      -- A problem line: chat too, whether the banner shows it or not.
-      Chat.say(TOOK_LONGER_LINE)
+      return
     end
+    -- Every slot was stale with Scans still waiting: the Brain is slow or off, and the
+    -- Addon can't tell which from here. The banner keeps saying it's working until the
+    -- Scans count as behind, then says the Brain isn't running (#176). A problem line:
+    -- chat too, whether the banner shows it or not. behindIn isn't nil: savedAtLoad > 0
+    -- counts Scans with savedAt.
+    tryState = "trying"
+    C_Timer.After(Nudge.behindIn(db.scans, GetServerTime()), function()
+      tryState = "stale"
+      local now = GetServerTime()
+      local behind = Nudge.brainBehind(db.scans, now)
+      -- A pull started since the load: its Scans wait behind it, as in afterDataLoad.
+      if behind and not Nudge.catchingUp(AzerothQuantRecommendations, now) then
+        behindAtLoad = true
+        Chat.say(Nudge.behindLine(behind))
+      else
+        reloadReady = true
+      end
+    end)
   end)
 end
 
@@ -466,12 +482,10 @@ ns.Scanner = {
   reloadReady = function()
     return reloadReady
   end,
-  -- The Data slot tries (ADR-0030): some still to come, and every one was stale.
+  -- The Data slot tries (ADR-0030): some still to come, or the wait after every one was
+  -- stale to see if the Brain is behind (#176).
   trying = function()
     return tryState == "trying"
-  end,
-  tookLonger = function()
-    return tryState == "stale"
   end,
   -- fn runs after each try that loaded a copy: the Recommendation frame redraws.
   setOnDataLoad = function(fn)

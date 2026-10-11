@@ -49,7 +49,7 @@ describe("Tips", function()
   it("has a tip for every banner button", function()
     local base = {
       scanning = false, ahOpen = false, unsaved = 0, unimported = 0, behind = false, catchingUp = false,
-      brainRan = true, trying = false, tookLonger = false, reloadReady = false,
+      brainRan = true, trying = false, reloadReady = false,
     }
     local function step(changes)
       local loop = {}

@@ -166,6 +166,24 @@ describe("Nudge.brainBehind", function()
   end)
 end)
 
+describe("Nudge.behindIn", function()
+  local NOW = SCAN + 60 * MIN
+
+  it("has nothing to wait for with no saved Scans", function()
+    assert.is_nil(Nudge.behindIn({}, NOW))
+    assert.is_nil(Nudge.behindIn({ { id = 1 } }, NOW))
+  end)
+
+  it("waits until the oldest saved Scan has waited 130 s", function()
+    -- The last Data slot try is 90 s after the reload (#176).
+    assert.are.equal(40, Nudge.behindIn({ { savedAt = NOW - 30 }, { savedAt = NOW - 90 } }, NOW))
+  end)
+
+  it("doesn't wait once a saved Scan is already behind", function()
+    assert.are.equal(0, Nudge.behindIn({ { savedAt = NOW - 10 * MIN } }, NOW))
+  end)
+end)
+
 describe("Nudge.atLogin", function()
   local NOW = 2000000
 

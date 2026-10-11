@@ -14,7 +14,7 @@ local NextStep = {}
 -- loop: what the Addon knows, as RecommendationFrame.lua gathers it each frame:
 --   scanning (Scanner.busy), ahOpen, unsaved and unimported and behind (Scanner.waiting),
 --   catchingUp (Nudge.catchingUp), brainRan (Recommendations.lua has a brain table),
---   trying and tookLonger (DataAddon: Data slots still to try, every slot tried stale),
+--   trying (Scanner.trying: Data slots still to try, or waiting to see if the Brain is behind),
 --   reloadReady (Scanner.reloadReady), lastScanAt.
 -- now: GetServerTime(), the clock lastScanAt is on. Returns the banner:
 -- { title, line, button ("Scan", "Scanning...", "Reload" or nil for none), action
@@ -74,18 +74,8 @@ function NextStep.of(loop, now)
       line = "New recommendations will show by themselves. About a minute.",
     }
   end
-  if loop.unimported > 0 and loop.tookLonger then
-    return {
-      title = "The Brain took longer than usual",
-      line = "Reload to try again.",
-      button = "Reload",
-      action = "reload",
-      enabled = true,
-      pulse = true,
-      warn = true,
-    }
-  end
-  -- No Data slots (the first run before a client restart): Reload once the Brain should be done.
+  -- No Data slots (the first run before a client restart), or every try stale with no Scan
+  -- behind: Reload once the Brain should be done.
   if loop.unimported > 0 and not loop.reloadReady then
     return { title = "The Brain is working", line = "The Brain is reading your Scan. About a minute." }
   end

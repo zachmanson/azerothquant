@@ -18,7 +18,8 @@ The try times are a guess until a warm `Import took` from `brain watch` is known
 
 ## Consequences
 
-- No Load button or `/aq load`. While tries remain the banner says the Brain is working; the first fresh try redraws the table, with a chat line if the window is closed. If all three are stale, the banner turns orange: "The Brain took longer than usual. Reload to try again."
+- No Load button or `/aq load`. While tries remain the banner says the Brain is working; the first fresh try redraws the table, with a chat line if the window is closed. If all three are stale, the banner turns orange: "The Brain took longer than usual. Reload to try again." (Changed 2026-10-11, #176: see the last line.)
 - The slots are Brain output, as before: setup creates all three, uninstall removes them, and both remove the old `AzerothQuant_Data`.
 - When the slots are missing (the first run before a client restart), the Addon falls back to Reload once the Brain should be done, as before.
 - While the Brain catches up on a long pull (#159) the Addon doesn't try: its Scans wait behind the pull.
+- 2026-10-11 (#176): the Brain being off wasn't covered. A Scan counts as behind only 130 s after it was saved, so after the last try at 90 s the banner said "took longer" and never "Brain not running". Now, when all three are stale with Scans still waiting, the banner keeps saying the Brain is working until the oldest counts as behind, then says "Brain not running" (and the chat line). The Addon can't tell a slow Brain from an off one (neither has written a new copy), so "took longer" is gone: a Brain slower than the last try (90 s) also gets "not running", and Reload fixes it.

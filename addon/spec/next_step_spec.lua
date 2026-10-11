@@ -15,7 +15,6 @@ local function loop(changes)
     catchingUp = false,
     brainRan = true,
     trying = false,
-    tookLonger = false,
     reloadReady = false,
     lastScanAt = NOW - 60 * MIN,
   }
@@ -64,7 +63,7 @@ describe("NextStep.of", function()
   end)
 
   it("warns the Brain isn't running when it's behind on a saved Scan", function()
-    local step = NextStep.of(loop({ unimported = 1, behind = true, reloadReady = true, tookLonger = true }), NOW)
+    local step = NextStep.of(loop({ unimported = 1, behind = true, reloadReady = true }), NOW)
     assert.are.equal("Brain not running", step.title)
     assert.is_true(step.warn)
     assert.are.equal("Reload", step.button)
@@ -85,15 +84,6 @@ describe("NextStep.of", function()
     assert.is_nil(step.button)
   end)
 
-  it("warns the Brain took longer, with Reload pulsing, once every Data slot was stale", function()
-    local step = NextStep.of(loop({ unimported = 1, tookLonger = true, reloadReady = true }), NOW)
-    assert.are.equal("The Brain took longer than usual", step.title)
-    assert.are.equal("Reload to try again.", step.line)
-    assert.is_true(step.warn)
-    assert.are.equal("Reload", step.button)
-    assert.is_true(step.pulse)
-  end)
-
   it("says the Brain is working, with no button, until it should be done, with no Data slots", function()
     local step = NextStep.of(loop({ unimported = 1, ahOpen = true }), NOW)
     assert.are.equal("The Brain is working", step.title)
@@ -101,8 +91,9 @@ describe("NextStep.of", function()
     assert.is_nil(step.button)
   end)
 
-  it("is Reload, pulsing, once the Brain should be done, with no Data slots", function()
-    -- The first run before a client restart: the client hasn't found the slots yet.
+  it("is Reload, pulsing, once the Brain should be done and no Data slot tries are left", function()
+    -- The first run before a client restart (the client hasn't found the slots yet), or
+    -- every slot came back stale with no Scan behind yet (#176).
     local step = NextStep.of(loop({ unimported = 1, reloadReady = true }), NOW)
     assert.are.equal("Reload", step.button)
     assert.are.equal("reload", step.action)

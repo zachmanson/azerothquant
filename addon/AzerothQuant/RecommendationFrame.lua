@@ -948,7 +948,6 @@ local function loopState()
     catchingUp = Nudge.catchingUp(AzerothQuantRecommendations, now),
     brainRan = AzerothQuantRecommendations ~= nil and AzerothQuantRecommendations.brain ~= nil,
     trying = Scanner.trying(),
-    tookLonger = Scanner.tookLonger(),
     reloadReady = Scanner.reloadReady(),
     lastScanAt = db.lastScanAt,
   }, now
@@ -982,7 +981,7 @@ local function createBanner()
   end)
   banner.button:SetScript("OnLeave", GameTooltip_Hide)
   -- Pulses when the step is one to take now: a Scan can run, a Scan is saved, or the
-  -- Brain should be done (#71), or took longer than its Data slots (ADR-0030).
+  -- Brain should be done (#71).
   banner.pulse = Scanner.addPulse(banner.button)
 
   banner.title = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")

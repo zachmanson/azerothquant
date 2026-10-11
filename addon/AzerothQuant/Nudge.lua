@@ -57,17 +57,39 @@ Nudge.BRAIN_BEHIND_AFTER = Nudge.RELOAD_READY_AFTER + 60
 Nudge.BRAIN_BEHIND_LINE = "Your Scan from %d min ago hasn't reached the Brain. Is AzerothQuant Brain running?"
   .. " Start it from the Start menu."
 
+-- The chat line for a Brain behind by `behind` seconds (Nudge.brainBehind).
+function Nudge.behindLine(behind)
+  return string.format(Nudge.BRAIN_BEHIND_LINE, math.max(1, math.floor(behind / 60)))
+end
+
+-- The earliest savedAt among scans, or nil if none has one.
+local function oldestSaved(scans)
+  local oldest
+  for _, scan in ipairs(scans) do
+    if scan.savedAt then
+      oldest = math.min(oldest or scan.savedAt, scan.savedAt)
+    end
+  end
+  return oldest
+end
+
 -- scans: those left after Prune.importedScans at load. Returns how many seconds ago the
 -- oldest Scan the Brain should have imported by now was saved, or nil if there's none.
 -- A Scan with no savedAt (saved by an older build) never counts.
 function Nudge.brainBehind(scans, now)
-  local oldest
-  for _, scan in ipairs(scans) do
-    if scan.savedAt and scan.savedAt <= now - Nudge.BRAIN_BEHIND_AFTER then
-      oldest = math.min(oldest or scan.savedAt, scan.savedAt)
-    end
+  local oldest = oldestSaved(scans)
+  if oldest and oldest <= now - Nudge.BRAIN_BEHIND_AFTER then
+    return now - oldest
   end
-  return oldest and now - oldest
+  return nil
+end
+
+-- How many seconds until the oldest saved Scan counts as behind (Nudge.brainBehind): 0 if
+-- one already does, nil with no saved Scans. After every Data slot try came back stale,
+-- the Addon checks again then, so a Brain that's off says so in the same session (#176).
+function Nudge.behindIn(scans, now)
+  local oldest = oldestSaved(scans)
+  return oldest and math.max(0, oldest + Nudge.BRAIN_BEHIND_AFTER - now)
 end
 
 -- At load, with the Scans left after Prune.importedScans. If the Brain is behind, says so
@@ -86,8 +108,7 @@ function Nudge.afterLoad(scans, now, after, ready, say, catchingUp)
   end
   local behind = Nudge.brainBehind(scans, now)
   if behind then
-    local minutes = math.max(1, math.floor(behind / 60))
-    say(string.format(Nudge.BRAIN_BEHIND_LINE, minutes))
+    say(Nudge.behindLine(behind))
     return true
   end
   if #scans > 0 then

@@ -62,8 +62,6 @@ Some handy things:
 
 **The table says "No Recommendations yet".** Do a Scan, click Reload, wait a minute.
 
-**The window says "The Brain took longer than usual".** Click **Reload** and wait another minute.
-
 **The window says "Brain not running"** (chat may say "Your Scan from X min ago hasn't reached the Brain"). The Brain isn't running. Open the Start menu, click **AzerothQuant Brain**, then Reload in game.
 
 **The window says "Downloading guild Scans".** With a guild code, the Brain downloads recent scans the first time it runs, and after a long break. It takes a few minutes. Keep playing, then Reload.
