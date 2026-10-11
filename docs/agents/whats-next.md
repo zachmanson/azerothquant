@@ -1,3 +1,12 @@
+2026-10-11 (later 127): #167 grilled, spec on #167 (comment 6112184474), now ready-for-agent. New `brain backtest` command + `backtest.py` (replay untouched; file a follow-up to retire it). Policies `brain` and `relaxed` (config overrides). Grader uses new `observation.sale_records` (Partial Sales any gap + can't-have-expired Disappearances in gaps <= 12 h, 1.2x cap). Bounds fixed 0.65/1.2 in config, calibration line printed. ADR-0032 amends ADR-0015; CONTEXT.md gets Sale Record and Backtest. Two slices; #170 can start after slice 1.
+
+Next, in order (PoC by Oct 20):
+1. User: close #175 (not a bug) or say otherwise.
+2. #167 slice 1 (TDD), then slice 2, then #168-#171 per #166's order.
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 126. Reproduction check: run p4 and `brain backtest` on the SAME commit and history copy (recipe in later 121 gotchas), within 5g at both marks.
+
 2026-10-11 (later 126): In-game checks PASSED, #156 and #176 closed (results on each). #156: "re-read 4920 of 7854 dropped rows in 0.2 s" (cap fine); the AH-closed-partway check can't be done by hand at 0.2 s (busted covers it); the latest Scan's 830 dropped items are all off the Shopping List. #176: 'Brain is working' then 'Brain not running' + the chat line, no 'took longer'; table caught up after the Brain restarted. **v0.2.0 tagged and released** (CI built the exe). brain watch restarted 14:11 in its own window.
 
 #146 is parked until the user says the guildie is free. When they do: anything merged after v0.2.0 means bumping the version (Brain `__version__` + Addon .toc; the CI release job fails if the tag and `__version__` differ), tagging v0.2.x and giving the guildie THAT exe. Then: download the exe and check it starts, `brain pool key add <guildie>`, user uploads exe + `docs/setup-guide.md` to Drive and DMs the link + key, then #146's Checks.
