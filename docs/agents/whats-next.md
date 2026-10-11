@@ -1,3 +1,11 @@
+2026-10-11 (later 125): #176 built (c9b7ab2), option (b), not closed: in-game check left (on #176's last comment). After every Data slot try is stale with Scans waiting, Scanner keeps tryState "trying" (banner: Brain is working) until new pure `Nudge.behindIn(scans, now)` says the oldest saved Scan counts as behind, then rechecks `brainBehind` (skipped while catching up): behind -> behindAtLoad + `Nudge.behindLine` in chat, else reloadReady. 'Took longer' state, line and `Scanner.tookLonger` deleted (a slow Brain and an off one look the same). ADR-0030 got a dated line, the setup guide's 'took longer' entry removed. 346 busted specs.
+
+Next, in order (target #146 by ~Oct 13; PoC by Oct 20):
+1. User: close #175 (not a bug) or say otherwise; in game: #176's check.
+2. Then #156/#146 release steps; #167 before any of #169-#171 (and #168 after #170/#171).
+
+- Gotchas: same as later 124.
+
 2026-10-11 (later 124): no code. Filed #177 (needs-triage, later): Addon shows which of my live Listings have been undercut, display only. It's the first half of #134 (commented there). Queue below unchanged.
 
 2026-10-11 (later 123): #175 diagnosed, no code change. Not about the day away, and not a code bug: on thin Scans the cheap-stock cutoff (ADR-0028/0029) takes nearly every candidate. With it off, the low Scans return to 23-30 passing. It also takes ~20 on good Scans. One-offs: 10-07 21:33 was Dropped rows (the last Scan before 6983547), and 10-05 18:17 is a replay artifact (gold pinned before the session's first Character Read). The market's raw cheap outliers don't dip after gaps. Full numbers on #175's comment. Probes in `docs/research/issue-175-probes/`. ADR-0031 got a correction line ("isn't mainly the cutoff" was wrong). #175 left open for the user to close as not-a-bug.
