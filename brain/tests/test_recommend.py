@@ -1177,6 +1177,16 @@ def test_a_flip_to_sell_no_longer_counts_sales_from_before_its_cheap_run_showed_
     assert result[MARKET].shopping_list == []
 
 
+def test_with_the_cheap_stock_cutoff_off_the_sales_from_before_its_cheap_run_count(db):
+    # The Backtest's relaxed policy (#167).
+    config = replace(FLIPS_NEED_3, cheap_stock_cutoff=False)
+
+    result = run(db, crashed(hours_since=24), [character_read(money=GOLD)], config=config)
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.post_at, flip.sale_events) == (Action.SELL, 999, 10)
+
+
 def test_a_flip_on_a_listing_first_seen_in_the_latest_scan_still_counts_the_sales_before_it(db):
     result = run(db, crashed(hours_since=0), [character_read(money=GOLD)], config=FLIPS_NEED_3)
 

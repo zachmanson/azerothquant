@@ -54,3 +54,7 @@ Realized profit from Lots and Sold mail is reported alongside as the confirmatio
   - Held units' worth in Sub-craft and Flip to Craft costing uses the same pricer.
   It's graded like every policy, by the real Brain's Best Exit Value at the end of the horizon, as the `Brain without own-Market Sell Rate` row. It runs on every `brain replay`.
 - **Realized profit** is the range's Sold Outcomes after the cut, less the cost of the Lot units they closed.
+
+## Amendments
+
+- Amended by #167 (ADR-0032): the replay no longer judges buy-side changes. The walk-forward Backtest graded on Sale Records does (`brain backtest`). The Brain vs. Auctionator and TSM checkpoints above still use the replay.

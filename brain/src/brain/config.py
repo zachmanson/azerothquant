@@ -247,6 +247,9 @@ class Config:
     # ADR-0015). Always on outside it: not read from config.toml.
     flips_to_craft: bool = True
     deposits: bool = True
+    # The cheap-stock cutoff (ADR-0028, ADR-0029): off only in the Backtest's relaxed
+    # policy (#167). Not read from config.toml.
+    cheap_stock_cutoff: bool = True
     # The Market's Days to Sell, set in game and read per Market with the Budget (#109,
     # ADR-0020); None for not set. Not read from config.toml.
     days_to_sell_seconds: int | None = None

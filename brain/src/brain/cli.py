@@ -5,6 +5,7 @@
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
     brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
+    brain backtest   trade the past Scans from a start gold and grade it by the sales after
     brain flips      grade the Flips to Sell and to Craft made: did they sell as named
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
     brain pool push  upload the player's Scans the Scan Pool doesn't have yet
@@ -36,6 +37,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from brain.archive import Archive, ArchivedScan
+from brain.backtest import POLICIES, START_GOLD, MarketBacktest, Trade, backtest
 from brain.beta_prior import BetaPrior, beta_prior
 from brain.config import (
     APP_FOLDER,
@@ -518,6 +520,87 @@ def run_replay(config: Config, since: date | None, until: date | None) -> str:
         return "No Character has a Market with a Scan yet.\n"
     hours = config.sale_horizon_seconds / 3600
     return "\n".join(_render_replay(m, hours) for m in markets)
+
+
+def _backtest(
+    config: Config, since: date | None, until: date | None, policies: list[str], start_gold: int
+) -> int:
+    if not config.history_path.exists():
+        log.error("No history at %s yet; run `brain import` first", config.history_path)
+        return 1
+    try:
+        text = run_backtest(config, since, until, policies, start_gold)
+    except sqlite3.Error as e:
+        log.error("Couldn't read the history: %s", e)
+        return 1
+    except PredictionsError as e:
+        log.error("Can't load the Predictions: %s", e)
+        return 1
+    print(text, end="")
+    return 0
+
+
+def run_backtest(
+    config: Config, since: date | None, until: date | None, policies: list[str], start_gold: int
+) -> str:
+    """The Backtest (#167, ADR-0032) over the Scans from the start of `since` to the end
+    of `until` (all of them without), per Market, as text."""
+    predictions = load_predictions(config.predictions_path)
+    start = None if since is None else start_of(since)
+    end = None if until is None else start_of(until + timedelta(days=1)) - 1
+    with closing(open_history(config.history_path)) as conn:
+        markets = backtest(conn, config, predictions, start, end, policies, start_gold)
+    if not markets:
+        return "No Character has a Market with a Scan yet.\n"
+    return "\n".join(_render_backtest(m, start_gold) for m in markets)
+
+
+def _render_backtest(m: MarketBacktest, start_gold: int) -> str:
+    table = _table(
+        [
+            "Policy",
+            "P&L vendor mark",
+            "P&L market mark",
+            "Buys",
+            "Units sold",
+            "Won",
+            "Lost",
+            "Worst trade",
+        ],
+        [
+            [
+                name,
+                _money(sim.profit()),
+                _money(sim.profit(market=True)),
+                str(len(sim.trades)),
+                f"{sum(t.sold for t in sim.trades)} of {sum(t.units for t in sim.trades)}",
+                str(sum(1 for t in sim.trades if t.profit() > 0)),
+                str(sum(1 for t in sim.trades if t.profit() < 0)),
+                _money(min((t.profit() for t in sim.trades), default=0)),
+            ]
+            for name, sim in m.runs.items()
+        ],
+    )
+    splits = []
+    for name, sim in m.runs.items():
+        split = sim.split()
+        splits.append(
+            f"{name}: sold out in week 1 {_trades_line(split.sold_out_in_week_1)}; "
+            f"relisted {_trades_line(split.relisted)}; the rest {_trades_line(split.rest)}\n"
+        )
+    scans = "Scan" if m.scans == 1 else "Scans"
+    return (
+        f"{_graded_title(m.market)}\n"
+        f"Backtested {m.scans} {scans} from {_money(start_gold)}, no buys in the last 7 days\n"
+        f"{table}\n" + "".join(splits) + "Flips to Disenchant not simulated.\n"
+    )
+
+
+def _trades_line(trades: Sequence[Trade]) -> str:
+    """How many trades, what they made at the vendor mark, and what they cost."""
+    made = sum(t.profit() for t in trades)
+    spent = sum(t.cost for t in trades)
+    return f"{len(trades)} made {_money(made)} on {_money(spent)} spent"
 
 
 def _graded_title(market: Market) -> str:
@@ -1411,6 +1494,17 @@ def watch_step(
         watcher.retry(path, now=clock())
 
 
+def _policies(text: str) -> list[str]:
+    """`--policy`'s comma-separated Backtest policies."""
+    names = [name.strip() for name in text.split(",") if name.strip()]
+    unknown = [name for name in names if name not in POLICIES]
+    if unknown or not names:
+        raise argparse.ArgumentTypeError(
+            f"unknown policy {', '.join(unknown)}; pick from {', '.join(POLICIES)}"
+        )
+    return names
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="brain", description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -1448,6 +1542,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
     replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
+    backtesting = commands.add_parser(
+        "backtest", help="trade the past Scans from a start gold and grade it by the sales after"
+    )
+    backtesting.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
+    backtesting.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
+    backtesting.add_argument(
+        "--policy",
+        default="brain",
+        type=_policies,
+        help=f"comma-separated, of {', '.join(POLICIES)} (default brain)",
+    )
+    backtesting.add_argument(
+        "--start-gold",
+        type=float,
+        default=START_GOLD / 10000,
+        help="simulated gold to start from, in gold (default 40)",
+    )
     commands.add_parser(
         "flips", help="grade the Flips to Sell and to Craft made: did they sell as named"
     )
@@ -1538,6 +1649,10 @@ def _run_command(args: argparse.Namespace, config_path: Path) -> int:
         return _bench(config, args.out)
     if args.command == "replay":
         return _replay(config, args.since, args.until)
+    if args.command == "backtest":
+        return _backtest(
+            config, args.since, args.until, args.policy, round(args.start_gold * 10000)
+        )
     if args.command == "disenchants":
         return _disenchants(config)
     if args.command == "flips":

@@ -87,6 +87,10 @@ A Disappearance treated as a sale because it could not have expired (the time be
 Every unit of one Item Key seen to sell in one Observation Window: all its Partial Sales and Probable Sales between those two Scans, whatever their prices. On Forever a buyer takes units cheapest-first across Listings and price points, and units that don't stack are one Listing each, so one buyer's sweep shows up as many drops; counted apart, they'd make one buyer look like many. A Sale Event is usually one buyer but can be several, and Scans can't tell which (ADR-0012). Its size is the units that went, and its price is the dearest of them.
 _Avoid_: sale, purchase (a Purchase is the player's own buy)
 
+**Sale Record**:
+Units of another player's Listing seen to sell between two Scans in any gap, not only an Observation Window: a Partial Sale, or a Disappearance over a gap of at most 12 hours that could not have expired and is not a Repost. It is priced at most 1.2x the Fair Value of the Scan before it, and an item either Scan dropped rows of has none. Only the Backtest grades with them, as its evidence of what a post would have sold; Sell Rate still reads Sale Events (ADR-0032).
+_Avoid_: sale (too vague), Sale Event (that's one Observation Window's)
+
 **Outcome**:
 What happened to one stack the player posted: Sold (with its price), Cancelled or Expired, read from a Mailbox Read. Unlike a Disappearance it is known, not inferred. It covers one stack, and a Listing can hold several, so an Outcome and a Listing don't map one to one. A Sold Outcome's mail names the item but doesn't carry it, so its Item Key is found by that name from own Listings and other Auction House mail; one whose name matches no Item Key, or more than one, is Unlinked and closes no Lot.
 _Avoid_: result, receipt, invoice (an invoice is one kind of mail)
@@ -153,6 +157,10 @@ One craft the player made with a Known Recipe, and how many units of its output 
 _Avoid_: craft log, craft event
 
 ## Decisions
+
+**Backtest**:
+A policy trading a Market's past Scans in time order on its own simulated gold (40g by default), graded by the Sale Records after each buy: a post sells to a later one at or above its price, our cheapest units first; a lot unsold after a week is relisted once under the cheapest ask, then vendored. It reports gold made at the vendor mark and the market mark. It's the yardstick for buy-side changes (ADR-0032); `brain backtest` runs it, with the Brain under a config as each policy (`brain`, `relaxed`).
+_Avoid_: replay (that's ADR-0015's per-Scan grade against Auctionator and TSM). What it buys aren't Lots: those come from the player's real Purchases
 
 **Candidate Item**:
 An item the Decision Engine evaluates for a Recommendation.

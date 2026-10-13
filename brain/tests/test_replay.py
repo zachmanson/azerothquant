@@ -27,7 +27,7 @@ from brain.recommend import (
     Row,
     recommend_market,
 )
-from brain.replay import Policy, _brain, _taken, db_market, db_min_buyout, replay
+from brain.replay import Policy, _brain, db_market, db_min_buyout, options_taken, replay
 
 T0 = 1_790_000_000
 HOUR = 3600
@@ -757,7 +757,7 @@ def test_a_taken_flip_to_disenchant_blocks_later_options_on_its_items_or_mats():
     )
 
     # A Flip to Disenchant isn't one of the Flips to Sell and Vendor the row cap counts.
-    shopping, _ = _taken(m, flip_rows=2)
+    shopping, _ = options_taken(m, flip_rows=2)
 
     assert shopping == [flip_to_disenchant(), linen]
 

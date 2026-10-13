@@ -305,13 +305,13 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
     """The Brain's Recommendations as moves: Sell rows posted, Vendor rows vendored (for
     nothing without a Vendor Price), no-data and Hold units held on to, Disenchant units
     held too (their Best Exit Value at the horizon is their mats', #76), and the Shopping
-    List options and Prediction buys the player would take (`_taken`). A Flip to Craft's
+    List options and Prediction buys the player would take (`options_taken`). A Flip to Craft's
     output is posted and vendored as it was valued; a Craft Action's is in the Holdings
     rows. A Flip to Disenchant's units are held on to, like a Disenchant row's (#89). Held
     units a taken Flip to Craft uses come off the least profitable Holdings rows of their
     Item Key."""
     moves = _Moves()
-    shopping, prediction_buys = _taken(m, flip_rows)
+    shopping, prediction_buys = options_taken(m, flip_rows)
     used: Counter[str] = Counter()
     for r in shopping:
         for use in r.uses:
@@ -348,7 +348,7 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
     return moves
 
 
-def _taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], list[Row]]:
+def options_taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], list[Row]]:
     """The Shopping List options and Prediction buys a player would take, since each option
     was sized as if the only buy (#86): most profit first while the gold (or the Budget)
     lasts, skipping any that buys, uses or makes an Item Key one already taken does (a

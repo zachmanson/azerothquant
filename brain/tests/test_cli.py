@@ -17,6 +17,7 @@ from brain.cli import (
     RebuildError,
     main,
     pool_syncer,
+    run_backtest,
     run_disenchants,
     run_flips,
     run_import,
@@ -2143,3 +2144,40 @@ def test_a_config_option_in_a_missing_folder_is_a_clean_error(tmp_path, caplog):
     assert main(["--config", str(tmp_path / "nowhere" / "config.toml"), "import"]) == 2
 
     assert "Can't load the config" in caplog.text
+
+
+def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
+    config = _three_linen_held(tmp_path)
+
+    text = run_backtest(
+        config, since=None, until=None, policies=["brain", "relaxed"], start_gold=400_000
+    )
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert "Classic Beta PvP Alliance (beta): provisional, Beta never decides" in text
+    assert "Backtested 2 Scans from 40g 00s 00c, no buys in the last 7 days" in text
+    header = [
+        "Policy",
+        "P&L vendor mark",
+        "P&L market mark",
+        "Buys",
+        "Units sold",
+        "Won",
+        "Lost",
+        "Worst trade",
+    ]
+    assert header in lines
+    assert [line[0] for line in lines if line and line[0] in ("brain", "relaxed")][:2] == [
+        "brain",
+        "relaxed",
+    ]
+    assert "Flips to Disenchant not simulated." in text
+
+
+@pytest.mark.parametrize("policies", ["brain,nope", ","])
+def test_backtest_refuses_a_policy_it_does_not_know(policies, capsys):
+    with pytest.raises(SystemExit) as refused:
+        main(["backtest", "--policy", policies])
+
+    assert refused.value.code == 2
+    assert "pick from brain, relaxed" in capsys.readouterr().err

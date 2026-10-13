@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,10 @@ from brain.history import Market, import_scans, open_history
 from brain.observation import (
     ObservationWindow,
     SaleEvent,
+    SaleRecord,
     disappearances,
     observation_windows,
+    sale_records,
     sell_rate_evidence,
 )
 
@@ -512,3 +515,83 @@ def test_a_disappearance_too_dear_to_be_a_sale_is_not_a_coincidence_either(db):
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert evidence.coincidence_counts() == {}
+
+
+# --- Sale Records, the Backtest's evidence (#167) ---
+
+
+def test_a_partial_sale_in_a_long_gap_is_a_sale_record(db):
+    run(
+        db,
+        scan(T0, row(quantity=20)),
+        scan(T0 + 20 * HOUR, row(quantity=15)),
+    )
+
+    assert sale_records(db, MARKET, CONFIG) == [
+        SaleRecord(
+            item_key=LINEN_KEY, unit_buyout=100, units=5, last_seen=T0, seen_at=T0 + 20 * HOUR
+        )
+    ]
+
+
+# The 12-48 h bucket set to 14-48 h, so expiry can't explain a 13 h gap and only the cap does.
+LONG_BUCKETS = replace(CONFIG, time_left_max_seconds=(30 * MINUTE, 2 * HOUR, 14 * HOUR, 48 * HOUR))
+
+
+@pytest.mark.parametrize(("gap", "counts"), [(12 * HOUR, True), (13 * HOUR, False)])
+def test_a_vanished_listing_is_a_sale_record_over_a_gap_of_at_most_12_hours(db, gap, counts):
+    import_scans(
+        db, [scan(T0, row(quantity=3, time_left=4)), scan(T0 + gap)], Era.BETA, LONG_BUCKETS
+    )
+
+    expected = [SaleRecord(LINEN_KEY, 100, 3, T0, T0 + gap)] if counts else []
+    assert sale_records(db, MARKET, LONG_BUCKETS) == expected
+
+
+def test_a_listing_reposted_cheaper_over_a_long_gap_is_not_a_sale_record(db):
+    # 2-12 h left, gone 3 h later: it can't have expired, but the same stack is back cheaper.
+    run(
+        db,
+        scan(T0, row(quantity=3, unit=100, time_left=4)),
+        scan(T0 + 3 * HOUR, row(quantity=3, unit=90)),
+    )
+
+    assert sale_records(db, MARKET, CONFIG) == []
+
+
+@pytest.mark.parametrize(("unit", "counts"), [(120, True), (121, False)])
+@pytest.mark.parametrize("partial", [False, True], ids=["vanished", "partial"])
+def test_a_sale_record_is_priced_at_most_1_2_times_fair_value_where_last_seen(
+    db, unit, counts, partial
+):
+    # 11 or 12 units, so Fair Value is the cheapest 2: both at 100.
+    # Either one of the 2 sells from the stack, or the 1 vanishes.
+    sold = row(quantity=2 if partial else 1, unit=unit, time_left=4)
+    left = [row(quantity=1, unit=unit, time_left=4)] if partial else []
+    run(
+        db,
+        scan(T0, row(quantity=10, unit=100), sold),
+        scan(T0 + 3 * HOUR, row(quantity=10, unit=100), *left),
+    )
+
+    assert [r.unit_buyout for r in sale_records(db, MARKET, CONFIG)] == ([unit] if counts else [])
+
+
+@pytest.mark.parametrize("dropped_in", ["before", "after"])
+def test_an_item_either_scan_dropped_rows_of_has_no_sale_records(db, dropped_in):
+    run(
+        db,
+        scan(
+            T0, row(quantity=20), row(item=SILK), dropped=[2589] if dropped_in == "before" else []
+        ),
+        scan(T0 + 3 * HOUR, row(quantity=15), dropped=[2589] if dropped_in == "after" else []),
+    )
+
+    assert [r.item_key for r in sale_records(db, MARKET, CONFIG)] == [SILK_KEY]
+
+
+def test_a_listing_that_could_have_expired_over_the_gap_is_not_a_sale_record(db):
+    # 30 min-2 h left, gone 3 h later.
+    run(db, scan(T0, row(time_left=2)), scan(T0 + 3 * HOUR))
+
+    assert sale_records(db, MARKET, CONFIG) == []

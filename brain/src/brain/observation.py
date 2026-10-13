@@ -365,3 +365,80 @@ def _sale_events(sales: list[tuple[str, int, int, int]]) -> list[SaleEvent]:
         for (item_key, seen_at), n in units.items()
     ]
     return sorted(events, key=lambda e: e.seen_at)
+
+
+@dataclass(frozen=True, order=True)
+class SaleRecord:
+    """Units of another player's Listing seen to sell between two Scans in any gap, not
+    only an Observation Window: the Backtest's evidence of what a post would have sold
+    (#167, ADR-0032). Not used by the Sell Rate."""
+
+    item_key: str
+    unit_buyout: int
+    units: int
+    last_seen: int  # requested_at of the Scan before the sale
+    seen_at: int  # requested_at of the Scan it was seen sold in
+
+
+# A Listing gone over a longer gap may have been cancelled as likely as sold (ADR-0032).
+SALE_RECORD_MAX_GAP_SECONDS = 12 * 3600
+
+
+def sale_records(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    fair_value_cache: FairValueCache | None = None,
+) -> list[SaleRecord]:
+    """Every Sale Record of the Market, by the Scan it was seen sold in: other players'
+    Partial Sales in any gap, and their Disappearances in a gap of at most 12 h whose
+    time-left bucket rules out expiry and no Repost explains. Each is priced at most the
+    Probable Sale multiple of the Fair Value in the Scan before it (none there, or 0: no cap).
+    `fair_value_cache` as in `sell_rate_evidence`."""
+    cache = FairValueCache() if fair_value_cache is None else fair_value_cache
+    seen = cache.listings(conn, market)
+    after = dict(pairwise(scan_times(conn, market)))
+    before = {b: a for a, b in after.items()}
+    dropped = dropped_item_ids(conn, market)
+
+    def left_out(item_key: str, last_seen: int, seen_at: int) -> bool:
+        """The Scan may only have missed it (#150)."""
+        either = dropped.get(last_seen, frozenset()) | dropped.get(seen_at, frozenset())
+        return item_id_of(item_key) in either
+
+    candidates: dict[int, list[Disappearance]] = defaultdict(list)
+    new_in: dict[int, list[Listing]] = defaultdict(list)
+    for listing in seen:
+        new_in[listing.first_seen].append(listing)
+        gone_at = after.get(listing.last_seen)
+        if (
+            listing.own
+            or gone_at is None
+            or gone_at - listing.last_seen > SALE_RECORD_MAX_GAP_SECONDS
+            or left_out(listing.item_key, listing.last_seen, gone_at)
+        ):
+            continue
+        d = _disappearance(listing, gone_at, config)
+        if not d.expiry_possible:
+            candidates[gone_at].append(d)
+    records = [
+        SaleRecord(d.item_key, d.unit_buyout, d.quantity, d.last_seen, d.gone_at)
+        for gone_at, ds in candidates.items()
+        for d in _pair_reposts(ds, new_in[gone_at]).sales
+    ]
+    records += [
+        SaleRecord(p.item_key, p.unit_buyout, p.units_sold, before[p.seen_at], p.seen_at)
+        for p in partial_sales(conn, market)
+        if not p.own
+        and p.seen_at in before
+        and not left_out(p.item_key, before[p.seen_at], p.seen_at)
+    ]
+
+    def priced_like_a_sale(r: SaleRecord) -> bool:
+        fair_value = cache.fair_values(conn, market, config, r.last_seen).get(r.item_key)
+        return (
+            not fair_value
+            or r.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
+        )
+
+    return sorted((r for r in records if priced_like_a_sale(r)), key=lambda r: r.seen_at)

@@ -1,0 +1,291 @@
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from brain.backtest import Buy, Terms, backtest, simulate
+from brain.config import Config, Era, Install
+from brain.history import Market, import_character_reads, import_scans, open_history
+from brain.observation import SaleRecord
+
+T0 = 1_790_000_000
+HOUR = 3600
+DAY = 24 * HOUR
+LINEN = "2589"
+SILK = "4306"
+
+# 5% cut, 1c deposit a unit, vendors pay 10c, other players' cheapest ask 150c.
+TERMS = Terms(
+    cut=0.05,
+    deposit=lambda item_key: 1,
+    vendor=lambda item_key: 10,
+    cheapest_ask=lambda item_key, at: 150,
+)
+
+
+def scripted(buys_at):
+    """A policy that buys what `buys_at` names at each Scan, whatever its gold."""
+    return lambda at, gold, posted: buys_at.get(at, [])
+
+
+def record(at, unit=100, units=1, item_key=LINEN, last_seen=None):
+    return SaleRecord(item_key, unit, units, at - HOUR if last_seen is None else last_seen, at)
+
+
+def test_a_post_sells_to_a_later_sale_record_at_or_above_its_price_after_the_cut():
+    result = simulate(
+        [T0, T0 + HOUR],
+        scripted({T0: [Buy(LINEN, units=2, cost=120, post_at=100)]}),
+        [record(T0 + HOUR, unit=110, units=5)],
+        TERMS,
+        start_gold=1000,
+    )
+
+    [trade] = result.trades
+    assert trade.sold == 2
+    assert trade.proceeds == pytest.approx(2 * 95)
+    assert result.gold == pytest.approx(1000 - 120 + 190)
+
+
+def run(buys_at, records, times=(T0, T0 + HOUR), start_gold=10_000, **kwargs):
+    return simulate(list(times), scripted(buys_at), records, TERMS, start_gold=start_gold, **kwargs)
+
+
+def test_our_cheapest_post_fills_first():
+    dear, cheap = (
+        Buy(LINEN, units=1, cost=50, post_at=120),
+        Buy(LINEN, units=1, cost=50, post_at=100),
+    )
+
+    result = run({T0: [dear, cheap]}, [record(T0 + HOUR, unit=130, units=1)])
+
+    assert [t.sold for t in result.trades] == [0, 1]
+
+
+def test_a_sale_record_under_our_price_sells_nothing():
+    result = run({T0: [Buy(LINEN, units=1, cost=50, post_at=100)]}, [record(T0 + HOUR, unit=99)])
+
+    assert result.trades[0].sold == 0
+
+
+def test_a_sale_record_of_a_listing_gone_before_we_posted_sells_nothing():
+    # Last seen in the Scan before ours, so it may have sold before we posted.
+    times = (T0, T0 + HOUR, T0 + 2 * HOUR)
+    late = record(T0 + 2 * HOUR, unit=100, last_seen=T0)
+
+    result = run({T0 + HOUR: [Buy(LINEN, units=1, cost=50, post_at=100)]}, [late], times=times)
+
+    assert result.trades[0].sold == 0
+
+
+@pytest.mark.parametrize(("hours", "deposits"), [(24, 0), (25, 1), (49, 2)])
+def test_a_sold_unit_loses_a_deposit_for_every_24_hours_posting_it_waited_through(hours, deposits):
+    times = (T0, T0 + hours * HOUR)
+
+    result = run(
+        {T0: [Buy(LINEN, units=1, cost=50, post_at=100)]}, [record(T0 + hours * HOUR)], times=times
+    )
+
+    assert result.trades[0].proceeds == pytest.approx(95 - deposits)
+
+
+def test_a_lot_unsold_after_a_week_is_relisted_1c_under_the_cheapest_ask():
+    times = (T0, T0 + 7 * DAY, T0 + 8 * DAY)
+
+    result = run(
+        {T0: [Buy(LINEN, units=1, cost=50, post_at=200)]},
+        [record(T0 + 8 * DAY, unit=149)],
+        times=times,
+    )
+
+    [trade] = result.trades
+    assert trade.relisted
+    # 7 deposits: it waited through the first 7 postings.
+    assert trade.proceeds == pytest.approx(149 * 0.95 - 7)
+
+
+def test_a_relisted_lot_still_unsold_after_another_week_is_vendored_less_a_deposit_a_day():
+    times = (T0, T0 + 7 * DAY, T0 + 14 * DAY)
+
+    result = run({T0: [Buy(LINEN, units=2, cost=100, post_at=200)]}, [], times=times)
+
+    [trade] = result.trades
+    assert trade.salvage == pytest.approx(2 * 10 - 2 * 14)
+    assert result.gold == pytest.approx(10_000 - 100 + 2 * 10 - 2 * 14)
+
+
+def test_a_lot_whose_relist_would_not_beat_its_vendor_price_is_vendored_after_a_week():
+    terms = Terms(
+        cut=0.05, deposit=lambda k: 1, vendor=lambda k: 150, cheapest_ask=lambda k, at: 150
+    )
+    times = (T0, T0 + 7 * DAY)
+
+    result = simulate(
+        list(times),
+        scripted({T0: [Buy(LINEN, units=1, cost=50, post_at=200)]}),
+        [],
+        terms,
+        start_gold=0,
+    )
+
+    [trade] = result.trades
+    assert not trade.relisted
+    assert trade.salvage == pytest.approx(150 - 7)
+
+
+def test_nothing_is_bought_after_the_last_buy():
+    result = run(
+        {T0: [Buy(LINEN, 1, 50, 100)], T0 + HOUR: [Buy(SILK, 1, 50, 100)]}, [], last_buy=T0
+    )
+
+    assert [t.item_key for t in result.trades] == [LINEN]
+
+
+def test_an_item_key_still_posted_is_not_bought_again_and_the_policy_is_told():
+    told = []
+
+    def policy(at, gold, posted):
+        told.append(posted)
+        return (
+            [Buy(LINEN, 1, 50, 100), Buy(SILK, 1, 50, 100)]
+            if at == T0 + HOUR
+            else [Buy(LINEN, 1, 50, 100)]
+        )
+
+    result = simulate([T0, T0 + HOUR], policy, [], TERMS, start_gold=10_000)
+
+    assert [t.item_key for t in result.trades] == [LINEN, SILK]
+    assert told == [frozenset(), frozenset({LINEN})]
+
+
+@pytest.mark.parametrize(("post_at", "market_unit"), [(200, 149 * 0.95), (100, 100 * 0.95)])
+def test_units_still_posted_at_the_end_are_marked_at_vendor_and_at_market(post_at, market_unit):
+    # 2 days posted: 2 Deposits a unit lost either way.
+    result = run(
+        {T0: [Buy(LINEN, units=2, cost=100, post_at=post_at)]}, [], times=(T0, T0 + 2 * DAY)
+    )
+
+    [trade] = result.trades
+    assert not trade.closed
+    assert trade.profit() == pytest.approx(2 * 10 - 2 * 2 - 100)
+    assert trade.profit(market=True) == pytest.approx(2 * market_unit - 2 * 2 - 100)
+    assert result.gold == pytest.approx(10_000 - 100 + 2 * 10 - 2 * 2)
+
+
+def test_gold_a_buy_brings_back_at_once_is_its_proceeds():
+    # A Flip to Vendor: nothing posted, every unit vendored as bought.
+    result = run({T0: [Buy(LINEN, units=0, cost=50, post_at=0, back=80)]}, [])
+
+    [trade] = result.trades
+    assert trade.closed
+    assert trade.profit() == trade.profit(market=True) == 30
+    assert result.gold == 10_000 + 30
+
+
+# --- the Brain backtested on a history (as in test_replay) ---
+
+REALM = "Classic Beta PvP"
+MARKET = Market(realm=REALM, faction="Alliance", era=Era.BETA)
+LINEN_ITEM = "item:2589::::::::20:1490"
+# No priors, so hourly Scans make a Sell Rate taken at its word (as in test_replay).
+CONFIG = replace(
+    Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),)),
+    sale_horizon_seconds=3 * HOUR,
+    sell_rate_prior_hours_holdings=0,
+    sell_rate_prior_hours_flips=0,
+    sale_size_prior_events_holdings=0,
+    sale_size_prior_events_flips=0,
+    flip_min_sale_events=1,
+)
+
+
+@pytest.fixture
+def db():
+    conn = open_history(":memory:")
+    yield conn
+    conn.close()
+
+
+def history_scan(at, *rows):
+    return {
+        "id": 1,
+        "requestedAt": at,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "droppedRows": 0,
+        "listings": list(rows),
+        "vendorPrices": {},
+    }
+
+
+def history_row(quantity=1, unit=100):
+    return {
+        "itemString": LINEN_ITEM,
+        "quantity": quantity,
+        "buyout": quantity * unit,
+        "timeLeft": 4,
+    }
+
+
+def test_the_brain_buys_with_its_simulated_gold_and_is_graded_by_the_sale_records_after(db):
+    # 2 Linen sell at 1000 each hour. At T0 + 1 h, 5 turn up at 200: the Brain, with no gold
+    # of its own but 10,000 simulated, buys them and posts at 999. The 2 that sell in the
+    # next hour are over 1.2x that Scan's Fair Value (200), so not believed; the 4 after
+    # take 4 of its 5, and the last is marked at the end.
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(
+            T0 + HOUR, history_row(quantity=18, unit=1000), history_row(quantity=5, unit=200)
+        ),
+        history_scan(T0 + 2 * HOUR, history_row(quantity=16, unit=1000)),
+        history_scan(T0 + 3 * HOUR, history_row(quantity=14, unit=1000)),
+        history_scan(T0 + 4 * HOUR, history_row(quantity=12, unit=1000)),
+    ]
+    read = {
+        "readAt": T0,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "vendorPrices": {"2589": 10},
+    }
+    import_scans(db, scans, Era.BETA, CONFIG)
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(db, CONFIG, [], start_gold=10_000, no_buys_in_last_seconds=0)
+
+    assert result.market == MARKET
+    [trade] = result.runs["brain"].trades
+    assert (trade.item_key, trade.units, trade.price, trade.sold) == (LINEN, 5, 999, 4)
+    assert trade.profit() == pytest.approx(4 * 999 * 0.95 + 10 - 5 * 200)
+
+
+def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():
+    # Linen sells out on day 1, Silk only after its relist, and the Flip to Vendor is
+    # done at once; the third Item Key never sells and is vendored after its week.
+    times = (T0, T0 + DAY, T0 + 7 * DAY, T0 + 8 * DAY)
+    ore = "2770"
+    buys = {
+        T0: [
+            Buy(LINEN, 1, 50, 100),
+            Buy(SILK, 1, 100, 200),
+            Buy(ore, 0, 5, 0, back=10),
+            Buy("2771", 1, 100, 140),
+        ]
+    }
+    records = [record(T0 + DAY, unit=100), record(T0 + 8 * DAY, unit=149, item_key=SILK)]
+    terms = Terms(
+        cut=0.05,
+        deposit=lambda k: 1,
+        vendor=lambda k: 10,
+        cheapest_ask=lambda k, at: 150 if k == SILK else 5,
+    )
+
+    result = simulate(list(times), scripted(buys), records, terms, start_gold=10_000)
+
+    split = result.split()
+    assert [t.item_key for t in split.sold_out_in_week_1] == [LINEN, ore]
+    assert [t.item_key for t in split.relisted] == [SILK]
+    assert [t.item_key for t in split.rest] == ["2771"]

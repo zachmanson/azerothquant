@@ -660,6 +660,7 @@ def recommend_market(
     why_not: bool = False,
     paid: bool = True,
     loot_alert: bool = True,
+    gold: int | None = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
@@ -670,7 +671,8 @@ def recommend_market(
     `why_not` as in `recommend`. Without `paid`, the Holdings rows get no Paid or ROI:
     working out a past Scan, whose Lots may rest on what it named (#55), or a replay.
     Without `loot_alert`, the Loot Alert has no items: only the latest Scan's is shown
-    (#54), and valuing every Item Key in a Scan adds up over a replay."""
+    (#54), and valuing every Item Key in a Scan adds up over a replay. A `gold` replaces
+    the Characters' gold and the Budget: a Backtest's simulated gold (#167)."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -709,8 +711,11 @@ def recommend_market(
     # it saw may not be the cheapest up (#156).
     dropped = dropped_at(conn, market, now)
     buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
-    gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
-    budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
+    if gold is None:
+        gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
+        budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
+    else:
+        budget = None
     spend = _spend(gold, budget)
     ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
     beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
@@ -1893,7 +1898,10 @@ class _Valuer:
 
     def cheap(self, item_key: str) -> _Cheap:
         """The cheapest other player's Listing of an Item Key in each Scan back from this
-        one, for a buy that takes the cheapest of them to Sell (#132, #135)."""
+        one, for a buy that takes the cheapest of them to Sell (#132, #135). None at all
+        with the cheap-stock cutoff off (#167)."""
+        if not self._config.cheap_stock_cutoff:
+            return _Cheap(())
         return _Cheap(self.listed.get(item_key, ()))
 
     def deposit(self, item_key: str) -> float:
