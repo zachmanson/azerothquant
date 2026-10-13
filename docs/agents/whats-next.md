@@ -1,3 +1,15 @@
+2026-10-13 (later 131): #167 slice 2 built TDD, reviewed, committed (5af13a9); #167 CLOSED. `simulate(grade_share=)`, `Simulation.curve`/`max_drawdown`/`gold_low`, `MarketBacktest.bounds` (low, high runs per policy) and `.calibration`, `observation.grader_calibration` (own Listings vs mail, as p6; shares `_gone_like_a_sale` with `sale_records`), `Config.backtest_grade_low/high` (0.65/1.2, not read from config.toml). Check on the review's history copy matched §6.2 exactly (posted on #167): bounds -12.45/-8.23g vendor, -8.55/-4.85g market, drawdown 26%, calibration 27 of 39 / 27 of 47.
+
+Next, in order (PoC by Oct 20):
+1. #168 (needs-triage): grill it into a spec (review step 2: cheap-stock cutoff). Judge it with `brain backtest --policy brain,relaxed`.
+2. Then #169-#171 per #166's order (#170 can start any time).
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 130, plus:
+  - `brain backtest` now runs every policy 3 times (central, 0.65x, 1.2x): ~20 min for `brain` on the 69-Scan history.
+  - The calibration line reads the Market's whole history, ignoring `--since/--until` (on purpose: own-Listing evidence is thin).
+  - Bound runs fill fractional units (as p4); `Trade.sold` is a float.
+
 2026-10-13 (later 130): #167 slice 1 built TDD and committed (7cfbea0). `brain backtest` (backtest.py): `observation.sale_records`, the walk-forward sim (`simulate`, pure, tested with scripted policies), the `brain`/`relaxed` policies (`POLICIES`, config overrides), the vendor/market-mark report, ADR-0032 (amends ADR-0015), CONTEXT.md Sale Record and Backtest. Check passed and posted on #167: brain -10.49g/+1.14g, relaxed -37.65g/-27.51g, equal to p4 to the copper once p4's Flips to Vendor net is counted (the port counts them as trades). Filed #184 (needs-triage): retire `brain replay`.
 
 Next, in order (PoC by Oct 20):
