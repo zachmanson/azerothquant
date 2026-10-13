@@ -1,3 +1,19 @@
+2026-10-13 (later 130): #167 slice 1 built TDD and committed (7cfbea0). `brain backtest` (backtest.py): `observation.sale_records`, the walk-forward sim (`simulate`, pure, tested with scripted policies), the `brain`/`relaxed` policies (`POLICIES`, config overrides), the vendor/market-mark report, ADR-0032 (amends ADR-0015), CONTEXT.md Sale Record and Backtest. Check passed and posted on #167: brain -10.49g/+1.14g, relaxed -37.65g/-27.51g, equal to p4 to the copper once p4's Flips to Vendor net is counted (the port counts them as trades). Filed #184 (needs-triage): retire `brain replay`.
+
+Next, in order (PoC by Oct 20):
+1. #167 slice 2 (TDD): the 0.65x/1.2x bound runs (`backtest_grade_low`/`backtest_grade_high` in config), the own-Listing calibration line (as p6), max drawdown and gold low. Spec comment 6112184474.
+2. Then #168-#171 per #166's order (#170 can start now).
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 127, plus:
+  - `brain backtest` takes ~8-9 min a policy on the 69-Scan history. Checks run on copies under Z:/aq-check-167 (safe to delete).
+  - `recommend_market(..., gold=)` replaces the Characters' gold and the Budget.
+  - `Config.cheap_stock_cutoff` is not read from config.toml.
+  - `replay._taken` is now `options_taken`, so the review's p4 needs `from brain.replay import options_taken as _taken` to run on new code.
+  - Locally on Windows, `test_instance_lock.py::test_another_running_brain_holds_the_lock_until_it_is_killed` fails at HEAD too (the venv launcher's child PID). CI is Linux.
+  - Close every `open_history(":memory:")` in tests (use a fixture): an unclosed one fails a random later test via ResourceWarning.
+  - Review smells left as judgement calls: `_backtest` duplicates `_replay`'s error handling, and `_render_backtest` computes won/lost/worst itself (could move onto `Simulation`).
+
 2026-10-13 (later 129): #175 closed as not planned (not a bug: the cheap-stock cutoff takes nearly every candidate on thin Scans; tuning belongs to #167, then #170/#171). Next: #167 slice 1 (TDD), then the rest of later 127's queue.
 
 2026-10-12 (later 128): no code. Discussion + filing. Filed (all needs-triage): #179 Brain update notice (core), #180 Scan-ready ping (core, small, Addon only), #181 profit so far (later), #182 minimap button (later), #183 undercut wars: cancel-and-repost Deposits + post a few at a time (core, under #166, lands with #171). #178 closed as a duplicate of #147 (its additions commented on #147: day-1 replay yardstick, setup guide's `_classic_beta_` and "out of date AddOns" lines to check on Nov 4). Future update path discussed (not filed): Addon on CurseForge, Brain self-updates from GitHub releases (#179), Brain stops installing the Addon if CurseForge owns it, version stamp in Recommendations.lua.
