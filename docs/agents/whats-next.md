@@ -1,3 +1,5 @@
+2026-10-13 (later 129): #175 closed as not planned (not a bug: the cheap-stock cutoff takes nearly every candidate on thin Scans; tuning belongs to #167, then #170/#171). Next: #167 slice 1 (TDD), then the rest of later 127's queue.
+
 2026-10-12 (later 128): no code. Discussion + filing. Filed (all needs-triage): #179 Brain update notice (core), #180 Scan-ready ping (core, small, Addon only), #181 profit so far (later), #182 minimap button (later), #183 undercut wars: cancel-and-repost Deposits + post a few at a time (core, under #166, lands with #171). #178 closed as a duplicate of #147 (its additions commented on #147: day-1 replay yardstick, setup guide's `_classic_beta_` and "out of date AddOns" lines to check on Nov 4). Future update path discussed (not filed): Addon on CurseForge, Brain self-updates from GitHub releases (#179), Brain stops installing the Addon if CurseForge owns it, version stamp in Recommendations.lua.
 
 Next, in order (PoC by Oct 20): unchanged from later 127. #180 fits before Oct 20 if there's slack.
