@@ -1,3 +1,9 @@
+2026-10-12 (later 128): no code. Discussion + filing. Filed (all needs-triage): #179 Brain update notice (core), #180 Scan-ready ping (core, small, Addon only), #181 profit so far (later), #182 minimap button (later), #183 undercut wars: cancel-and-repost Deposits + post a few at a time (core, under #166, lands with #171). #178 closed as a duplicate of #147 (its additions commented on #147: day-1 replay yardstick, setup guide's `_classic_beta_` and "out of date AddOns" lines to check on Nov 4). Future update path discussed (not filed): Addon on CurseForge, Brain self-updates from GitHub releases (#179), Brain stops installing the Addon if CurseForge owns it, version stamp in Recommendations.lua.
+
+Next, in order (PoC by Oct 20): unchanged from later 127. #180 fits before Oct 20 if there's slack.
+
+- Gotchas: same as later 127.
+
 2026-10-11 (later 127): #167 grilled, spec on #167 (comment 6112184474), now ready-for-agent. New `brain backtest` command + `backtest.py` (replay untouched; file a follow-up to retire it). Policies `brain` and `relaxed` (config overrides). Grader uses new `observation.sale_records` (Partial Sales any gap + can't-have-expired Disappearances in gaps <= 12 h, 1.2x cap). Bounds fixed 0.65/1.2 in config, calibration line printed. ADR-0032 amends ADR-0015; CONTEXT.md gets Sale Record and Backtest. Two slices; #170 can start after slice 1.
 
 Next, in order (PoC by Oct 20):
