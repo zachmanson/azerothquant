@@ -250,6 +250,10 @@ class Config:
     # The cheap-stock cutoff (ADR-0028, ADR-0029): off only in the Backtest's relaxed
     # policy (#167). Not read from config.toml.
     cheap_stock_cutoff: bool = True
+    # The Backtest's grader bounds (#167, ADR-0032): runs that believe this share of each
+    # Sale Record's units, bracketing the own-Listing calibration. Not read from config.toml.
+    backtest_grade_low: float = 0.65
+    backtest_grade_high: float = 1.2
     # The Market's Days to Sell, set in game and read per Market with the Budget (#109,
     # ADR-0020); None for not set. Not read from config.toml.
     days_to_sell_seconds: int | None = None

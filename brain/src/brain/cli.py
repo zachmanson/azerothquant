@@ -37,7 +37,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from brain.archive import Archive, ArchivedScan
-from brain.backtest import POLICIES, START_GOLD, MarketBacktest, Trade, backtest
+from brain.backtest import POLICIES, START_GOLD, MarketBacktest, Simulation, Trade, backtest
 from brain.beta_prior import BetaPrior, beta_prior
 from brain.config import (
     APP_FOLDER,
@@ -74,6 +74,7 @@ from brain.history import (
 )
 from brain.instance_lock import instance_lock
 from brain.lots import happened_at, start_of
+from brain.observation import GraderCalibration
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
@@ -552,10 +553,11 @@ def run_backtest(
         markets = backtest(conn, config, predictions, start, end, policies, start_gold)
     if not markets:
         return "No Character has a Market with a Scan yet.\n"
-    return "\n".join(_render_backtest(m, start_gold) for m in markets)
+    low, high = config.backtest_grade_low, config.backtest_grade_high
+    return "\n".join(_render_backtest(m, start_gold, low, high) for m in markets)
 
 
-def _render_backtest(m: MarketBacktest, start_gold: int) -> str:
+def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float) -> str:
     table = _table(
         [
             "Policy",
@@ -566,6 +568,10 @@ def _render_backtest(m: MarketBacktest, start_gold: int) -> str:
             "Won",
             "Lost",
             "Worst trade",
+            f"Grader x{low:g} / x{high:g} vendor mark",
+            f"Grader x{low:g} / x{high:g} market mark",
+            "Max drawdown",
+            "Gold low",
         ],
         [
             [
@@ -573,10 +579,14 @@ def _render_backtest(m: MarketBacktest, start_gold: int) -> str:
                 _money(sim.profit()),
                 _money(sim.profit(market=True)),
                 str(len(sim.trades)),
-                f"{sum(t.sold for t in sim.trades)} of {sum(t.units for t in sim.trades)}",
+                f"{sum(t.sold for t in sim.trades):g} of {sum(t.units for t in sim.trades)}",
                 str(sum(1 for t in sim.trades if t.profit() > 0)),
                 str(sum(1 for t in sim.trades if t.profit() < 0)),
                 _money(min((t.profit() for t in sim.trades), default=0)),
+                _bounds(m.bounds[name], market=False),
+                _bounds(m.bounds[name], market=True),
+                f"{sim.max_drawdown:.0%}",
+                _money(sim.gold_low),
             ]
             for name, sim in m.runs.items()
         ],
@@ -592,7 +602,28 @@ def _render_backtest(m: MarketBacktest, start_gold: int) -> str:
     return (
         f"{_graded_title(m.market)}\n"
         f"Backtested {m.scans} {scans} from {_money(start_gold)}, no buys in the last 7 days\n"
-        f"{table}\n" + "".join(splits) + "Flips to Disenchant not simulated.\n"
+        f"{table}\n"
+        + "".join(splits)
+        + _calibration_line(m.calibration)
+        + "Flips to Disenchant not simulated.\n"
+    )
+
+
+def _bounds(bounds: tuple[Simulation, Simulation], market: bool) -> str:
+    """The P&L of the runs at the grader's low and high bounds, at one mark."""
+    low, high = bounds
+    return f"{_money(low.profit(market))} / {_money(high.profit(market))}"
+
+
+def _calibration_line(c: GraderCalibration) -> str:
+    """How the grader's rule did on own Listings, whose mail says what became of them."""
+    if not c.matched:
+        return "Grader checked on own Listings: no Listing it calls sold matched a mail.\n"
+    caught = f"{c.sold / c.sold_mails:.0%}" if c.sold_mails else "none"
+    return (
+        f"Grader checked on own Listings: of {c.matched} it calls sold that a mail matched, "
+        f"{c.sold / c.matched:.0%} really sold; it caught {caught} of the {c.sold_mails} "
+        "Sold mails.\n"
     )
 
 

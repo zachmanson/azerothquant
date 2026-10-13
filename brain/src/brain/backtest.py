@@ -20,7 +20,7 @@ from dataclasses import dataclass, field, replace
 from brain.config import Config
 from brain.fair_value import FairValueCache
 from brain.history import Market, character_markets, scan_times, supply_at, vendor_prices
-from brain.observation import SaleRecord, sale_records
+from brain.observation import GraderCalibration, SaleRecord, grader_calibration, sale_records
 from brain.predictions import Prediction
 from brain.recommend import Action, auction_cut, deposit_of, recommend_market
 from brain.replay import options_taken
@@ -84,7 +84,7 @@ class Trade:
     cost: float
     price: float  # per unit, as posted (lowered by a relist)
     posted_at: int
-    sold: int = 0
+    sold: float = 0  # in part when the grader believes a share of a record (#167)
     proceeds: float = 0.0
     # Its unsold units at their Vendor Price (`salvage`), or at other players' cheapest
     # ask then (`salvage_market`), less the Deposits they lost: when vendored, or as
@@ -95,7 +95,7 @@ class Trade:
     closed: bool = False
 
     @property
-    def left(self) -> int:
+    def left(self) -> float:
         return self.units - self.sold
 
     def profit(self, market: bool = False) -> float:
@@ -120,6 +120,23 @@ class Simulation:
 
     gold: float
     trades: list[Trade] = field(default_factory=list)
+    # (gold, gold plus unsold units at cost) after each Scan's buys
+    curve: list[tuple[float, float]] = field(default_factory=list)
+
+    @property
+    def gold_low(self) -> float:
+        return min((gold for gold, _ in self.curve), default=self.gold)
+
+    @property
+    def max_drawdown(self) -> float:
+        """The deepest fall of gold plus unsold units at cost from a peak before it, as a
+        share of that peak."""
+        peak, deepest = 0.0, 0.0
+        for _, bankroll in self.curve:
+            peak = max(peak, bankroll)
+            if peak > 0:
+                deepest = max(deepest, (peak - bankroll) / peak)
+        return deepest
 
     def profit(self, market: bool = False) -> float:
         return sum(t.profit(market) for t in self.trades)
@@ -138,17 +155,20 @@ def simulate(
     terms: Terms,
     start_gold: float,
     last_buy: int | None = None,
+    grade_share: float = 1.0,
 ) -> Simulation:
-    """`policy` trading the Scans at `times`, oldest first, graded by `records`. It buys
-    nothing after `last_buy`, and never an Item Key it still has units posted in: the
-    Scans don't show our simulated posts."""
+    """`policy` trading the Scans at `times`, oldest first, graded by `records`, of whose
+    units it believes `grade_share`. It buys nothing after `last_buy`, and never an Item
+    Key it still has units posted in: the Scans don't show our simulated posts."""
     sim = Simulation(gold=start_gold)
     for previous, at in zip([None, *times], times, strict=False):
         if previous is not None:
-            _fill(sim, [r for r in records if previous < r.seen_at <= at], terms)
+            _fill(sim, [r for r in records if previous < r.seen_at <= at], terms, grade_share)
         _expire(sim, at, terms)
         if last_buy is None or at <= last_buy:
             _buy(sim, at, policy, terms)
+        unsold = sum(t.cost * t.left / t.units for t in sim.trades if t.units and not t.closed)
+        sim.curve.append((sim.gold, sim.gold + unsold))
     if times:
         _expire(sim, times[-1], terms, end=True)
     return sim
@@ -165,15 +185,16 @@ def _buy(sim: Simulation, at: int, policy: BuyPolicy, terms: Terms) -> None:
         sim.trades.append(trade)
 
 
-def _fill(sim: Simulation, records: Sequence[SaleRecord], terms: Terms) -> None:
-    """Sell posted units to `records`, oldest first."""
+def _fill(sim: Simulation, records: Sequence[SaleRecord], terms: Terms, grade_share: float) -> None:
+    """Sell posted units to `records`, oldest first, believing `grade_share` of each
+    record's units (so a unit may sell in part)."""
     by_item: dict[str, list[Trade]] = defaultdict(list)
     for trade in sim.trades:
         if trade.closed:
             continue
         by_item[trade.item_key].append(trade)
     for r in records:
-        units = r.units
+        units = r.units * grade_share
         for trade in sorted(by_item.get(r.item_key, []), key=lambda t: t.price):
             if units <= 0 or trade.price > r.unit_buyout:
                 break
@@ -216,11 +237,14 @@ def _expire(sim: Simulation, at: int, terms: Terms, end: bool = False) -> None:
 
 @dataclass(frozen=True)
 class MarketBacktest:
-    """One Market's Backtest: each policy's run over its Scans."""
+    """One Market's Backtest: each policy's run over its Scans, its runs at the grader's
+    low and high bounds, and the grader checked on own Listings."""
 
     market: Market
     scans: int
     runs: dict[str, Simulation]  # by policy name
+    bounds: dict[str, tuple[Simulation, Simulation]]  # (low, high), by policy name
+    calibration: GraderCalibration
 
 
 def backtest(
@@ -250,18 +274,27 @@ def backtest(
         cache = FairValueCache()
         records = sale_records(conn, market, config, cache)
         terms = _terms(conn, config, market)
-        runs = {
-            name: simulate(
-                times,
-                _brain_policy(conn, POLICIES[name](config), market, predictions, cache, terms),
-                records,
-                terms,
-                start_gold,
-                last_buy=times[-1] - no_buys_in_last_seconds,
-            )
+
+        shares = (1.0, config.backtest_grade_low, config.backtest_grade_high)
+        graded = {
+            name: [
+                simulate(
+                    times,
+                    _brain_policy(conn, POLICIES[name](config), market, predictions, cache, terms),
+                    records,
+                    terms,
+                    start_gold,
+                    last_buy=times[-1] - no_buys_in_last_seconds,
+                    grade_share=share,
+                )
+                for share in shares
+            ]
             for name in policies
         }
-        result.append(MarketBacktest(market, len(times), runs))
+        runs = {name: central for name, (central, _, _) in graded.items()}
+        bounds = {name: (low, high) for name, (_, low, high) in graded.items()}
+        calibration = grader_calibration(conn, market, config)
+        result.append(MarketBacktest(market, len(times), runs, bounds, calibration))
     return result
 
 

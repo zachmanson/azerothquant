@@ -2165,12 +2165,17 @@ def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
         "Won",
         "Lost",
         "Worst trade",
+        "Grader x0.65 / x1.2 vendor mark",
+        "Grader x0.65 / x1.2 market mark",
+        "Max drawdown",
+        "Gold low",
     ]
     assert header in lines
     assert [line[0] for line in lines if line and line[0] in ("brain", "relaxed")][:2] == [
         "brain",
         "relaxed",
     ]
+    assert "Grader checked on own Listings: no Listing it calls sold matched a mail." in text
     assert "Flips to Disenchant not simulated." in text
 
 

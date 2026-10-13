@@ -4,12 +4,13 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
-from brain.history import Market, import_scans, open_history
+from brain.history import Market, import_mailbox_reads, import_scans, open_history
 from brain.observation import (
     ObservationWindow,
     SaleEvent,
     SaleRecord,
     disappearances,
+    grader_calibration,
     observation_windows,
     sale_records,
     sell_rate_evidence,
@@ -595,3 +596,72 @@ def test_a_listing_that_could_have_expired_over_the_gap_is_not_a_sale_record(db)
     run(db, scan(T0, row(time_left=2)), scan(T0 + 3 * HOUR))
 
     assert sale_records(db, MARKET, CONFIG) == []
+
+
+# --- the grader checked on own Listings (#167) ---
+
+
+def named_row(name, **kwargs):
+    return row(**kwargs) | {"own": True, "name": name}
+
+
+def sold(name, count, price):
+    return {
+        "sender": "Alliance Auction House",
+        "subject": f"Auction successful: {name}",
+        "money": price,
+        "daysLeft": 30,
+        "invoice": {"invoiceType": "seller", "itemName": name, "bid": price, "count": count},
+    }
+
+
+def cancelled(name, item, count):
+    return {
+        "sender": "Alliance Auction House",
+        "subject": f"Auction cancelled: {name}",
+        "money": 0,
+        "daysLeft": 30,
+        "firstItemQuantity": count,
+        "firstItemLink": f"|cffffffff|H{item}|h[{name}]|h|r",
+    }
+
+
+def test_the_grader_is_checked_on_own_listings_against_the_mail_that_says_what_became_of_them(db):
+    # Four own Listings gone an hour later. The Sale Record rule calls three of them gone
+    # (a Linen of 1, a Linen of 2, the Silk); the fourth had under 30 min left, so it
+    # could have expired. The mail: both Linen called gone sold, the Silk was cancelled,
+    # and the Linen that could have expired sold too, a sale the rule didn't catch. Sold
+    # mails count only when matched to an own Listing that went missing (as p6).
+    run(
+        db,
+        scan(
+            T0,
+            named_row("Linen Cloth", unit=100),
+            named_row("Linen Cloth", quantity=2, unit=100),
+            named_row("Silk Cloth", item=SILK, unit=300),
+            named_row("Linen Cloth", unit=50, time_left=1),
+        ),
+        scan(T0 + HOUR),
+    )
+    mails = [
+        sold("Linen Cloth", 1, 100),
+        cancelled("Silk Cloth", SILK, 1),
+        sold("Linen Cloth", 1, 50),
+        sold("Linen Cloth", 2, 200),
+        # Sold between two Scans, so no Listing went missing for it: not counted.
+        sold("Silk Cloth", 1, 999),
+    ]
+    read = {
+        "readAt": T0 + 2 * HOUR,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "shownCount": len(mails),
+        "totalCount": len(mails),
+        "skippedMails": 0,
+        "mails": [{"index": i + 1, **m} for i, m in enumerate(mails)],
+    }
+    import_mailbox_reads(db, [read], Era.BETA, CONFIG)
+
+    calibration = grader_calibration(db, MARKET, CONFIG)
+
+    assert (calibration.matched, calibration.sold, calibration.sold_mails) == (3, 2, 3)

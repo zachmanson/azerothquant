@@ -21,9 +21,11 @@ from brain.history import (
     Market,
     dropped_item_ids,
     listings,
+    outcomes,
     partial_sales,
     scan_times,
 )
+from brain.mailbox import MailKind
 from brain.scan import item_id_of
 
 
@@ -401,26 +403,17 @@ def sale_records(
     before = {b: a for a, b in after.items()}
     dropped = dropped_item_ids(conn, market)
 
-    def left_out(item_key: str, last_seen: int, seen_at: int) -> bool:
-        """The Scan may only have missed it (#150)."""
-        either = dropped.get(last_seen, frozenset()) | dropped.get(seen_at, frozenset())
-        return item_id_of(item_key) in either
-
     candidates: dict[int, list[Disappearance]] = defaultdict(list)
     new_in: dict[int, list[Listing]] = defaultdict(list)
     for listing in seen:
         new_in[listing.first_seen].append(listing)
         gone_at = after.get(listing.last_seen)
         if (
-            listing.own
-            or gone_at is None
-            or gone_at - listing.last_seen > SALE_RECORD_MAX_GAP_SECONDS
-            or left_out(listing.item_key, listing.last_seen, gone_at)
+            not listing.own
+            and gone_at is not None
+            and _gone_like_a_sale(listing, gone_at, dropped, config)
         ):
-            continue
-        d = _disappearance(listing, gone_at, config)
-        if not d.expiry_possible:
-            candidates[gone_at].append(d)
+            candidates[gone_at].append(_disappearance(listing, gone_at, config))
     records = [
         SaleRecord(d.item_key, d.unit_buyout, d.quantity, d.last_seen, d.gone_at)
         for gone_at, ds in candidates.items()
@@ -431,7 +424,7 @@ def sale_records(
         for p in partial_sales(conn, market)
         if not p.own
         and p.seen_at in before
-        and not left_out(p.item_key, before[p.seen_at], p.seen_at)
+        and not _left_out(p.item_key, before[p.seen_at], p.seen_at, dropped)
     ]
 
     def priced_like_a_sale(r: SaleRecord) -> bool:
@@ -442,3 +435,72 @@ def sale_records(
         )
 
     return sorted((r for r in records if priced_like_a_sale(r)), key=lambda r: r.seen_at)
+
+
+def _gone_like_a_sale(
+    listing: Listing, gone_at: int, dropped: dict[int, frozenset[int]], config: Config
+) -> bool:
+    """Whether `listing`, missing from the Scan at `gone_at`, went the way a Sale Record's
+    Listing must: in a gap of at most 12 h its time-left bucket rules out expiring in,
+    and not maybe just missed by a Scan that dropped rows."""
+    return (
+        gone_at - listing.last_seen <= SALE_RECORD_MAX_GAP_SECONDS
+        and not _left_out(listing.item_key, listing.last_seen, gone_at, dropped)
+        and not _disappearance(listing, gone_at, config).expiry_possible
+    )
+
+
+def _left_out(
+    item_key: str, last_seen: int, seen_at: int, dropped: dict[int, frozenset[int]]
+) -> bool:
+    """The Scan may only have missed it (#150)."""
+    either = dropped.get(last_seen, frozenset()) | dropped.get(seen_at, frozenset())
+    return item_id_of(item_key) in either
+
+
+@dataclass(frozen=True)
+class GraderCalibration:
+    """The Sale Record rule tried on the player's own Listings, whose mail says what
+    became of them (#167): of the own Listings it calls gone that a mail matched,
+    how many sold, and how many Sold mails matched an own Listing that went missing at
+    all (the sales it could have caught)."""
+
+    matched: int
+    sold: int
+    sold_mails: int
+
+
+def grader_calibration(
+    conn: sqlite3.Connection, market: Market, config: Config
+) -> GraderCalibration:
+    """Each own Listing that went missing, oldest last seen first, matched to the first
+    Sold, Cancelled or Expired mail not matched yet with its item name and count (and,
+    when Sold, its stack price) read after it was last seen. Only those the Sale Record
+    rule calls gone are counted. It doesn't move the grader's bounds."""
+    after = dict(pairwise(scan_times(conn, market)))
+    dropped = dropped_item_ids(conn, market)
+    mails = outcomes(conn, market)
+    used: set[int] = set()
+    matched = sold = sold_mails = 0
+    gone = [x for x in listings(conn, market) if x.own and x.last_seen in after]
+    for listing in sorted(gone, key=lambda x: x.last_seen):
+        match = next(
+            (
+                i
+                for i, o in enumerate(mails)
+                if i not in used
+                and o.item_name == listing.item_name
+                and o.count == listing.quantity
+                and o.first_seen >= listing.last_seen
+                and (o.kind is not MailKind.SOLD or o.price == listing.unit_buyout * o.count)
+            ),
+            None,
+        )
+        if match is None:
+            continue
+        used.add(match)
+        sold_mails += mails[match].kind is MailKind.SOLD
+        if _gone_like_a_sale(listing, after[listing.last_seen], dropped, config):
+            matched += 1
+            sold += mails[match].kind is MailKind.SOLD
+    return GraderCalibration(matched, sold, sold_mails)

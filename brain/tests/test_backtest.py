@@ -260,6 +260,12 @@ def test_the_brain_buys_with_its_simulated_gold_and_is_graded_by_the_sale_record
     [trade] = result.runs["brain"].trades
     assert (trade.item_key, trade.units, trade.price, trade.sold) == (LINEN, 5, 999, 4)
     assert trade.profit() == pytest.approx(4 * 999 * 0.95 + 10 - 5 * 200)
+    # The grader's bounds: 0.65 and 1.2 of each of the 2 believed records of 2 units.
+    low, high = result.bounds["brain"]
+    assert [t.sold for t in low.trades] == pytest.approx([2 * 2 * 0.65])
+    assert [t.sold for t in high.trades] == pytest.approx([2 * 2 * 1.2])
+    # No own Listings, so nothing to check the grader on.
+    assert (result.calibration.matched, result.calibration.sold_mails) == (0, 0)
 
 
 def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():
@@ -289,3 +295,40 @@ def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():
     assert [t.item_key for t in split.sold_out_in_week_1] == [LINEN, ore]
     assert [t.item_key for t in split.relisted] == [SILK]
     assert [t.item_key for t in split.rest] == ["2771"]
+
+
+@pytest.mark.parametrize(("share", "sold"), [(0.65, 6.5), (1.2, 10)])
+def test_the_grader_believes_only_its_share_of_each_records_units(share, sold):
+    # 10 posted; a record of 10 units fills 6.5 at 0.65x, and all 10 (not 12) at 1.2x.
+    result = run(
+        {T0: [Buy(LINEN, units=10, cost=500, post_at=100)]},
+        [record(T0 + HOUR, unit=100, units=10)],
+        grade_share=share,
+    )
+
+    assert result.trades[0].sold == pytest.approx(sold)
+
+
+def test_the_gold_low_is_the_least_gold_after_a_scans_buys():
+    # 1,000 -> 600 after buying at T0; the sale at T0 + 1 h brings 95 back.
+    result = run(
+        {T0: [Buy(LINEN, units=4, cost=400, post_at=100)]},
+        [record(T0 + HOUR, unit=100, units=1)],
+        start_gold=1000,
+    )
+
+    assert result.gold_low == pytest.approx(600)
+
+
+def test_the_max_drawdown_is_the_deepest_fall_from_a_peak_of_gold_and_unsold_units_at_cost():
+    # Gold plus unsold units at cost: 1,000 at T0 (bought 4 for 400) and when relisted at
+    # T0 + 7 days, then the lot is vendored for 4 x (10 - 14 Deposits) = -16: 584.
+    times = (T0, T0 + 7 * DAY, T0 + 14 * DAY)
+    result = run(
+        {T0: [Buy(LINEN, units=4, cost=400, post_at=1000)]},
+        [],
+        times=times,
+        start_gold=1000,
+    )
+
+    assert result.max_drawdown == pytest.approx(416 / 1000)

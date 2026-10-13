@@ -16,7 +16,7 @@ Units still posted at the end are marked two ways: the **vendor mark** (Vendor P
 
 **Sale Records** are the grader's evidence (CONTEXT.md): other players' Partial Sales in any gap, and their Disappearances over a gap of at most 12 hours that couldn't have expired and aren't Reposts, priced at most 1.2x the Fair Value of the Scan before, with items either Scan dropped rows of left out. They don't feed the Sell Rate. Whether they should is #169.
 
-**Grader bounds** (slice 2): a "gone" Listing may have been cancelled rather than sold. The review's own-Listing check (p6) found about 60-75% of the player's gone Listings were really sold. Each run will also be graded believing 0.65x and 1.2x of each record's units (`backtest_grade_low`, `backtest_grade_high`), and print that calibration line from the player's own Listings against their mail. The line doesn't move the bounds.
+**Grader bounds** (slice 2): a "gone" Listing may have been cancelled rather than sold. The review's own-Listing check (p6) found about 60-75% of the player's gone Listings were really sold. Each run is also graded believing 0.65x and 1.2x of each record's units (`backtest_grade_low`, `backtest_grade_high`), and prints a calibration line: the same rule tried on the player's own Listings against their mail (how many it calls sold really were, and how many Sold mails it caught). The line doesn't move the bounds. Each run also reports its max drawdown (the deepest fall of gold plus unsold units at cost from a peak) and its gold low (the least gold after a Scan's buys).
 
 ## Considered options
 
