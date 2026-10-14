@@ -231,8 +231,6 @@ class WhyNot:
     # The Scan the stretch of cheaper Listings began in, when `sale_events` counts only the
     # ones since (#132, #135, ADR-0029). None if they all count.
     cheap_since: int | None = None
-    # Whether any Observation Window hours came after `cheap_since` (#135).
-    watched_since: bool = True
     # The Scans with no cheaper Listing the stretch was kept through (#139), oldest first.
     cheap_breaks: tuple[int, ...] = ()
 
@@ -419,11 +417,6 @@ class _Cheap:
         if start is None or start == 0:
             return _Stretch(None, ())
         return _Stretch(self.lows[start][0], tuple(self.lows[s][0] for s in reversed(skipped)))
-
-    @property
-    def latest(self) -> int:
-        """The Scan the cheapest Listings are from, the latest: only for a `since`."""
-        return self.lows[0][0]
 
 
 @dataclass(frozen=True)
@@ -958,7 +951,6 @@ def _why_not(
                 name=names.get(item_key),
                 cheap_since=stretch.since,
                 cheap_breaks=stretch.breaks,
-                watched_since=not cut or demand.window_hours > 0,
             )
         )
     return result
@@ -3682,7 +3674,7 @@ def _demand_at(
     demand = None if rate is None else rate.at_or_above(post_at)
     cutoff = None if cheap is None else cheap.since(post_at)
     if demand is not None and cutoff is not None:
-        demand = demand.since_cheap(cutoff, cheap.latest)
+        demand = demand.since_cheap(cutoff)
     return demand if beta is None else beta.pooled(demand, post_at)
 
 

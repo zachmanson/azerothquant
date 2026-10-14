@@ -1189,12 +1189,8 @@ def _numbers(w: WhyNot, check: Check) -> str:
             if w.cheap_since is None:
                 return counted
             since = _minute(w.cheap_since)
-            notes = []
-            if w.cheap_breaks:
-                notes.append("none at " + ", ".join(_minute(t) for t in w.cheap_breaks))
-            if not w.watched_since:
-                notes.append("not watched since")
-            note = f" ({'; '.join(notes)})" if notes else ""
+            breaks = ", ".join(_minute(t) for t in w.cheap_breaks)
+            note = f" (none at {breaks})" if breaks else ""
             return f"{counted} since cheaper Listings went up {since}{note}"
         case Check.ROOM:
             at = "" if w.post_at is None else f" at {_money(w.post_at)}"

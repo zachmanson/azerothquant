@@ -1249,21 +1249,27 @@ def test_a_prediction_buys_max_loss_counts_only_the_sales_since_its_cheap_run(db
 # --- The stretch the cheap stock has been up (#135, ADR-0029) ---
 
 
-def walls(*cheap_scans, gap=12 * HOUR):
+def walls(*cheap_scans, gap=12 * HOUR, watched_cheap=None):
     """The 1000s sell 2 an hour for 10 h, one Sale Event each, then Scans `gap` apart
-    from CHEAP_AT, too far apart to watch, each with the cheap Listings given for it."""
+    from CHEAP_AT, too far apart to watch, each with the cheap Listings given for it.
+    With `watched_cheap`, one more Scan an hour after the last with those cheap Listings: an
+    hour watched since, so the stretch is cut (ADR-0033)."""
     scans = [scan(T0 + n * HOUR, row(quantity=40 - 2 * n, unit=1000)) for n in range(10)]
     for n, cheap in enumerate(cheap_scans):
         scans.append(scan(CHEAP_AT + n * gap, row(quantity=20, unit=1000), *cheap))
+    if watched_cheap is not None:
+        last = CHEAP_AT + (len(cheap_scans) - 1) * gap
+        scans.append(scan(last + HOUR, row(quantity=20, unit=1000), *watched_cheap))
     return scans
 
 
 def test_a_flip_on_a_fresh_wall_counts_only_since_the_cheap_stock_before_it_went_up(db):
     # Each Scan's cheap wall is gone by the next and a new one is up: the one bought is
-    # new this Scan, but cheap stock has been up a day since CHEAP_AT, nothing watched.
+    # new this Scan, but cheap stock has been up a day since CHEAP_AT, and nothing sold
+    # in the hour watched since.
     result = run(
         db,
-        walls([row(unit=100)], [row(unit=110)], [row(unit=120)]),
+        walls([row(unit=100)], [row(unit=110)], [row(unit=120)], watched_cheap=[row(unit=130)]),
         [character_read(money=GOLD)],
         config=FLIPS_NEED_3,
     )
@@ -1271,11 +1277,13 @@ def test_a_flip_on_a_fresh_wall_counts_only_since_the_cheap_stock_before_it_went
     assert result[MARKET].shopping_list == []
 
 
-def test_a_flip_on_cheap_stock_up_under_a_day_and_never_watched_counts_the_sales_before(db):
-    # Up 4 h in Scans 2 h apart: too new to judge with nothing watched since.
+@pytest.mark.parametrize("gap", [2 * HOUR, 12 * HOUR, 3 * DAY])
+def test_a_flip_on_cheap_stock_never_watched_counts_the_sales_before_however_long_its_up(db, gap):
+    # #168, ADR-0033: up 4 h, a day or 6 days in Scans too far apart to watch. Nothing
+    # watched since is unknown demand, not zero.
     result = run(
         db,
-        walls([row(unit=100)], [row(unit=100)], [row(unit=100)], gap=2 * HOUR),
+        walls([row(unit=100)], [row(unit=100)], [row(unit=100)], gap=gap),
         [character_read(money=GOLD)],
         config=FLIPS_NEED_3,
     )
@@ -1316,7 +1324,14 @@ def test_one_scan_with_no_cheap_stock_doesnt_end_the_stretch(db):
     # the stretch still starts at the first.
     _, why = why_not(
         db,
-        walls([row(unit=100)], [], [row(unit=110)], [row(unit=120)], [row(unit=130)]),
+        walls(
+            [row(unit=100)],
+            [],
+            [row(unit=110)],
+            [row(unit=120)],
+            [row(unit=130)],
+            watched_cheap=[row(unit=140)],
+        ),
         [character_read(money=GOLD)],
         FLIPS_NEED_3,
     )
@@ -1344,7 +1359,9 @@ def test_only_a_short_break_in_the_cheap_stock_doesnt_end_the_stretch(
     # Scans 12 h apart, and cheap stock back for 36 h after the break.
     back = [[row(unit=110)], [row(unit=120)], [row(unit=130)], [row(unit=140)]]
     cheap = [[row(unit=100)]] + [[]] * breaks + back
-    _, why = why_not(db, walls(*cheap), [character_read(money=GOLD)], FLIPS_NEED_3)
+    _, why = why_not(
+        db, walls(*cheap, watched_cheap=[row(unit=150)]), [character_read(money=GOLD)], FLIPS_NEED_3
+    )
 
     linen = why[LINEN_KEY]
     assert (linen.cheap_since, linen.cheap_breaks) == (since, kept_through)
@@ -1353,7 +1370,7 @@ def test_only_a_short_break_in_the_cheap_stock_doesnt_end_the_stretch(
 def test_a_prediction_buys_max_loss_counts_only_since_the_cheap_stock_before_its_wall(db):
     result = run(
         db,
-        walls([row(unit=100)], [row(unit=110)], [row(unit=120)]),
+        walls([row(unit=100)], [row(unit=110)], [row(unit=120)], watched_cheap=[row(unit=130)]),
         [character_read(money=GOLD)],
         config=FLIPS_NEED_3,
         predictions=[prediction(LINEN_KEY)],

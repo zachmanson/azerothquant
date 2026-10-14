@@ -1805,30 +1805,24 @@ def _minute(at):
     return datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M")
 
 
-@pytest.mark.parametrize(
-    ("scan_gap", "note"),
-    [
-        (1, ""),  # #132: watched hourly since, nothing sold
-        (2, " (not watched since)"),  # #135: Scans too far apart to watch
-    ],
-)
-def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(
-    tmp_path, scan_gap, note
-):
-    # Only the Sale Events since the 1s showed up count at 9s 99c.
-    line = _why_not_linens_sale_events(tmp_path, [(n * scan_gap, True) for n in range(25)])
+def test_recommend_why_not_a_flip_cut_to_the_sales_since_its_cheap_run_says_since_when(tmp_path):
+    # #132: watched hourly since the 1s showed up, nothing sold, so only the Sale Events
+    # since count at 9s 99c.
+    line = _why_not_linens_sale_events(tmp_path, [(n, True) for n in range(25)])
 
-    expected = f"0/3 Sale Events since cheaper Listings went up {_minute(CHEAP_AT)}{note}"
+    expected = f"0/3 Sale Events since cheaper Listings went up {_minute(CHEAP_AT)}"
     assert line == ["Sale Events", "fail", expected]
 
 
 def test_recommend_why_not_names_the_scan_a_stretch_was_kept_through(tmp_path):
-    # Cheap stock was up in Scans 12 h apart since CHEAP_AT, but for the second (#139).
-    line = _why_not_linens_sale_events(tmp_path, [(0, True), (12, False), (24, True), (36, True)])
+    # Cheap stock was up in Scans 12 h apart since CHEAP_AT, but for the second (#139),
+    # and an hour watched after the last (ADR-0033).
+    cheap = [(0, True), (12, False), (24, True), (36, True), (37, True)]
+    line = _why_not_linens_sale_events(tmp_path, cheap)
 
     expected = (
         f"0/3 Sale Events since cheaper Listings went up {_minute(CHEAP_AT)} "
-        f"(none at {_minute(CHEAP_AT + 12 * HOUR)}; not watched since)"
+        f"(none at {_minute(CHEAP_AT + 12 * HOUR)})"
     )
     assert line == ["Sale Events", "fail", expected]
 

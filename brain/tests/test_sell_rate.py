@@ -201,7 +201,7 @@ def test_a_cutoff_drops_the_events_and_hours_before_it_however_few_hours_since(a
     # #135: 6 events in 10 h would expect only 1.2 or 2.4 since, but the cut applies anyway.
     rate = hourly(before_events=6, after_hours=after_hours, after_events=(CUTOFF + HOUR,))
 
-    assert rate.since_cheap(CUTOFF, now=CUTOFF + 30 * HOUR) == replace(
+    assert rate.since_cheap(CUTOFF) == replace(
         rate,
         units_per_day=2 / after_hours * 24,
         sale_events=1,
@@ -215,43 +215,23 @@ def test_a_cutoff_drops_the_events_and_hours_before_it_however_few_hours_since(a
 def test_a_cut_with_nothing_sold_since_sells_zero_a_day():
     rate = hourly(before_events=10, after_hours=24)
 
-    cut = rate.since_cheap(CUTOFF, now=CUTOFF + 30 * HOUR)
+    cut = rate.since_cheap(CUTOFF)
 
     assert (cut.units_per_day, cut.sale_events, cut.window_hours) == (0, 0, 24)
 
 
-@pytest.mark.parametrize(
-    ("hours_up", "cut"),
-    [
-        (23, False),  # too new to judge with nothing watched since: left whole
-        (24, True),  # a day up unbought: nothing sells
-    ],
-)
-def test_a_cutoff_with_no_hours_watched_since_waits_a_day(hours_up, cut):
-    # #135: the cheap stock went up after the last Observation Window.
+def test_a_cutoff_with_no_hours_watched_since_leaves_the_sell_rate_whole():
+    # #168, ADR-0033: the cheap stock went up after the last Observation Window. Nothing
+    # watched since is unknown demand, not zero, however long the stretch has been up.
     rate = hourly(before_events=10, after_hours=0)
 
-    result = rate.since_cheap(CUTOFF, now=CUTOFF + hours_up * HOUR)
-
-    assert result == (
-        replace(
-            rate,
-            units_per_day=0,
-            sale_events=0,
-            window_hours=0,
-            sale_units=0,
-            sale_prices=(),
-            windows=(),
-        )
-        if cut
-        else rate
-    )
+    assert rate.since_cheap(CUTOFF) == rate
 
 
 def test_no_cutoff_leaves_the_sell_rate_whole():
     rate = hourly(before_events=10, after_hours=24)
 
-    assert rate.since_cheap(None, now=CUTOFF) == rate
+    assert rate.since_cheap(None) == rate
 
 
 @pytest.mark.parametrize(("ended_ago", "counted"), [(14 * DAY - 1, True), (14 * DAY, False)])

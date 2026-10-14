@@ -1,5 +1,7 @@
 # The demand cut dates from the stretch of cheap stock and no longer waits for expected sales
 
+Amended by ADR-0033 (#168): a stretch with no Observation Window hours since it began keeps its demand however old it is, so the 24-hour rule below is gone.
+
 Amends ADR-0028. After it, the Brain still said to buy all 3895 Lesser Magic Essence at up to 3s 33c and post at 5s 96c (#135). Every Sale Event at that price was from Sep 27–30. Cheap stock had been up in every Scan since 10-02, but each wall sold at 20c or came down and a new one went up, so the wall being bought was first seen that day. ADR-0028's cutoff, the earliest first seen among the Listings in the run, dated the crash two days late. Even at the right date, the expected-sales test said 2.5 Sale Events an hour before, times 0.84 Observation Window hours since, was 2.1, under the minimum of 3, so the old demand was left whole.
 
 So the cut changes in two ways:
