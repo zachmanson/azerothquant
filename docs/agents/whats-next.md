@@ -1,3 +1,16 @@
+2026-10-13 (later 132): #168 grilled into a spec (comment 6159665234), retitled, ready-for-agent. ADR-0033 committed (amends 0029). It drops only the 24 h unwatched rule: an unwatched stretch keeps its demand. Backtest on a live-history copy (86 Scans): brain -34.8g/+76.5g, this rule -24.3g/+78.5g (better on every line), cutoff off -49.7g/-18.9g (drawdown 53%), power test -45.2g/-22.3g. So the cutoff stays. The user's Cured Medium Hide loss (Brain said 241 at 14s49c on 4 Sale Events over a 6s68c floor; the floor came back a day later) isn't a cutoff case: noted on #170 as its headline, and #170 moves ahead of #169. Note on #171: loosening the cutoff must beat `brain` on #168's bar.
+
+Next, in order (PoC by Oct 20):
+1. #168 (ready-for-agent): build per the spec comment (TDD), check with `brain backtest --policy brain,relaxed` before/after on one fresh live-history copy, then /code-review and commit.
+2. #170 (needs-triage): grill (risk caps; the hide case is the headline, gold-at-risk per buy may matter more than units).
+3. Then #169, #171 per #166's order.
+4. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 131, plus:
+  - Check copies live in Z:/aq-check-168 (safe to delete): `live/` (brain), `nocut/`, `vb/`, `vc/`, each its own history copy and config.toml with an empty fake-wow dir. `run.py`/`run_variant.py` add policies by patching (`POLICIES`, `SellRate.since_cheap`). `dump.py` pickles the central run's trades.
+  - The live copy has 86 Scans: one `brain` policy takes ~25 min (3 runs). Run policies as separate processes in parallel (12 cores).
+  - Copy the live history with sqlite `backup`, not cp: `brain watch` may be writing it.
+
 2026-10-13 (later 131): #167 slice 2 built TDD, reviewed, committed (5af13a9); #167 CLOSED. `simulate(grade_share=)`, `Simulation.curve`/`max_drawdown`/`gold_low`, `MarketBacktest.bounds` (low, high runs per policy) and `.calibration`, `observation.grader_calibration` (own Listings vs mail, as p6; shares `_gone_like_a_sale` with `sale_records`), `Config.backtest_grade_low/high` (0.65/1.2, not read from config.toml). Check on the review's history copy matched §6.2 exactly (posted on #167): bounds -12.45/-8.23g vendor, -8.55/-4.85g market, drawdown 26%, calibration 27 of 39 / 27 of 47.
 
 Next, in order (PoC by Oct 20):
