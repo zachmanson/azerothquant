@@ -1,3 +1,13 @@
+2026-10-13 (later 133): #168 built TDD, reviewed, committed (44ad4ba), closed by the commit. ADR-0029's 24 h unwatched rule is gone: `SellRate.since_cheap(cutoff)` (no `now`) returns self with no window hours after the cutoff; `UNWATCHED_STRETCH_SECONDS`, `_Cheap.latest`, `WhyNot.watched_since` and "(not watched since)" removed. CONTEXT.md Sell Rate/Flip and an ADR-0029 "Amended by" line updated. Tests using `walls` (Scans 12 h apart) now pass `watched_cheap=` to get an hour watched after the cutoff. Check on a fresh 86-Scan live copy (posted on #168, comment 6160137763): brain -34.84g/+76.45g -> -24.30g/+78.55g, all bounds up, worst trade/drawdown unchanged, relaxed identical. Matches the spec's patched run.
+
+Next, in order (PoC by Oct 20):
+1. #170 (needs-triage): grill (risk caps; the Cured Medium Hide case is the headline, gold-at-risk per buy may matter more than units).
+2. Then #169, #171 per #166's order (#171: any cutoff loosening must beat `brain` on #168's bar).
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 132, plus:
+  - Check copies now in Z:/aq-check-168b (safe to delete, along with Z:/aq-check-168): `history.sqlite` (86 Scans), `config.toml`, `run.py <config> <policy>`, `head/` is a git worktree at 181a009 (remove with `git worktree remove Z:/aq-check-168b/head`), `after-src/` a source snapshot. Run old code via `PYTHONPATH=<worktree>/brain/src`.
+
 2026-10-13 (later 132): #168 grilled into a spec (comment 6159665234), retitled, ready-for-agent. ADR-0033 committed (amends 0029). It drops only the 24 h unwatched rule: an unwatched stretch keeps its demand. Backtest on a live-history copy (86 Scans): brain -34.8g/+76.5g, this rule -24.3g/+78.5g (better on every line), cutoff off -49.7g/-18.9g (drawdown 53%), power test -45.2g/-22.3g. So the cutoff stays. The user's Cured Medium Hide loss (Brain said 241 at 14s49c on 4 Sale Events over a 6s68c floor; the floor came back a day later) isn't a cutoff case: noted on #170 as its headline, and #170 moves ahead of #169. Note on #171: loosening the cutoff must beat `brain` on #168's bar.
 
 Next, in order (PoC by Oct 20):
