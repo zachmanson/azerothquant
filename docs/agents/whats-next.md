@@ -1,3 +1,15 @@
+2026-10-14 (later 136): #170 slice 2 built TDD, reviewed, committed (3a95231), pushed, CI green; #170 CLOSED by the commit. The Brain now writes Market `lossCap` (Unsold Loss cap, copper) and row `cappedBy` ("room" if sizing within the room alone gives as few units, else "loss"; the Disenchant loop records the first cap it hits). The Addon puts a plain-words line first in a capped row's details (`cappedLine` in RecommendationTable.lua): "Capped at N of M: if none sell, you'd lose at most Xg (3% of what you're trading with)" or "...: more would put over 60% of what you're trading with into auctions" (share worked back from room/stake/gold). `BoughtMarks.goldLeft(budget, gold, spent, room)` also folds on room less what's marked. ADR-0034 and CONTEXT.md (Bought mark) updated. Review left: marks on Prediction buys also come off the room (spec says "marked costs"), not changed.
+
+Next, in order (PoC by Oct 20):
+1. #169, then #171 per #166's order (#171 must beat capped `brain` on #168's bar).
+2. #146 when the guildie is free (see later 126).
+3. In game when on the PC: see a capped row's line in the side pane after a Brain run (restart `brain watch` so it writes lossCap/cappedBy).
+
+- Gotchas: same as later 135, plus:
+  - This PC has no lua/busted. lupa (pip) is installed, so a busted stand-in on lupa's Lua 5.1 works: describe/it/before_each/after_each, assert.are.equal/same, is_nil/is_true/is_false/matches. This session's copy was in its scratchpad (gone); CI's busted is the authority.
+  - Python heredocs that write Lua/Python string literals with `
+` or `\"` mangle them: edit those lines with the Edit tool.
+
 2026-10-14 (later 135): #170 slice 1 built TDD, reviewed, committed (9b35e4c), pushed. `_RiskCaps` (loss, room) inside sizing: `_FlipToSell.fitting`, `_option` (Vendor room-only, Craft steps), `_flip_to_disenchant`; `_SellRun`/`_CraftBuy.unsold_loss`; `Row.capped` (by sizing again with gold alone; the Disenchant loop counts it). `MarketRecommendations.stake/room`, written to Recommendations.lua (`stake`, `room`, row `capped`). `recommend_market(tied_up=)` (Stake = gold + tied_up; no separate stake override). Live Stake: own units in the Scan costed by newest open Lots, else Best Exit Value; with `paid=False` (past Scans) no Lots (recursion through `held_at_writing`), noted in ADR-0034. `options_taken` tracks the room. `BuyPolicy` takes a 4th arg (tied-up at cost); `uncapped` policy; `Config.risk_caps` (not in toml), `flip_unsold_loss_share` (now 0.03) and `flip_tied_up_share` (0.6) in config.toml. Check posted on #170 (6183475938): brain passes every line vs uncapped; 3%/60% beat 5%/60% by 12g/17g so default switched, ADR-0034 has the table; hide row gone as of Scan 85. Filed #187 (Why Not ignores the caps).
 
 Next, in order (PoC by Oct 20):
