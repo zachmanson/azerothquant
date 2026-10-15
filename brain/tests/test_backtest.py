@@ -25,7 +25,7 @@ TERMS = Terms(
 
 def scripted(buys_at):
     """A policy that buys what `buys_at` names at each Scan, whatever its gold."""
-    return lambda at, gold, posted: buys_at.get(at, [])
+    return lambda at, gold, posted, tied_up: buys_at.get(at, [])
 
 
 def record(at, unit=100, units=1, item_key=LINEN, last_seen=None):
@@ -144,7 +144,7 @@ def test_nothing_is_bought_after_the_last_buy():
 def test_an_item_key_still_posted_is_not_bought_again_and_the_policy_is_told():
     told = []
 
-    def policy(at, gold, posted):
+    def policy(at, gold, posted, tied_up):
         told.append(posted)
         return (
             [Buy(LINEN, 1, 50, 100), Buy(SILK, 1, 50, 100)]
@@ -156,6 +156,19 @@ def test_an_item_key_still_posted_is_not_bought_again_and_the_policy_is_told():
 
     assert [t.item_key for t in result.trades] == [LINEN, SILK]
     assert told == [frozenset(), frozenset({LINEN})]
+
+
+def test_the_policy_is_told_what_its_units_still_unsold_cost():
+    # #170: the Stake's own Listings up at cost. 1 of the 4 Linen bought for 400 sold.
+    told = []
+
+    def policy(at, gold, posted, tied_up):
+        told.append(tied_up)
+        return [Buy(LINEN, 4, 400, 100)] if at == T0 else []
+
+    simulate([T0, T0 + HOUR], policy, [record(T0 + HOUR, unit=110)], TERMS, start_gold=10_000)
+
+    assert told == [0, 300]
 
 
 @pytest.mark.parametrize(("post_at", "market_unit"), [(200, 149 * 0.95), (100, 100 * 0.95)])
@@ -196,6 +209,7 @@ CONFIG = replace(
     sale_size_prior_events_holdings=0,
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
+    risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
 )
 
 
@@ -266,6 +280,48 @@ def test_the_brain_buys_with_its_simulated_gold_and_is_graded_by_the_sale_record
     assert [t.sold for t in high.trades] == pytest.approx([2 * 2 * 1.2])
     # No own Listings, so nothing to check the grader on.
     assert (result.calibration.matched, result.calibration.sold_mails) == (0, 0)
+
+
+def test_the_brains_risk_caps_are_on_its_simulated_stake_and_uncapped_has_none(db):
+    # #170, ADR-0034: 2 Linen turn up at 2s and 3 at 4s. Posted at 9s 99c, all 5 would
+    # lose 15s 80c unsold (16s less 50c at the Vendor Price, plus 30c of Deposits), over
+    # 5% of the 1g Stake. The 2 at 2s lose 3s 92c, posted 1c under the 4s.
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(
+            T0 + HOUR,
+            history_row(quantity=18, unit=1000),
+            history_row(quantity=2, unit=200),
+            history_row(quantity=3, unit=400),
+        ),
+        history_scan(T0 + 2 * HOUR, history_row(quantity=16, unit=1000)),
+    ]
+    read = {
+        "readAt": T0,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "vendorPrices": {"2589": 10},
+    }
+    capped = replace(CONFIG, risk_caps=True, flip_unsold_loss_share=0.05)
+    import_scans(db, scans, Era.BETA, capped)
+    import_character_reads(db, [read], Era.BETA, capped)
+
+    [result] = backtest(
+        db,
+        capped,
+        [],
+        policies=("brain", "uncapped"),
+        start_gold=10_000,
+        no_buys_in_last_seconds=0,
+    )
+
+    [brain] = result.runs["brain"].trades
+    assert (brain.units, brain.price) == (2, 399)
+    [uncapped] = result.runs["uncapped"].trades
+    assert (uncapped.units, uncapped.price) == (5, 999)
 
 
 def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():

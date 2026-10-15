@@ -44,6 +44,8 @@ POLICIES: dict[str, Callable[[Config], Config]] = {
         flip_min_margin_share=0.0,
         flip_min_margin_copper=0,
     ),
+    # No risk caps (#170, ADR-0034): what they change is measured against it.
+    "uncapped": lambda c: replace(c, risk_caps=False),
 }
 
 
@@ -59,8 +61,9 @@ class Buy:
     back: float = 0.0  # gold back at once, from units vendored as bought
 
 
-# (Scan time, gold, Item Keys with units still posted) -> what it buys at that Scan.
-BuyPolicy = Callable[[int, float, frozenset[str]], Sequence[Buy]]
+# (Scan time, gold, Item Keys with units still posted, what the units still posted cost)
+# -> what it buys at that Scan.
+BuyPolicy = Callable[[int, float, frozenset[str], float], Sequence[Buy]]
 
 
 @dataclass(frozen=True)
@@ -167,16 +170,20 @@ def simulate(
         _expire(sim, at, terms)
         if last_buy is None or at <= last_buy:
             _buy(sim, at, policy, terms)
-        unsold = sum(t.cost * t.left / t.units for t in sim.trades if t.units and not t.closed)
-        sim.curve.append((sim.gold, sim.gold + unsold))
+        sim.curve.append((sim.gold, sim.gold + _tied_up(sim)))
     if times:
         _expire(sim, times[-1], terms, end=True)
     return sim
 
 
+def _tied_up(sim: Simulation) -> float:
+    """What the units still posted cost."""
+    return sum(t.cost * t.left / t.units for t in sim.trades if t.units and not t.closed)
+
+
 def _buy(sim: Simulation, at: int, policy: BuyPolicy, terms: Terms) -> None:
     posted = frozenset(t.item_key for t in sim.trades if not t.closed)
-    for buy in policy(at, sim.gold, posted):
+    for buy in policy(at, sim.gold, posted, _tied_up(sim)):
         if buy.item_key in posted:
             continue
         trade = Trade(buy.item_key, buy.units, buy.cost, buy.post_at, at, proceeds=buy.back)
@@ -325,10 +332,11 @@ def _brain_policy(
     cache: FairValueCache,
     terms: Terms,
 ) -> BuyPolicy:
-    """The Brain's Shopping List at each Scan, as of then, sized to the simulated gold:
-    the options a player would take (`options_taken`), while the gold lasts."""
+    """The Brain's Shopping List at each Scan, as of then, sized to the simulated gold
+    and Stake (the gold plus the units still posted at cost, ADR-0034): the options a
+    player would take (`options_taken`), while the gold and the room last."""
 
-    def policy(at: int, gold: float, posted: frozenset[str]) -> list[Buy]:
+    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
         cache.start_pass()
         m = recommend_market(
             conn,
@@ -342,6 +350,7 @@ def _brain_policy(
             paid=False,
             loot_alert=False,
             gold=int(gold),
+            tied_up=tied_up,
         )
         m = replace(m, shopping_list=[r for r in m.shopping_list if r.disenchant is None])
         shopping, _ = options_taken(m, config.shopping_list_rows)

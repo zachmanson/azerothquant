@@ -130,6 +130,11 @@ DEFAULT_POST_DURATION_HOURS = 24
 # Held units of a random suffix count their siblings' Sale Events, the other suffixes of
 # the same itemID, at this weight each (#58, ADR-0022): suffixes split a thin history.
 DEFAULT_SUFFIX_POOL_WEIGHT = 0.5
+# The risk caps on a Shopping List option (#170, ADR-0034), as shares of the Stake: its
+# Unsold Loss, and its cost against the room the player's own Listings leave. 3% beat
+# 5% by 12g and 17g at the vendor and market marks in the Backtest on 87 Scans.
+DEFAULT_FLIP_UNSOLD_LOSS_SHARE = 0.03
+DEFAULT_FLIP_TIED_UP_SHARE = 0.60
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -184,6 +189,10 @@ class Config:
     flip_min_margin_share: float = DEFAULT_FLIP_MIN_MARGIN_SHARE
     # ...and at least this many copper per unit.
     flip_min_margin_copper: int = DEFAULT_FLIP_MIN_MARGIN_COPPER
+    # A Shopping List option's risk caps (ADR-0034): its Unsold Loss at most this share of
+    # the Stake, and its cost at most this share of the Stake less the own Listings up.
+    flip_unsold_loss_share: float = DEFAULT_FLIP_UNSOLD_LOSS_SHARE
+    flip_tied_up_share: float = DEFAULT_FLIP_TIED_UP_SHARE
     # Hours of no sales added to the Observation Windows before Sell Rate becomes a
     # quantity, for Holdings and for Flips.
     sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
@@ -250,6 +259,9 @@ class Config:
     # The cheap-stock cutoff (ADR-0028, ADR-0029): off only in the Backtest's relaxed
     # policy (#167). Not read from config.toml.
     cheap_stock_cutoff: bool = True
+    # The risk caps (ADR-0034): off only in the Backtest's uncapped policy (#170). Not read
+    # from config.toml.
+    risk_caps: bool = True
     # The Backtest's grader bounds (#167, ADR-0032): runs that believe this share of each
     # Sale Record's units, bracketing the own-Listing calibration. Not read from config.toml.
     backtest_grade_low: float = 0.65
@@ -526,6 +538,13 @@ def load_config(path: Path) -> Config:
         lambda x: x > 0,
         "of hours above 0",
     )
+    unsold_loss_share, tied_up_share = (
+        _parse_number(path, raw.get(key, default), key, lambda x: 0 <= x <= 1, "from 0 to 1")
+        for key, default in (
+            ("flip_unsold_loss_share", DEFAULT_FLIP_UNSOLD_LOSS_SHARE),
+            ("flip_tied_up_share", DEFAULT_FLIP_TIED_UP_SHARE),
+        )
+    )
     pool_weight = _parse_number(
         path,
         raw.get("suffix_pool_weight", DEFAULT_SUFFIX_POOL_WEIGHT),
@@ -577,6 +596,8 @@ def load_config(path: Path) -> Config:
         sale_horizon_seconds=round(horizon_days * 24 * 3600),
         flip_min_margin_share=margin_share,
         flip_min_margin_copper=margin_copper,
+        flip_unsold_loss_share=unsold_loss_share,
+        flip_tied_up_share=tied_up_share,
         sell_rate_prior_hours_holdings=prior_holdings,
         sell_rate_prior_hours_flips=prior_flips,
         sale_size_prior_events_holdings=size_prior_holdings,

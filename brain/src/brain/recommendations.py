@@ -21,6 +21,7 @@ Keys, Action names) for the Recommendation Table. The Addon formats them itself,
 only it can look up item names.
 """
 
+import math
 import os
 import sqlite3
 import tempfile
@@ -62,9 +63,12 @@ _HEADER = (
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
     "-- recommendations[realm][faction] is that Market's Recommendations, in copper.\n"
     "-- budget is the Budget the Brain sized them within (nil for all the gold), and each\n"
-    "-- shoppingList row is an option sized as if it were the only buy. A Flip to Sell or\n"
-    "-- Flip to Vendor row has listings (bought), posts (stacks posted) and days (until\n"
-    "-- its last unit sells; nil on a Flip to Vendor, which sells now). A\n"
+    "-- shoppingList row is an option sized as if it were the only buy. stake is the gold\n"
+    "-- plus the own Listings up at cost, and room what an option may cost under the risk\n"
+    "-- caps (nil without them); a row they shrank has capped, its units by the gold\n"
+    "-- alone. A Flip to Sell or Flip to Vendor row has listings (bought), posts (stacks\n"
+    "-- posted) and days (until its last unit sells; nil on a Flip to Vendor, which sells\n"
+    "-- now). A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant },\n"
     "-- and its output's postAt (nil when none of it beats vendoring).\n"
@@ -176,6 +180,7 @@ def _recommendations(
         by_realm.setdefault(m.market.realm, {})[m.market.faction] = {
             "asOf": m.as_of,
             "gold": m.gold,
+            "stake": math.floor(m.stake),
             "windowHours": m.window_hours,
             "predictionCost": m.prediction_cost,
             "holdings": [_row(r) for r in m.holdings],
@@ -193,6 +198,8 @@ def _recommendations(
         }
         if m.budget is not None:  # a Lua table can't hold nil
             by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
+        if m.room is not None:
+            by_realm[m.market.realm][m.market.faction]["room"] = math.floor(m.room)
         if m.market in beta_priors:
             by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
     return by_realm
@@ -233,6 +240,7 @@ _ROW_KEYS = {
     "listings": "listings",
     "posts": "posts",
     "days": "days",
+    "capped": "capped",
 }
 
 

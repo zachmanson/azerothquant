@@ -298,6 +298,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.ah_deposit_share == 0.6
     assert config.post_duration_hours == 24
     assert config.suffix_pool_weight == 0.5
+    assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.03, 0.6)
     assert config.disenchant_check_min_results == 20
     assert config.buy_under_min_sightings == 1
     assert config.buy_under_window_days == 7
@@ -330,6 +331,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "ah_deposit_share = 0.15\n"
         "post_duration_hours = 12\n"
         "suffix_pool_weight = 0.25\n"
+        "flip_unsold_loss_share = 0.04\n"
+        "flip_tied_up_share = 0.5\n"
         "disenchant_check_min_results = 50\n"
         "buy_under_min_sightings = 3\n"
         "buy_under_window_days = 14\n"
@@ -361,6 +364,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.ah_deposit_share == 0.15
     assert config.post_duration_hours == 12
     assert config.suffix_pool_weight == 0.25
+    assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.04, 0.5)
     assert config.disenchant_check_min_results == 50
     assert (config.buy_under_min_sightings, config.buy_under_window_days) == (3, 14)
     assert config.beta_column_days == 0
@@ -431,6 +435,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("post_duration_hours", '"48"'),
         ("suffix_pool_weight", "-0.1"),
         ("suffix_pool_weight", "1.5"),
+        ("flip_unsold_loss_share", "-0.01"),
+        ("flip_tied_up_share", "1.5"),
         ("suffix_pool_weight", "true"),
         ("non_stacking_effort_copper", "0.5"),  # whole copper
         ("non_stacking_effort_copper", "true"),

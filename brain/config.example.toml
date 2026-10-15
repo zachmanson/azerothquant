@@ -68,6 +68,14 @@
 # flip_min_margin_share = 0.2
 # flip_min_margin_copper = 100
 
+# Optional: the Shopping List's risk caps (ADR-0034), as shares of the Stake (your gold
+# plus your own Listings up, at what they cost). An option is sized so that if none of it
+# sold it would lose at most flip_unsold_loss_share of the Stake, and so it costs no more
+# than flip_tied_up_share of the Stake less what's already posted. Each from 0 to 1.
+# Default to 0.03 and 0.6. Must come before the first [[installs]].
+# flip_unsold_loss_share = 0.03
+# flip_tied_up_share = 0.6
+
 # Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
 # evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours
 # of Observation Windows had been watched with no sales, so one sale in a short window

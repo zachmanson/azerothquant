@@ -356,6 +356,24 @@ class Row:
     listings: int | None = field(default=None, compare=False)
     posts: int | None = field(default=None, compare=False)
     days: float | None = field(default=None, compare=False)
+    # A Shopping List option the risk caps shrank (ADR-0034): its units sized by the gold
+    # alone.
+    capped: int | None = None
+
+
+@dataclass(frozen=True)
+class _RiskCaps:
+    """A Shopping List option's risk caps (#170, ADR-0034): the most Unsold Loss it may
+    have, and the most it may cost besides the gold, the room. None by default."""
+
+    loss: float = math.inf
+    room: float = math.inf
+
+    def fit(self, cost: float, unsold_loss: float) -> bool:
+        return cost <= self.room and unsold_loss <= self.loss
+
+
+NO_CAPS = _RiskCaps()
 
 
 @dataclass(frozen=True)
@@ -429,6 +447,9 @@ class _SellRun:
     profit: float
     days: float  # until its last unit sells, behind the held units (#98)
     sale_events: int  # the Sale Events at or above `post_at` it counts on (#107)
+    # What it loses if none of it sells: its cost less its units' Vendor Price, plus one
+    # posting's Deposits (ADR-0034).
+    unsold_loss: float = 0.0
 
     @property
     def cost(self) -> int:
@@ -468,9 +489,12 @@ class _FlipToSell:
     def per_gold(self) -> float:
         return self.whole.profit / self.whole.cost
 
-    def fitting(self, gold: float) -> _SellRun | None:
-        """The run that makes the most profit on no more than `gold`, if any."""
-        runs = [run for run in self.runs if run.cost <= gold]
+    def fitting(self, gold: float, caps: _RiskCaps = NO_CAPS) -> _SellRun | None:
+        """The run that makes the most profit on no more than `gold` within the `caps`, if
+        any."""
+        runs = [
+            run for run in self.runs if run.cost <= gold and caps.fit(run.cost, run.unsold_loss)
+        ]
         return max(runs, key=lambda run: run.profit) if runs else None
 
 
@@ -571,6 +595,10 @@ class MarketRecommendations:
     # The most the player will spend, set in game (#86); None for all the gold. Each
     # Shopping List option and the Prediction buys spend up to the lesser of the two.
     budget: int | None = None
+    # The pooled gold plus the own Listings up at cost, and the room it leaves an option
+    # under the risk caps (ADR-0034); None without them.
+    stake: float = 0.0
+    room: float | None = None
     # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
@@ -654,6 +682,7 @@ def recommend_market(
     paid: bool = True,
     loot_alert: bool = True,
     gold: int | None = None,
+    tied_up: float | None = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
@@ -665,7 +694,9 @@ def recommend_market(
     working out a past Scan, whose Lots may rest on what it named (#55), or a replay.
     Without `loot_alert`, the Loot Alert has no items: only the latest Scan's is shown
     (#54), and valuing every Item Key in a Scan adds up over a replay. A `gold` replaces
-    the Characters' gold and the Budget: a Backtest's simulated gold (#167)."""
+    the Characters' gold and the Budget: a Backtest's simulated gold (#167). A `tied_up`
+    replaces the own Listings up at cost in the Stake (ADR-0034): a Backtest's unsold
+    units, since the Scans show the real player's posts."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -710,6 +741,13 @@ def recommend_market(
     else:
         budget = None
     spend = _spend(gold, budget)
+    # Without `paid`, a past Scan's Lots may rest on what it named (#55), so the own
+    # Listings up are at Best Exit Value.
+    paid_lots = market_lots(conn, config, market, predictions, seen) if paid else []
+    if tied_up is None and config.risk_caps:
+        tied_up = _at_cost(_own_units(supply, for_sale), paid_lots, valuer)
+    tied_up = tied_up or 0.0
+    risk = _risk_caps(gold, tied_up, config)
     ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
     beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
     hold_buys = [
@@ -760,7 +798,7 @@ def recommend_market(
         if config.flips_to_craft
         else []
     )
-    disenchants = _flips_to_disenchant(valuer, plans, set(under), dropped, spend, config)
+    disenchants = _flips_to_disenchant(valuer, plans, set(under), dropped, spend, config, risk)
     shopping = _options(
         buys,
         crafts,
@@ -769,6 +807,7 @@ def recommend_market(
         config.shopping_list_rows,
         config.craft_list_rows,
         config.disenchant_list_rows,
+        risk,
     )
     crafted = crafting.counts
     disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
@@ -788,7 +827,7 @@ def recommend_market(
     lot_costs = _lot_costs(conn, config, market, active, seen)
     rows = _hold(rows, active, bound, vendor, caps, lot_costs)
     if paid:
-        rows = _with_roi(rows, market_lots(conn, config, market, predictions, seen), cut, config)
+        rows = _with_roi(rows, paid_lots, cut, config)
     rows = [
         _with_note(row, PRICE_MAY_BE_OFF) if item_id_of(row.item_key) in dropped else row
         for row in rows
@@ -804,6 +843,8 @@ def recommend_market(
         now,
         gold,
         budget=budget,
+        stake=gold + tied_up,
+        room=None if risk == NO_CAPS else risk.room,
         window_hours=observation_window_hours(conn, market, config, now),
         holdings=rows,
         shopping_list=shopping,
@@ -821,6 +862,48 @@ def recommend_market(
         else [],
         beta_ratios=ratios,
         loot_alert=_loot_alert(gold, valuer, plans, config, with_items=loot_alert),
+    )
+
+
+def _own_units(supply: Mapping[str, Supply], others: Mapping[str, Supply]) -> dict[str, int]:
+    """The player's own units up in the Scan, by Item Key: its every unit on sale less
+    other players'."""
+    result = {}
+    for item_key, offers in supply.items():
+        units = sum(n for _, n in offers) - sum(n for _, n in others.get(item_key, []))
+        if units > 0:
+            result[item_key] = units
+    return result
+
+
+def _at_cost(own: Mapping[str, int], lots: Sequence[Lot], valuer: "_Valuer") -> float:
+    """What the `own` units up cost (ADR-0034): Paid by each Item Key's newest open Lots,
+    and the units they don't cover at Best Exit Value."""
+    total = 0.0
+    for item_key, units in own.items():
+        covered = 0
+        for lot in reversed(lots):  # newest first
+            if covered == units:
+                break
+            if lot.item_key != item_key or not lot.open_units:
+                continue
+            taken = min(units - covered, lot.open_units)
+            total += taken * lot.cost / lot.units
+            covered += taken
+        if covered < units:
+            total += valuer.worth(item_key, Holding(bags=units - covered))
+    return total
+
+
+def _risk_caps(gold: float, tied_up: float, config: Config) -> _RiskCaps:
+    """The risk caps on each Shopping List option (ADR-0034), as shares of the Stake: the
+    pooled `gold` plus the own Listings up at cost, `tied_up`."""
+    if not config.risk_caps:
+        return NO_CAPS
+    stake = gold + tied_up
+    return _RiskCaps(
+        loss=config.flip_unsold_loss_share * stake,
+        room=max(0.0, config.flip_tied_up_share * stake - tied_up),
     )
 
 
@@ -1088,14 +1171,15 @@ def _flips_to_disenchant(
     dropped: frozenset[int],
     gold: float,
     config: Config,
+    caps: _RiskCaps = NO_CAPS,
 ) -> list[Row]:
     """The Flips to Disenchant in this Scan (#89): one option per Disenchant source group
-    with a Character who can Disenchant it, sized alone within `gold` (ADR-0017). Its
-    candidates are other players' Listings of the group's items not `under` a Prediction,
-    nor of an item the Scan dropped rows of (#156), whose best way out for one unit is
-    Disenchant, so it never repeats a better Flip to Sell or Vendor of the same Listing. A
-    mat that feeds a Craft gets the Craft's credit through its way out, with the Flip
-    margin charged once, as in a Buy Under."""
+    with a Character who can Disenchant it, sized alone within `gold` (ADR-0017) and the
+    risk `caps` (ADR-0034). Its candidates are other players' Listings of the group's
+    items not `under` a Prediction, nor of an item the Scan dropped rows of (#156), whose
+    best way out for one unit is Disenchant, so it never repeats a better Flip to Sell or
+    Vendor of the same Listing. A mat that feeds a Craft gets the Craft's credit through
+    its way out, with the Flip margin charged once, as in a Buy Under."""
     disenchanting = valuer.disenchanting
     if disenchanting is None:
         return []
@@ -1125,7 +1209,7 @@ def _flips_to_disenchant(
         disenchanter = disenchanting.disenchanter(group)
         if disenchanter is None:
             continue
-        row = _flip_to_disenchant(group, disenchanter, listed, valuer, sources, gold, config)
+        row = _flip_to_disenchant(group, disenchanter, listed, valuer, sources, gold, config, caps)
         if row is not None:
             rows.append(row)
     return rows
@@ -1139,26 +1223,44 @@ def _flip_to_disenchant(
     sources: "_Sources",
     gold: float,
     config: Config,
+    caps: _RiskCaps = NO_CAPS,
 ) -> Row | None:
     """One group's Flip to Disenchant, greedy like a Flip to Craft: each step buys the
     cheapest `listed` (unit buyout, Item Key) left if one more Disenchant's expected mats,
     at their ways out on top of the held mats and the earlier steps', less the effort of
     buying it, clear the Flip margin on its buyout and it fits the gold left. It stops at
-    the first that doesn't. None if none does."""
+    the first that doesn't. None if none does. Within the risk `caps` it stops at the first
+    that would break one (ADR-0034): a step's Unsold Loss is its buyout less its mats'
+    Vendor Price, plus one posting's Deposits on them."""
     expected = {str(mat): q for mat, q in group.expected.items()}
     share, floor = config.flip_min_margin_share, config.flip_min_margin_copper
+    # What a step's mats add to its Unsold Loss over its buyout: their Deposits less their
+    # Vendor Price.
+    mats_unsold = sum(
+        q * (valuer.deposit(mat) - valuer.vendor.get(item_id_of(mat), 0))
+        for mat, q in expected.items()
+    )
     added: Counter[str] = Counter()  # expected mats from the steps so far, in fractions
     bought: list[ListingBuy] = []
     profit = 0.0
+    whole = 0  # the steps the gold alone buys
+    room, loss = caps.room, caps.loss
+    stopped = False  # by a cap: the later steps are only counted
     for unit, item_key in sorted(listed):
         net = _mats_value(expected, added, valuer, sources, config)
         net -= config.non_stacking_effort_copper
         if unit > gold or net - unit < max(unit * share, floor):
             break
-        bought.append(ListingBuy(item_key, unit))
-        profit += net - unit
+        whole += 1
         gold -= unit
         added.update(expected)
+        stopped = stopped or unit > room or unit + mats_unsold > loss
+        if stopped:
+            continue
+        bought.append(ListingBuy(item_key, unit))
+        profit += net - unit
+        room -= unit
+        loss -= unit + mats_unsold
     if not bought:
         return None
     n = len(bought)
@@ -1173,6 +1275,7 @@ def _flip_to_disenchant(
         mats=tuple(MatYield(mat, q * n) for mat, q in expected.items()),
         listings=n,
         disenchant=DisenchantFlip(group, tuple(bought)),
+        capped=whole if whole > n else None,
     )
 
 
@@ -3124,6 +3227,9 @@ class _CraftBuy:
     selling: int  # output units that Sell
     post_at: float | None  # what they're posted at
     parts: list[_Part]  # its share of the Craft Chain (#77)
+    # What it loses if none of its output sells: its gold less the output's Vendor Price,
+    # plus one posting's Deposits on the units it posts (ADR-0034).
+    unsold_loss: float = 0.0
 
     @property
     def per_gold(self) -> float:
@@ -3223,6 +3329,7 @@ def _flip_step(plan: _Plan, sources: _Sources, outlet: _Outlet) -> _CraftBuy | N
         selling,
         outlet.post_at,
         sources.parts(chain) + exits,
+        gold - units * outlet.vendor_price + selling * outlet.queue.deposit,
     )
 
 
@@ -3511,7 +3618,9 @@ def _flips(
             per_hour = at_price.units_per_hour
             days = (held + bought) / (per_hour * 24) if per_hour else math.inf
             events = demand.sale_events if demand else 0
-            runs.append(_SellRun(prefix, post_at, profit, days, events))
+            cost = sum(u * n for u, n in prefix)
+            unsold = cost - bought * ((vendor_price or 0) - at_price.deposit)
+            runs.append(_SellRun(prefix, post_at, profit, days, events, unsold))
         if take < quantity:
             break  # the rest of this Listing is left, so no longer run buys past it
     buys: list[_VendorBuy | _FlipToSell] = []
@@ -3838,7 +3947,10 @@ def cheapest_without(supply: Supply, bought: Supply) -> int | None:
 
 
 def _option(
-    buys: list[_VendorBuy | _FlipToSell], crafts: list[_CraftBuy], gold: float
+    buys: list[_VendorBuy | _FlipToSell],
+    crafts: list[_CraftBuy],
+    gold: float,
+    caps: _RiskCaps = NO_CAPS,
 ) -> list[Row]:
     """One Shopping List option's row (#86): one Item Key's Flip to Sell or its buys to
     Vendor, cheapest first, or one recipe's Flips to Craft, in the order chosen, as much
@@ -3846,8 +3958,10 @@ def _option(
 
     A Flip to Sell buys the most profitable run `gold` covers, or nothing (ADR-0011). Once
     a Flip to Craft is left out, so are the later crafts of its recipe, which were costed
-    after it.
+    after it. All of it stays within the risk `caps` too (ADR-0034); a Flip to Vendor
+    loses nothing unsold, so only their room cuts it.
     """
+    room, loss = caps.room, caps.loss
     rows: dict[object, Row] = {}
     plans: dict[int, _Plan] = {}  # the Flips to Craft taken of each recipe
     cut: set[int] = set()
@@ -3855,10 +3969,12 @@ def _option(
     for buy in [*sorted(buys, key=lambda buy: -buy.per_gold), *crafts]:
         if isinstance(buy, _CraftBuy):
             recipe_id = buy.plan.recipe.recipe_id
-            if recipe_id in cut or buy.gold > gold:
+            if recipe_id in cut or buy.gold > min(gold, room) or buy.unsold_loss > loss:
                 cut.add(recipe_id)
                 continue
             gold -= buy.gold
+            room -= buy.gold
+            loss -= buy.unsold_loss
             plan = plans.setdefault(recipe_id, _Plan(buy.plan.recipe, buy.plan.character))
             plan.crafts += 1
             plan.gain += buy.profit
@@ -3876,10 +3992,11 @@ def _option(
             )
             continue
         if isinstance(buy, _FlipToSell):
-            run = buy.fitting(gold)
+            run = buy.fitting(gold, replace(caps, room=room))
             if run is None:
                 continue
             gold -= run.cost
+            room -= run.cost
             key = (buy.item_key, Action.SELL)
             rows[key] = Row(
                 buy.item_key,
@@ -3896,10 +4013,12 @@ def _option(
                 days=run.days,
             )
             continue
-        quantity = min(buy.quantity, int(gold // buy.unit_buyout))
+        affords = min(gold, room) // buy.unit_buyout
+        quantity = buy.quantity if affords >= buy.quantity else int(affords)
         if not quantity:
             continue
         gold -= quantity * buy.unit_buyout
+        room -= quantity * buy.unit_buyout
         buy = replace(buy, quantity=quantity)
         cost = buy.unit_buyout * buy.quantity
         profit = buy.unit_profit * buy.quantity
@@ -3955,6 +4074,7 @@ def _options(
     flip_rows: int,
     craft_rows: int,
     disenchant_rows: int,
+    caps: _RiskCaps = NO_CAPS,
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
@@ -3963,9 +4083,9 @@ def _options(
     and the Flips to Craft,
     apart, to the top `craft_rows` by Profit (#87), and the Flips to Disenchant likewise
     to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011)."""
-    flips = _flip_options(buys, gold)
+    flips = _flip_options(buys, gold, caps)
     ranks = _best_ranks(flips)
-    crafted = [row for recipe in crafts if recipe for row in _option([], recipe, gold)]
+    crafted = [row for recipe in crafts if recipe for row in _capped_option([], recipe, gold, caps)]
     crafted.sort(key=lambda r: -r.profit)
     disenchanted = sorted(disenchants, key=lambda r: -r.profit)
     # One list again, most profit first: Replay takes the options in that order.
@@ -3977,12 +4097,31 @@ def _options(
     )
 
 
-def _flip_options(buys: list[_VendorBuy | _FlipToSell], gold: float) -> list[Row]:
+def _flip_options(
+    buys: list[_VendorBuy | _FlipToSell], gold: float, caps: _RiskCaps = NO_CAPS
+) -> list[Row]:
     """Each Item Key's Flip to Sell and Flip to Vendor as a Shopping List option (#86)."""
     groups: dict[object, list[_VendorBuy | _FlipToSell]] = {}
     for buy in buys:
         groups.setdefault((buy.item_key, isinstance(buy, _FlipToSell)), []).append(buy)
-    return [row for group in groups.values() for row in _option(group, [], gold)]
+    return [row for group in groups.values() for row in _capped_option(group, [], gold, caps)]
+
+
+def _capped_option(
+    buys: list[_VendorBuy | _FlipToSell], crafts: list[_CraftBuy], gold: float, caps: _RiskCaps
+) -> list[Row]:
+    """`_option` within the `caps`, each row they shrank carrying its units sized by the
+    gold alone (ADR-0034)."""
+    rows = _option(buys, crafts, gold, caps)
+    if caps == NO_CAPS:
+        return rows
+    whole = {(r.item_key, r.action): r.quantity for r in _option(buys, crafts, gold)}
+    return [
+        replace(r, capped=whole[r.item_key, r.action])
+        if whole.get((r.item_key, r.action), 0) > r.quantity
+        else r
+        for r in rows
+    ]
 
 
 def _best_ranks(flips: list[Row]) -> list[int]:

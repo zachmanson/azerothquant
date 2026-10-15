@@ -76,7 +76,12 @@ CONFIG = replace(
     sale_size_prior_events_holdings=0,
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
+    # The risk caps (ADR-0034) are off but in the tests of them (CAPPED), so the rest size
+    # by the gold alone, as they were written to.
+    risk_caps=False,
 )
+# Pinned, so the worked examples don't move when the default is tuned.
+CAPPED = replace(CONFIG, risk_caps=True, flip_unsold_loss_share=0.05, flip_tied_up_share=0.6)
 
 
 def scan(at, *rows, vendor_prices=None, faction="Alliance"):
@@ -299,6 +304,86 @@ def test_a_flip_the_gold_cant_buy_whole_buys_the_best_run_that_fits(db):
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at) == (3, 14999)
     assert flip.profit == pytest.approx(3 * (14999 * 0.95 - 10000))
+
+
+# --- Risk caps (#170, ADR-0034) ---
+
+
+def test_a_flip_to_sell_whose_unsold_loss_breaks_the_cap_buys_the_best_run_that_fits(db):
+    # All 5 would post under the 3g wall, but unsold they'd lose 5g 99s 80c (6g less 5 at
+    # the 10c Vendor Price, plus 5 Deposits of 6c), over 5% of the 100g Stake. The 3 at 1g
+    # lose 2g 99s 88c, and post 1c under the 1g 50s they leave.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD, vendor_prices={2589: 10})],
+        config=CAPPED,
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.post_at, flip.capped) == (3, 14999, 5)
+
+
+def test_a_flip_to_sell_with_no_run_within_the_risk_caps_is_skipped(db):
+    # As above, but 5% of a 50g Stake is 2g 50s: even the 3 at 1g would lose more unsold.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD // 2, vendor_prices={2589: 10})],
+        config=CAPPED,
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_to_sell_costs_no_more_than_the_room_the_own_listings_leave(db):
+    # 500g of gold and 650g of own Listings up at cost: a 1150g Stake, whose 60% leaves
+    # 40g of room. All 5 would cost 60g, so the 3 at 10g are bought, posted under the 15g.
+    # Their Vendor Price of 9g keeps the Unsold Loss of all 5 (42g) under 5% (57g 50s).
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=100000), row(quantity=2, unit=150000), unit=300000
+        ),
+        [character_read(item(), vendor_prices={2589: 90000})],
+    )
+
+    m = recommend_market(db, CAPPED, MARKET, [], T0 + HOUR, gold=5_000_000, tied_up=6_500_000)
+
+    [flip] = m.shopping_list
+    assert (flip.quantity, flip.post_at, flip.capped) == (3, 149999, 5)
+
+
+def test_the_stake_counts_own_listings_no_lot_covers_at_their_best_exit_value(db):
+    # 10 Ore up that never sell are worth their 2g Vendor Price: 20g, and 80g of gold. The
+    # room is 60% of the 100g Stake less the 20g up.
+    result = run(
+        db,
+        [scan(T0 + n * HOUR, row(ORE, quantity=10, unit=50000, own=True)) for n in range(2)],
+        [character_read(money=800_000, vendor_prices={2770: 20000})],
+        config=CAPPED,
+    )
+
+    assert (result[MARKET].stake, result[MARKET].room) == (1_000_000, 400_000)
+
+
+def test_a_flip_to_vendor_is_capped_by_the_room_alone(db):
+    # A 10g Stake leaves 6g of room. 70 Ore at 10s vendor for 20s, so whatever they cost
+    # (7g, over the 50s cap on an Unsold Loss), they lose nothing: only the room cuts them.
+    run(
+        db,
+        [scan(T0, row(ORE, quantity=10, unit=1000), row(ORE, quantity=60, unit=1000))],
+        [character_read(vendor_prices={2770: 2000})],
+    )
+
+    m = recommend_market(db, CAPPED, MARKET, [], T0, gold=100_000, tied_up=0)
+
+    [flip] = m.shopping_list
+    assert (flip.action, flip.quantity, flip.capped) == (Action.VENDOR, 60, 70)
 
 
 def test_a_flip_with_no_run_the_gold_covers_that_clears_the_margin_is_skipped(db):
@@ -2719,6 +2804,28 @@ def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
     ]
 
 
+def test_a_flip_to_craft_stops_at_the_first_craft_that_breaks_a_risk_cap(db):
+    # A Bolt from 1 Thread at 10c Vendors for 1c, so each Bolt posted loses 9.6c unsold
+    # (10c less 1c, plus a 0.6c Deposit). 6 would Sell, but 5% of a 6s Stake is 30c: 3
+    # crafts lose 28.8c, and a 4th would make it 38.4c.
+    run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                vendor_prices={2996: 1},
+                recipes=[recipe(reagents=[(2320, 1)])],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    m = recommend_market(db, CAPPED, MARKET, [], T0 + HOUR, gold=600, tied_up=0)
+
+    [craft] = m.shopping_list
+    assert (craft.action, craft.quantity, craft.cost, craft.capped) == (Action.CRAFT, 3, 30, 6)
+
+
 def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
     # The Thread held goes into the first Bolt; the other 5 buy theirs from a merchant.
     result = run(
@@ -3968,6 +4075,23 @@ def test_held_units_bought_on_the_auction_house_show_roi_after_the_cut(db, tmp_p
     assert sell.roi == pytest.approx(0.881)
     assert (vendor.action, vendor.paid, vendor.paid_units) == (Action.VENDOR, 50, 10)
     assert vendor.roi == pytest.approx(-0.8)
+
+
+def test_the_stake_counts_own_listings_a_lot_covers_at_what_they_cost(db, tmp_path):
+    # 10 Linen bought for 50c each, 4 of them up at 99c: they're in the Stake at 2s, not
+    # at what they'd sell for.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20)),
+            scan(BOUGHT + HOUR, row(quantity=20), row(quantity=4, unit=99, own=True)),
+        ],
+        [character_read(money=GOLD, vendor_prices={2589: 10})],
+        config=named_at_t0(tmp_path, LINEN_KEY, config=CAPPED),
+        mailbox_reads=[won(BOUGHT, count=10, price=500)],
+    )
+
+    assert result[MARKET].stake == GOLD + 4 * 50
 
 
 def test_held_units_are_costed_by_the_newest_lots_first(db, tmp_path):

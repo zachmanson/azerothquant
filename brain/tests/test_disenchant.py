@@ -209,6 +209,7 @@ RECOMMEND_CONFIG = replace(
     sale_size_prior_events_holdings=0,
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
+    risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
 )
 
 
@@ -720,6 +721,18 @@ def test_the_budget_cuts_a_flip_to_disenchant(db):
     [row] = flips_to_disenchant(db, flip_scans(*CHEAP_GREENS), [reader])
 
     assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(OTHER, 150))
+
+
+def test_a_flip_to_disenchant_stops_at_the_first_listing_that_breaks_a_risk_cap(db):
+    # #170, ADR-0034: 2.99% of the 1g Stake leaves 2s 99c of room, as the Budget above.
+    config = replace(RECOMMEND_CONFIG, risk_caps=True, flip_tied_up_share=0.0299)
+
+    [row] = flips_to_disenchant(
+        db, flip_scans(*CHEAP_GREENS), [enchanter(vendor_prices=FLIP_PRICES)], config
+    )
+
+    assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(OTHER, 150))
+    assert (row.quantity, row.capped) == (2, 3)
 
 
 def test_a_mat_that_feeds_a_craft_brings_the_crafts_credit_to_a_flip_to_disenchant(db):

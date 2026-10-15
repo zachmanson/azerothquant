@@ -85,6 +85,7 @@ def config_for(tmp_path: Path, *installs: Install) -> Config:
         installs=installs,
         history_path=tmp_path / "history.sqlite",
         archive_dir=tmp_path / "archive",
+        risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
     )
 
 

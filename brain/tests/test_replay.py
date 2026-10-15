@@ -47,6 +47,7 @@ CONFIG = replace(
     sale_size_prior_events_holdings=0,
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
+    risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
 )
 
 
@@ -768,3 +769,16 @@ def test_a_taken_flip_to_disenchants_units_are_kept_for_their_best_exit_value():
     moves = _brain(m, {}, flip_rows=50)
 
     assert (moves.spent, dict(moves.kept)) == (550, {"9999": 2, "9998": 1})
+
+
+def test_options_are_taken_while_the_room_lasts_as_well_as_the_gold():
+    # #170, ADR-0034: 1g of gold but 50s of room, so after the 40s Ore only the 10s Linen
+    # fits, not the 30s Bolt.
+    ore = Row("2770", Action.SELL, 4, price=10, profit=300, cost=4000)
+    bolt = Row("2996", Action.SELL, 3, price=10, profit=200, cost=3000)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=1000)
+    m = MarketRecommendations(MARKET, T0, 10000, room=5000, shopping_list=[ore, bolt, linen])
+
+    shopping, _ = options_taken(m, flip_rows=50)
+
+    assert shopping == [ore, linen]

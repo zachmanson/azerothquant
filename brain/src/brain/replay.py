@@ -354,9 +354,11 @@ def options_taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], 
     lasts, skipping any that buys, uses or makes an Item Key one already taken does (a
     Flip to Disenchant makes its expected mats, #89). Only the top `flip_rows` Flips to
     Sell and to Vendor by Profit are options, so the rows kept for Per click, Per day or
-    ROI (#98) leave the replay as it was. The Prediction buys then get what's left, in
-    order."""
+    ROI (#98) leave the replay as it was. The room the risk caps leave (ADR-0034) runs out
+    as the gold does. The Prediction buys then get the gold left, in order: the room isn't
+    theirs."""
     gold = m.spend
+    room = math.inf if m.room is None else m.room
     shopping: list[Row] = []
     keys: set[str] = set()
     flips = [r for r in m.shopping_list if r.action in (Action.SELL, Action.VENDOR)]
@@ -366,11 +368,12 @@ def options_taken(m: MarketRecommendations, flip_rows: int) -> tuple[list[Row], 
     ]
     for r in options:
         touched = _touched(r)
-        if r.cost is None or r.cost > gold or touched & keys:
+        if r.cost is None or r.cost > min(gold, room) or touched & keys:
             continue
         shopping.append(r)
         keys |= touched
         gold -= r.cost
+        room -= r.cost
     prediction_buys = []
     for r in m.prediction_buys:
         if r.cost is not None and r.cost <= gold:

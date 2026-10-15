@@ -2,7 +2,7 @@
 
 Amends ADR-0017 (#170, parent #166). Options are still sized alone and the player still picks. But each is now sized within two risk caps as well as `min(gold, Budget)`, both shares of the **Stake** (the pooled gold plus the player's own Listings up, at what they cost):
 
-- **Unsold Loss** at most 5% of the Stake (`flip_unsold_loss_share`). An option's Unsold Loss is what it loses if none of it sells: its cost, less what its units vendor for (a Flip to Craft's output, a Flip to Disenchant's mats), plus one posting's Deposits.
+- **Unsold Loss** at most 3% of the Stake (`flip_unsold_loss_share`; 5% as decided, lowered by the check below). An option's Unsold Loss is what it loses if none of it sells: its cost, less what its units vendor for (a Flip to Craft's output, a Flip to Disenchant's mats), plus one posting's Deposits.
 - **Tied up** at most 60% of the Stake (`flip_tied_up_share`). An option costs at most the room: 60% of the Stake less the own Listings up at cost.
 
 Both are settings. Neither has a floor.
@@ -30,4 +30,16 @@ In the Backtest on the 86-Scan copy (ADR-0032), `brain`'s three worst trades wer
 - With a small Stake (day 1 of Live), most rows are small or gone. That's intended.
 - Taking two options can still go over the room, as with the Budget. The Bought-mark fold is the guard.
 - The Backtest gains an `uncapped` policy, so the change and later ones (#171) can be measured against the Brain without it. Its Stake is the simulated gold plus unsold units at cost, passed in, not read from Scans, which show the real player's posts.
+- Working out a past Scan (a replay, a Grade) can't use the Lots, which may rest on what that Scan named (#55), so there the own Listings up count at Best Exit Value, not Paid.
 - The Cured Medium Hide buy is outside the Backtest (no buys in the last 7 days). It's checked by `brain recommend` as of Scan 85.
+
+## Check (2026-10-14, #170 slice 1)
+
+Backtest on a fresh 87-Scan live copy, P&L at the vendor / market mark, worst trade, max drawdown, gold low:
+
+- `uncapped`: −49.62g / +104.34g, −48.93g, 11%, 17c
+- 5% / 60%: +32.96g / +101.33g, −27.37g, 11%, 20.20g
+- 3% / 60%: +44.73g / +118.27g, −17.71g, 9%, 23.17g
+- 5% / 100%: −14.49g / +146.11g, −33.62g, 16%, 10s 46c
+
+3% beat 5% by more than 5g at both marks and on every other line, so it's the default. As of Scan 85 the Cured Medium Hide row is gone: no run that fits clears the Flip margin.

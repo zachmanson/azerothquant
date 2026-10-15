@@ -38,6 +38,7 @@ from brain.recommendations import (
     render,
     write_recommendations,
 )
+from brain.savedvariables import parse_savedvariables
 
 ADDON = Path(__file__).parents[2] / "addon" / "AzerothQuant"
 
@@ -879,3 +880,25 @@ def test_a_real_lua_reads_the_loot_alert(tmp_path, lua):
 
     # Whole copper, as the Addon's Money.format shows it.
     assert out == "100000	123457	Sell	200000	Disenchant"
+
+
+def test_a_market_carries_its_stake_and_room_and_a_capped_row_its_units_before_the_cap():
+    # #170, ADR-0034. Rounded down to the copper: the Addon shows gold, not fractions.
+    capped = Row("2589", Action.SELL, 55, price=100, profit=500, cost=5500, capped=241)
+    m = MarketRecommendations(
+        MARKET, 1790000000, 600000, stake=905000.4, room=243000.6, shopping_list=[capped]
+    )
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    lua_m = data["recommendations"]["Quel'Thalas"]["Horde"]
+    assert (lua_m["stake"], lua_m["room"]) == (905000, 243000)
+    assert lua_m["shoppingList"][0]["capped"] == 241
+
+
+def test_a_market_without_risk_caps_has_no_room():
+    m = MarketRecommendations(MARKET, 1790000000, 600000, stake=600000)
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    assert "room" not in data["recommendations"]["Quel'Thalas"]["Horde"]
