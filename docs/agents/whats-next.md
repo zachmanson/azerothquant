@@ -1,3 +1,16 @@
+2026-10-14 (later 134): #170 grilled. Spec comment on #170 (6182758039), ADR-0034, ADR-0017 "Amended by" line, CONTEXT.md gains Stake and Unsold Loss (and Shopping List mentions the caps). Labelled ready-for-agent. Two caps inside sizing, as shares of the Stake (pooled gold + own Listings up at cost): Unsold Loss <= 5%, cost <= room (60% of Stake − own Listings at cost). No brake (#185), no Backtest tail change (#186).
+
+Next, in order (PoC by Oct 20):
+1. #170 slice 1 (Brain): TDD per the spec comment. Pass bar is `brain` vs new `uncapped` on a fresh live copy, plus the hide check at Scan 85. Slice 2 (Addon tooltip + Bought-mark fold on the room) only if slice 1 passes.
+2. Then #169, #171 per #166's order (#171: must beat `brain` on #168's bar, and now `brain` is capped).
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 133, plus:
+  - Backtest Stake must be passed in (simulated gold + unsold at cost), not read from Scans: Scans show the real player's posts. Add overrides beside `recommend_market(gold=)`.
+  - A capped Flip to Sell is a shorter run inside ADR-0011's run choice, so it posts lower. Don't just cut units off the full run's plan.
+  - The full 3-share Backtest on the 86-Scan copy takes 10+ minutes. Run it in the background.
+  - `addon/AzerothQuant/Recommendations.lua` was left modified from a local Brain run. It's generated, so it isn't committed.
+
 2026-10-13 (later 133): #168 built TDD, reviewed, committed (44ad4ba), closed by the commit. ADR-0029's 24 h unwatched rule is gone: `SellRate.since_cheap(cutoff)` (no `now`) returns self with no window hours after the cutoff; `UNWATCHED_STRETCH_SECONDS`, `_Cheap.latest`, `WhyNot.watched_since` and "(not watched since)" removed. CONTEXT.md Sell Rate/Flip and an ADR-0029 "Amended by" line updated. Tests using `walls` (Scans 12 h apart) now pass `watched_cheap=` to get an hour watched after the cutoff. Check on a fresh 86-Scan live copy (posted on #168, comment 6160137763): brain -34.84g/+76.45g -> -24.30g/+78.55g, all bounds up, worst trade/drawdown unchanged, relaxed identical. Matches the spec's patched run.
 
 Next, in order (PoC by Oct 20):

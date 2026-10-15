@@ -254,7 +254,7 @@ How long the player is willing to wait for held units to sell. Only the units Se
 _Avoid_: timeout, patience
 
 **Shopping List**:
-The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, each recipe's Flips to Craft, and each Disenchant source group's Flip to Disenchant, sized as if it were the only buy within the Budget and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day (Flips to Sell only) or ROI, Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab, and Flips to Disenchant up to `disenchant_list_rows` (10) by Profit, in theirs. Taking two may need more than the Budget, and the player picks (ADR-0017).
+The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, each recipe's Flips to Craft, and each Disenchant source group's Flip to Disenchant, sized as if it were the only buy within the Budget and the risk caps (its Unsold Loss and the gold tied up in posts, each a share of the Stake), and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day (Flips to Sell only) or ROI, Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab, and Flips to Disenchant up to `disenchant_list_rows` (10) by Profit, in theirs. Taking two may need more than the Budget, and the player picks (ADR-0017).
 _Avoid_: buy list, snipes, basket
 
 **Per click**:
@@ -268,6 +268,14 @@ _Avoid_: profit per hour, velocity
 **Budget**:
 The most gold the player will spend in a Market, set in the Recommendation Table and carried to the Brain in each Character Read. Each Shopping List option, and the Prediction buys, spend up to the lesser of it and the pooled gold. None set means all the gold. The Prediction caps stay shares of the pooled gold (ADR-0006).
 _Avoid_: bankroll, allowance
+
+**Stake**:
+What the player is trading with in a Market: their pooled gold plus their own Listings up on the Auction House, each at what it cost (Paid where known, else its Best Exit Value). Bags and bank aren't in it. The Shopping List's risk caps are shares of it (#170). It isn't the Budget: the Budget is what the player will spend, the Stake is what one bad buy is measured against.
+_Avoid_: bankroll, net worth
+
+**Unsold Loss**:
+What a Shopping List option loses if none of it sells: its cost, less what its units (a Flip to Craft's output, a Flip to Disenchant's mats) vendor for, plus the Deposits of one posting. Each option is sized so its Unsold Loss stays within a share of the Stake, and so it doesn't take the gold tied up in posts past a share of the Stake (#170). A Flip to Vendor's is about nothing: it sells now. Not Max Loss, which is a Prediction's and assumes the unit still sells at today's prices.
+_Avoid_: worst case, risk
 
 **Bought mark**:
 A flag the player puts on a buy-side row of the Recommendation Table (right-click) once they've bought it, so it isn't bought twice before the next Brain run (#97). The row greys out and sorts last, and its Cost counts as spent against the **gold left**: the lesser of the Budget less what's spent and the gold on hand, which the table folds options over. Marks are kept per Market and cleared once an import's Scan is later than the mark. Only the Addon reads them; the Brain learns of the buy from Purchases and the next Scan.
