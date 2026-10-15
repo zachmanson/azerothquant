@@ -1,3 +1,15 @@
+2026-10-14 (later 135): #170 slice 1 built TDD, reviewed, committed (9b35e4c), pushed. `_RiskCaps` (loss, room) inside sizing: `_FlipToSell.fitting`, `_option` (Vendor room-only, Craft steps), `_flip_to_disenchant`; `_SellRun`/`_CraftBuy.unsold_loss`; `Row.capped` (by sizing again with gold alone; the Disenchant loop counts it). `MarketRecommendations.stake/room`, written to Recommendations.lua (`stake`, `room`, row `capped`). `recommend_market(tied_up=)` (Stake = gold + tied_up; no separate stake override). Live Stake: own units in the Scan costed by newest open Lots, else Best Exit Value; with `paid=False` (past Scans) no Lots (recursion through `held_at_writing`), noted in ADR-0034. `options_taken` tracks the room. `BuyPolicy` takes a 4th arg (tied-up at cost); `uncapped` policy; `Config.risk_caps` (not in toml), `flip_unsold_loss_share` (now 0.03) and `flip_tied_up_share` (0.6) in config.toml. Check posted on #170 (6183475938): brain passes every line vs uncapped; 3%/60% beat 5%/60% by 12g/17g so default switched, ADR-0034 has the table; hide row gone as of Scan 85. Filed #187 (Why Not ignores the caps).
+
+Next, in order (PoC by Oct 20):
+1. #170 slice 2 (Addon): tooltip line on a capped row in plain words (uses row `capped`, Market `stake`/`room`; loss share is 3% now, not 5%), and the Bought-mark fold (#97) takes marked costs off `room` as well as the gold left. Then close #170.
+2. Then #169, #171 per #166's order (#171 must beat capped `brain` on #168's bar).
+3. #146 when the guildie is free (see later 126).
+
+- Gotchas: same as later 134, plus:
+  - Test configs (test_recommend/flips/replay/backtest/craft_flips/disenchant/cli) set `risk_caps=False`; cap tests use `CAPPED` with shares pinned to 0.05/0.6.
+  - Check copy in Z:/aq-check-170 (safe to delete): history.sqlite (87 Scans), run.py adds `c3_60`/`c5_100`, hide.py. Four policies in parallel took ~30 min.
+  - Never `git stash push <path>` from brain/ for a mutation check: it emptied the index here (fixed with `git reset`). Revert by sed instead.
+
 2026-10-14 (later 134): #170 grilled. Spec comment on #170 (6182758039), ADR-0034, ADR-0017 "Amended by" line, CONTEXT.md gains Stake and Unsold Loss (and Shopping List mentions the caps). Labelled ready-for-agent. Two caps inside sizing, as shares of the Stake (pooled gold + own Listings up at cost): Unsold Loss <= 5%, cost <= room (60% of Stake − own Listings at cost). No brake (#185), no Backtest tail change (#186).
 
 Next, in order (PoC by Oct 20):
