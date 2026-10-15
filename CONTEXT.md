@@ -104,7 +104,7 @@ A Purchase the Brain didn't name, so it starts no Lot (ADR-0025): not under a Pr
 _Avoid_: consumable, personal buy
 
 **Observation Window**:
-The time between two consecutive Scans of a Market, when it is short enough that almost no sale goes unseen. Only Observation Windows count toward Sell Rate; longer gaps still track Listings but add nothing to it. An item that either of its Scans dropped rows of (item data not loaded yet) is left out of it, since its Listings may only have been missed.
+The time between two consecutive Scans of a Market, when it is at most 12 hours. Within one, a Listing that went missing counts as a sale only if its time-left bucket rules out expiring over the gap, so over a long gap only Listings with more time left than the gap can show a sale, and the window sees fewer of the sales there were: Sell Rate leans low (ADR-0035). Only Observation Windows count toward Sell Rate; longer gaps still track Listings but add nothing to it. An item that either of its Scans dropped rows of (item data not loaded yet) is left out of it, since its Listings may only have been missed.
 _Avoid_: gap (when you mean one that counts), interval
 
 **Fair Value**:

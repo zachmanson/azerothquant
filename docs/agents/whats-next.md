@@ -1,3 +1,16 @@
+2026-10-15 (later 137): #169 grilled. Spec comment on #169 (6184660098), retitled "Sell Rate: Observation Windows up to 12 hours", ready-for-agent. ADR-0035 (amends 0004, "Amended by" line added), CONTEXT.md Observation Window updated. The change is one default: `observation_window_max_minutes` 60 -> 720. Hours stay Market-wide; gaps over 12 h still add nothing (no Partial Sales from them either). Backtest on a fresh 87-Scan copy: brain 44.7g/118.3g -> 84.6g/115.7g (vendor/market), vendor bounds up, worst trade -17.7 -> -16.2g, drawdown 9% both; the market-mark x0.65 bound fell 106.4 -> 89.4g. The pass bar is the vendor mark (capped); the market mark is reported only. Per-Item-Key hours (the review's idea) and a 2 h cap were tried and lost (ADR-0035).
+
+Next, in order (PoC by Oct 20):
+1. #169 (ready-for-agent): build per the spec comment (TDD), check `brain backtest --policy brain,uncapped` before/after on one fresh copy, /code-review, commit.
+2. #171 per #166's order (must beat the capped, 12 h `brain` on #168's bar; watch the market-mark x0.65 bound).
+3. #146 when the guildie is free (see later 126).
+4. In game when on the PC: see a capped row's line in the side pane (from later 136).
+
+- Gotchas: same as later 136, plus:
+  - Tests that build Scans 12 h apart to get a non-window gap (`walls`, #168) become windows at exactly 12 h. Move the gap past 12 h or pin `observation_window_max_seconds=3600`; don't change what they assert.
+  - Check copy in Z:/aq-check-169 (safe to delete): history.sqlite (87 Scans), run.py + variants.py (`w12`, `w2`, `pb` per-Item-Key hours, each with a `u` uncapped twin), facts.py (gap/bucket counts). Results in *.txt.
+  - 8 backtests in parallel ran the machine critically low on memory (Claude Code killed the background wait shells; the backtests survived). Run at most 4 at once, and don't leave a background wait loop going.
+
 2026-10-14 (later 136): #170 slice 2 built TDD, reviewed, committed (3a95231), pushed, CI green; #170 CLOSED by the commit. The Brain now writes Market `lossCap` (Unsold Loss cap, copper) and row `cappedBy` ("room" if sizing within the room alone gives as few units, else "loss"; the Disenchant loop records the first cap it hits). The Addon puts a plain-words line first in a capped row's details (`cappedLine` in RecommendationTable.lua): "Capped at N of M: if none sell, you'd lose at most Xg (3% of what you're trading with)" or "...: more would put over 60% of what you're trading with into auctions" (share worked back from room/stake/gold). `BoughtMarks.goldLeft(budget, gold, spent, room)` also folds on room less what's marked. ADR-0034 and CONTEXT.md (Bought mark) updated. Review left: marks on Prediction buys also come off the room (spec says "marked costs"), not changed.
 
 Next, in order (PoC by Oct 20):
