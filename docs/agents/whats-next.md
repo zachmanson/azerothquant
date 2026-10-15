@@ -1,3 +1,16 @@
+2026-10-15 (later 138): #169 built TDD, reviewed, committed (bc30af2), pushed; CLOSED by the commit. `DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 720`; config.example.toml and the observation.py/sell_rate.py/ObservationWindow docstrings cite ADR-0035. New tests in test_observation.py (6 h gap: bucket-4 gone is a Probable Sale, bucket-3 isn't, hours count; Partial Sale in 6 h; 12 h counts, 12 h + 1 s adds nothing). Backtest on a fresh 87-Scan copy matched the prototype exactly: brain vendor 44.7 -> 84.6g, x0.65 47.7 -> 56.8g, x1.2 65.6 -> 88.1g, worst -17.7 -> -16.2g, drawdown 9% both; market-mark x0.65 106.4 -> 89.4g. Posted on #169 (comment 6185337458).
+
+Next, in order (PoC by Oct 20):
+1. #171 (needs-triage): grill per #166's order. It must beat the capped, 12 h `brain` on #168's bar (vendor mark central + both bounds, worst trade, drawdown); watch the market-mark x0.65 bound (89.4g now).
+2. #146 when the guildie is free (see later 126).
+3. In game when on the PC: see a capped row's line in the side pane (from later 136); restart `brain watch` so it picks up the 12 h windows.
+
+- Gotchas: same as later 137, plus:
+  - Tests now pin the old 1 h cap as `HOUR_CAP` (test_observation, test_beta_prior), and test_recommend's shared `CONFIG` pins `observation_window_max_seconds=HOUR`. A new recommend test that wants 12 h windows must use `DEFAULTS` or override it.
+  - test_instance_lock's `test_another_running_brain_holds_the_lock_until_it_is_killed` fails locally on old and new code alike (the venv launcher's child pid differs). CI is the authority.
+  - `git stash push <path>` emptied the index again this session (fixed by `git reset`). Don't use it.
+  - Check copy in Z:/aq-check-169b (safe to delete, with Z:/aq-check-169): history.sqlite (87 Scans), before-src/ and after-src/ snapshots, `run.py <config> <policy>` with `PYTHONPATH=<snapshot>`. Four backtests at once ran fine (~30 min).
+
 2026-10-15 (later 137): #169 grilled. Spec comment on #169 (6184660098), retitled "Sell Rate: Observation Windows up to 12 hours", ready-for-agent. ADR-0035 (amends 0004, "Amended by" line added), CONTEXT.md Observation Window updated. The change is one default: `observation_window_max_minutes` 60 -> 720. Hours stay Market-wide; gaps over 12 h still add nothing (no Partial Sales from them either). Backtest on a fresh 87-Scan copy: brain 44.7g/118.3g -> 84.6g/115.7g (vendor/market), vendor bounds up, worst trade -17.7 -> -16.2g, drawdown 9% both; the market-mark x0.65 bound fell 106.4 -> 89.4g. The pass bar is the vendor mark (capped); the market mark is reported only. Per-Item-Key hours (the review's idea) and a 2 h cap were tried and lost (ADR-0035).
 
 Next, in order (PoC by Oct 20):
