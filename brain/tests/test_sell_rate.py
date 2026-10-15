@@ -54,10 +54,10 @@ def run(db, *scans):
 
 
 def test_a_market_without_observation_windows_has_no_data(db):
-    # Two Scans 3 h apart: Listings were seen, but the gap is too long to count.
-    run(db, scan(T0, row(quantity=20)), scan(T0 + 3 * HOUR, row(quantity=15)))
+    # Two Scans 13 h apart: Listings were seen, but the gap is too long to count.
+    run(db, scan(T0, row(quantity=20)), scan(T0 + 13 * HOUR, row(quantity=15)))
 
-    assert sell_rates(db, MARKET, CONFIG, now=T0 + 3 * HOUR) == {}
+    assert sell_rates(db, MARKET, CONFIG, now=T0 + 13 * HOUR) == {}
 
 
 def test_an_item_key_with_windows_but_no_sales_sells_zero_a_day(db):

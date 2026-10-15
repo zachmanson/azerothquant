@@ -1,5 +1,5 @@
 """Sell Rate: units of an Item Key sold per day in a Market, from Observation Windows
-only (ADR-0004)."""
+only (ADR-0004), gaps of up to 12 h by default (ADR-0035)."""
 
 import sqlite3
 from collections import Counter, defaultdict

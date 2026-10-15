@@ -12,9 +12,9 @@
 # time_left_max_minutes = [30, 120, 720, 1440]
 
 # Optional: the longest gap, in minutes, between two Scans of a Market that still counts
-# as an Observation Window. Only those gaps count toward Sell Rate (see ADR-0004).
-# Defaults to 60. Must come before the first [[installs]].
-# observation_window_max_minutes = 60
+# as an Observation Window. Only those gaps count toward Sell Rate (see ADR-0004 and
+# ADR-0035). Defaults to 720 (12 h). Must come before the first [[installs]].
+# observation_window_max_minutes = 720
 
 # Optional: a Scan older than its Market's latest imported one is merged into its place in
 # time by re-matching the Market's Scans from it on. One more than pool_rematch_hours older

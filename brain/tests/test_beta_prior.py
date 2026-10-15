@@ -13,6 +13,8 @@ HOUR = 60 * MINUTE
 DAY = 24 * HOUR
 
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
+# The old 1 h cap, for Scans hours apart that are no Observation Window (ADR-0035).
+HOUR_CAP = replace(CONFIG, observation_window_max_seconds=HOUR)
 BETA_REALM = "Classic Beta PvP"
 LIVE_REALM = "Forever"
 LIVE = Market(realm=LIVE_REALM, faction="Alliance", era=Era.LIVE)
@@ -84,8 +86,9 @@ def test_a_live_market_gets_the_median_sale_event_price_of_its_factions_beta_mar
 
 
 def test_without_three_sale_events_it_is_the_median_daily_fair_value_of_the_last_7_days(db):
-    # Scans hours apart, so no Observation Windows. Beta's last day has two Scans, whose
-    # Fair Values average 200; the days before it 400 and 150. A Scan 8 days back is out.
+    # Scans hours apart and a 1 h cap, so no Observation Windows. Beta's last day has two
+    # Scans, whose Fair Values average 200; the days before it 400 and 150. A Scan 8 days
+    # back is out.
     last = T0 + 10 * DAY
     beta(
         db,
@@ -97,7 +100,7 @@ def test_without_three_sale_events_it_is_the_median_daily_fair_value_of_the_last
     )
     live(db, scan(LIVE_START, row(unit=900), realm=LIVE_REALM))
 
-    prior = beta_prior(db, LIVE, CONFIG, now=LIVE_START, item_keys={LINEN_KEY})
+    prior = beta_prior(db, LIVE, HOUR_CAP, now=LIVE_START, item_keys={LINEN_KEY})
 
     assert prior.prices[LINEN_KEY] == BetaPrice(
         price=200, sold=False, sale_events=0, units_per_day=None

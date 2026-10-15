@@ -21,8 +21,10 @@ MINUTE = 60
 HOUR = 60 * MINUTE
 DAY = 24 * HOUR
 
-# Default cap (1 h) and default time-left buckets (<30m, 30m-2h, 2-12h, 12-48h).
+# Default cap (12 h, ADR-0035) and default time-left buckets (<30m, 30m-2h, 2-12h, 12-24h).
 CONFIG = Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),))
+# The old 1 h cap, for a gap that's no window but too short for its Listings to expire.
+HOUR_CAP = replace(CONFIG, observation_window_max_seconds=HOUR)
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
 LINEN = "item:2589::::::::20:1490"
 LINEN_KEY = "2589"
@@ -67,16 +69,17 @@ def run(db, *scans):
 
 
 def test_gap_exactly_at_the_cap_is_an_observation_window(db):
-    run(db, scan(T0), scan(T0 + HOUR))
+    run(db, scan(T0), scan(T0 + 12 * HOUR))
 
-    assert observation_windows(db, MARKET, CONFIG) == [ObservationWindow(T0, T0 + HOUR)]
+    assert observation_windows(db, MARKET, CONFIG) == [ObservationWindow(T0, T0 + 12 * HOUR)]
 
 
 def test_gap_just_over_the_cap_is_not_an_observation_window(db):
-    run(db, scan(T0), scan(T0 + HOUR + 1), scan(T0 + HOUR + 1 + 20 * MINUTE))
+    over = 12 * HOUR + 1
+    run(db, scan(T0), scan(T0 + over), scan(T0 + over + 20 * MINUTE))
 
     assert observation_windows(db, MARKET, CONFIG) == [
-        ObservationWindow(T0 + HOUR + 1, T0 + HOUR + 1 + 20 * MINUTE)
+        ObservationWindow(T0 + over, T0 + over + 20 * MINUTE)
     ]
 
 
@@ -94,7 +97,7 @@ def test_markets_do_not_mix_windows(db):
         scan(T0),
         scan(T0 + 20 * MINUTE, faction="Horde"),
         scan(T0 + 40 * MINUTE),
-        scan(T0 + 2 * HOUR, faction="Horde"),
+        scan(T0 + 13 * HOUR, faction="Horde"),
     )
 
     assert observation_windows(db, MARKET, CONFIG) == [ObservationWindow(T0, T0 + 40 * MINUTE)]
@@ -146,13 +149,13 @@ def test_window_hours_add_up_the_windows_that_end_in_the_range(db):
         db,
         scan(T0),
         scan(T0 + 20 * MINUTE),  # window: 20 min, before the range
-        scan(T0 + 3 * HOUR),  # 2 h 40 min gap: not a window
-        scan(T0 + 3 * HOUR + 30 * MINUTE),  # window: 30 min
-        scan(T0 + 4 * HOUR + 15 * MINUTE),  # window: 45 min
-        scan(T0 + 5 * HOUR),  # window: 45 min, ends at the range's (exclusive) end
+        scan(T0 + 13 * HOUR),  # 12 h 40 min gap: not a window
+        scan(T0 + 13 * HOUR + 30 * MINUTE),  # window: 30 min
+        scan(T0 + 14 * HOUR + 15 * MINUTE),  # window: 45 min
+        scan(T0 + 15 * HOUR),  # window: 45 min, ends at the range's (exclusive) end
     )
 
-    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0 + HOUR, until=T0 + 5 * HOUR)
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0 + HOUR, until=T0 + 15 * HOUR)
 
     assert evidence.window_hours == 1.25
 
@@ -162,7 +165,7 @@ def test_partial_sales_count_only_inside_windows(db):
         db,
         scan(T0, row(quantity=20)),
         scan(T0 + 20 * MINUTE, row(quantity=15)),  # window: 5 sold
-        scan(T0 + 3 * HOUR, row(quantity=12)),  # not a window: 3 sold, unseen hours
+        scan(T0 + 13 * HOUR, row(quantity=12)),  # not a window: 3 sold, unseen hours
     )
 
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
@@ -190,7 +193,7 @@ def test_probable_sales_are_disappearances_in_a_window_that_could_not_expire(db)
         scan(T0 + 3 * HOUR),
     )
 
-    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+    evidence = sell_rate_evidence(db, MARKET, HOUR_CAP, since=T0, until=T0 + DAY)
 
     assert evidence.sale_events == [
         SaleEvent(
@@ -407,7 +410,7 @@ def test_reposts_and_the_coincidence_baseline_are_counted_per_item_key(db):
 def test_a_disappearance_outside_an_observation_window_is_never_a_repost(db):
     run(db, scan(T0, row(unit=100)), scan(T0 + 3 * HOUR, row(unit=90)))
 
-    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+    evidence = sell_rate_evidence(db, MARKET, HOUR_CAP, since=T0, until=T0 + DAY)
 
     assert evidence.repost_counts() == {}
 
@@ -516,6 +519,52 @@ def test_a_disappearance_too_dear_to_be_a_sale_is_not_a_coincidence_either(db):
     evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
 
     assert evidence.coincidence_counts() == {}
+
+
+# --- Observation Windows up to 12 hours (ADR-0035) ---
+
+
+def test_a_6_hour_gap_is_a_window_where_only_a_listing_that_outlasts_it_is_a_probable_sale(db):
+    run(
+        db,
+        scan(
+            T0,
+            row(item=LINEN, quantity=3, time_left=4),  # 12 h+ left: can't have expired in 6 h
+            row(item=SILK, time_left=3),  # 2-12 h left: may have expired
+        ),
+        scan(T0 + 6 * HOUR),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.window_hours == 6
+    assert evidence.sale_events == [
+        SaleEvent(item_key=LINEN_KEY, unit_buyout=100, seen_at=T0 + 6 * HOUR, units=3)
+    ]
+
+
+def test_a_partial_sale_in_a_6_hour_gap_is_a_sale_event(db):
+    run(db, scan(T0, row(quantity=20)), scan(T0 + 6 * HOUR, row(quantity=15)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.sale_events == [
+        SaleEvent(item_key=LINEN_KEY, unit_buyout=100, seen_at=T0 + 6 * HOUR, units=5)
+    ]
+
+
+@pytest.mark.parametrize(("gap", "counts"), [(12 * HOUR, True), (12 * HOUR + 1, False)])
+def test_a_gap_counts_up_to_12_hours_and_past_them_adds_no_hours_or_sale_events(db, gap, counts):
+    run(db, scan(T0, row(quantity=20)), scan(T0 + gap, row(quantity=15)))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.window_hours == (gap / HOUR if counts else 0)
+    assert evidence.sale_events == (
+        [SaleEvent(item_key=LINEN_KEY, unit_buyout=100, seen_at=T0 + gap, units=5)]
+        if counts
+        else []
+    )
 
 
 # --- Sale Records, the Backtest's evidence (#167) ---

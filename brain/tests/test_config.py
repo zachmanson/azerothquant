@@ -155,10 +155,10 @@ def test_history_path_can_be_set_relative_to_the_config(tmp_path):
     assert config.history_path == tmp_path / "data" / "h.sqlite"
 
 
-def test_observation_window_cap_defaults_to_an_hour(tmp_path):
+def test_observation_window_cap_defaults_to_12_hours(tmp_path):
     config = load_config(write_config(tmp_path, INSTALL))
 
-    assert config.observation_window_max_seconds == 3600
+    assert config.observation_window_max_seconds == 12 * 3600
 
 
 def test_observation_window_cap_can_be_set(tmp_path):

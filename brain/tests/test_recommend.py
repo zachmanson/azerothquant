@@ -79,6 +79,9 @@ CONFIG = replace(
     # The risk caps (ADR-0034) are off but in the tests of them (CAPPED), so the rest size
     # by the gold alone, as they were written to.
     risk_caps=False,
+    # The 1 h Observation Window cap these tests were written to: their Scans hours apart
+    # are gaps no Sell Rate is read from (ADR-0035 raised the default to 12 h).
+    observation_window_max_seconds=HOUR,
 )
 # Pinned, so the worked examples don't move when the default is tuned.
 CAPPED = replace(CONFIG, risk_caps=True, flip_unsold_loss_share=0.05, flip_tied_up_share=0.6)

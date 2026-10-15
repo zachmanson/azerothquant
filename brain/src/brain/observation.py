@@ -1,10 +1,10 @@
 """Which parts of a Market's history count toward Sell Rate (ADR-0004).
 
 Only Observation Windows (gaps between consecutive Scans no longer than the configured
-cap) count, and within one a Disappearance is a Probable Sale candidate only if its
-time-left bucket rules out expiry over the gap and no Repost explains it. Everything
-here is computed from the raw history on read, so changing the cap recomputes the past
-(ADR-0002).
+cap, 12 h by default: ADR-0035) count, and within one a Disappearance is a Probable Sale
+candidate only if its time-left bucket rules out expiry over the gap and no Repost
+explains it. Everything here is computed from the raw history on read, so changing the
+cap recomputes the past (ADR-0002).
 """
 
 import sqlite3
@@ -31,6 +31,9 @@ from brain.scan import item_id_of
 
 @dataclass(frozen=True, order=True)
 class ObservationWindow:
+    """A gap of up to the cap between two consecutive Scans of a Market. Over a long one,
+    only Listings whose time-left bucket outlasts it can be Probable Sales (ADR-0035)."""
+
     start: int  # requested_at of the earlier Scan
     end: int  # requested_at of the later Scan
 

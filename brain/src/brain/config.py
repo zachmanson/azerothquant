@@ -33,9 +33,9 @@ class Install:
 DEFAULT_TIME_LEFT_MAX_MINUTES = (30, 120, 12 * 60, 24 * 60)
 
 
-# Longest gap between two Scans of a Market that still counts as an Observation Window
-# (ADR-0004).
-DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 60
+# Longest gap between two Scans of a Market that still counts as an Observation Window:
+# 12 h (ADR-0004, ADR-0035).
+DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 720
 
 # A Scan more than this much older than its Market's latest is archived and waits for
 # `brain rebuild` instead of re-matching the Market's tail (ADR-0026).
