@@ -732,7 +732,7 @@ def test_a_flip_to_disenchant_stops_at_the_first_listing_that_breaks_a_risk_cap(
     )
 
     assert row.disenchant.buys == (ListingBuy(GREEN, 100), ListingBuy(OTHER, 150))
-    assert (row.quantity, row.capped) == (2, 3)
+    assert (row.quantity, row.capped, row.capped_by) == (2, 3, "room")
 
 
 def test_a_mat_that_feeds_a_craft_brings_the_crafts_credit_to_a_flip_to_disenchant(db):

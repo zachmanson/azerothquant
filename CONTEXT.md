@@ -278,7 +278,7 @@ What a Shopping List option loses if none of it sells: its cost, less what its u
 _Avoid_: worst case, risk
 
 **Bought mark**:
-A flag the player puts on a buy-side row of the Recommendation Table (right-click) once they've bought it, so it isn't bought twice before the next Brain run (#97). The row greys out and sorts last, and its Cost counts as spent against the **gold left**: the lesser of the Budget less what's spent and the gold on hand, which the table folds options over. Marks are kept per Market and cleared once an import's Scan is later than the mark. Only the Addon reads them; the Brain learns of the buy from Purchases and the next Scan.
+A flag the player puts on a buy-side row of the Recommendation Table (right-click) once they've bought it, so it isn't bought twice before the next Brain run (#97). The row greys out and sorts last, and its Cost counts as spent against the **gold left**: the least of the Budget less what's spent, the gold on hand, and the risk caps' room less what's spent (#170), which the table folds options over. Marks are kept per Market and cleared once an import's Scan is later than the mark. Only the Addon reads them; the Brain learns of the buy from Purchases and the next Scan.
 _Avoid_: purchase (that's the stack read from mail), checked, done
 
 **Days to Sell**:

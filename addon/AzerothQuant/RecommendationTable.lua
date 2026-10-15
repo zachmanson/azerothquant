@@ -508,6 +508,26 @@ end
 
 local BOUGHT_LINE = "Bought: right-click to undo"
 
+local function percent(share)
+  return math.floor(share * 100 + 0.5) .. "%"
+end
+
+-- Why the risk caps shrank a row (#170, ADR-0034), in plain words, or nil if they didn't.
+-- caps is the Market's entry: its gold, stake, lossCap and room. The room is the tied-up
+-- share of the Stake less what's up already (the Stake less the gold).
+local function cappedLine(r, caps)
+  if not (caps and r.capped) then
+    return nil
+  end
+  local capped = "Capped at " .. r.quantity .. " of " .. r.capped .. ": "
+  if r.cappedBy == "room" then
+    local tiedUp = (caps.room + caps.stake - caps.gold) / caps.stake
+    return capped .. "more would put over " .. percent(tiedUp) .. " of what you're trading with into auctions"
+  end
+  return capped .. "if none sell, you'd lose at most " .. Money.format(caps.lossCap)
+    .. " (" .. percent(caps.lossCap / caps.stake) .. " of what you're trading with)"
+end
+
 -- What the side pane says to do with a row, in plain words (#160), and the Action it heads
 -- the pane with, by tab. A row that can be marked Bought adds the hint to mark it.
 local LATER = "they should sell for more later."
@@ -632,9 +652,10 @@ end
 -- for the Shopping List and Flips to Craft only, folds away the options that cost more (#86).
 -- beta is the entry's Beta Prior, and adds its column while the Brain writes one (#90).
 -- marks, given for the buy-side tabs only, are the Market's rows marked Bought by id (#97).
+-- caps, given for the tabs the risk caps size, is the Market's entry (#170).
 -- The cells and keys functions give a Note last where columns has one: it goes to the side
 -- pane as the row's note (#160), and the Beta column goes last.
-local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta, marks)
+local function section(title, columns, rows, cells, keys, default, nameOf, holdersOf, inBags, budget, beta, marks, caps)
   local held = RecommendationTable.heldUnits(rows)
   local noteAt = columnAt(columns, "Note")
   columns = { unpack(columns, 1, noteAt and noteAt - 1 or #columns) }
@@ -671,6 +692,10 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         rowCells[noteAt], rowKeys[noteAt] = nil, nil
       end
       local rowDetails = paneLines(r, note, nameOf, held, holdersOf)
+      local why = cappedLine(r, caps)
+      if why then
+        table.insert(rowDetails, 1, why)
+      end
       if beta then
         local p = betaPrice(beta, r.itemKey)
         rowCells[n + 1] = RecommendationTable.betaCell(beta, r.itemKey)
@@ -808,8 +833,9 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
   -- The buy-side tabs can be marked Bought whether or not any row is yet.
   marks = marks or {}
   local spent = BoughtMarks.spent(marks)
-  -- Once something is marked, the buy-side tabs fold on the gold left (#97).
-  local fold = BoughtMarks.goldLeft(budget, gold, spent)
+  -- Once something is marked, the buy-side tabs fold on the gold left (#97), the risk caps'
+  -- room included (#170).
+  local fold = BoughtMarks.goldLeft(budget, gold, spent, entry.room)
   -- No re-sort and no filter: the marker only points out what's on hand (#38).
   local function inBags(itemKey)
     for _, h in ipairs(holdersOf[itemKey] or {}) do
@@ -858,7 +884,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nil,
         fold,
         entry.beta,
-        marks
+        marks,
+        entry
       ),
       section(
         "Flips to Craft",
@@ -872,7 +899,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nil,
         fold,
         entry.beta,
-        marks
+        marks,
+        entry
       ),
       -- No Beta column: a group has no one Item Key to price.
       section(
@@ -887,7 +915,8 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         nil,
         fold,
         nil,
-        marks
+        marks,
+        entry
       ),
       section(
         "Prediction buys",

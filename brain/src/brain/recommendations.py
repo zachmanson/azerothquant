@@ -64,11 +64,12 @@ _HEADER = (
     "-- recommendations[realm][faction] is that Market's Recommendations, in copper.\n"
     "-- budget is the Budget the Brain sized them within (nil for all the gold), and each\n"
     "-- shoppingList row is an option sized as if it were the only buy. stake is the gold\n"
-    "-- plus the own Listings up at cost, and room what an option may cost under the risk\n"
-    "-- caps (nil without them); a row they shrank has capped, its units by the gold\n"
-    "-- alone. A Flip to Sell or Flip to Vendor row has listings (bought), posts (stacks\n"
-    "-- posted) and days (until its last unit sells; nil on a Flip to Vendor, which sells\n"
-    "-- now). A\n"
+    "-- plus the own Listings up at cost, room what an option may cost and lossCap the\n"
+    "-- most Unsold Loss it may have under the risk caps (nil without them); a row they\n"
+    "-- shrank has capped, its units by the gold alone, and cappedBy, the cap that shrank\n"
+    '-- it ("room" or "loss"). A Flip to Sell or Flip to Vendor row has listings (bought),\n'
+    "-- posts (stacks posted) and days (until its last unit sells; nil on a Flip to\n"
+    "-- Vendor, which sells now). A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
     "-- { itemKey, quantity, maxUnitPrice, merchant = true when bought from a merchant },\n"
     "-- and its output's postAt (nil when none of it beats vendoring).\n"
@@ -200,6 +201,8 @@ def _recommendations(
             by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
         if m.room is not None:
             by_realm[m.market.realm][m.market.faction]["room"] = math.floor(m.room)
+        if m.loss_cap is not None:
+            by_realm[m.market.realm][m.market.faction]["lossCap"] = math.floor(m.loss_cap)
         if m.market in beta_priors:
             by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
     return by_realm
@@ -241,6 +244,7 @@ _ROW_KEYS = {
     "posts": "posts",
     "days": "days",
     "capped": "capped",
+    "capped_by": "cappedBy",
 }
 
 

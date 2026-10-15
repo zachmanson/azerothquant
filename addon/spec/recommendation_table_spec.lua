@@ -1002,6 +1002,20 @@ describe("rows marked Bought (#97)", function()
     assert.are.equal("1 over the gold left (Reload to re-size)", crafts.more)
   end)
 
+  it("folds the options over what's left of the risk caps' room once a mark spent some (#170)", function()
+    local view = marked(
+      entry({ room = 4000, shoppingList = { sell(), vendor(), flipToCraft() } }),
+      { ["9749 Sell "] = 3000 },
+      nil,
+      100000
+    )
+
+    local shopping, crafts = view.sections[2], view.sections[3]
+    assert.are.same({ "2589", "9749" }, { shopping.rows[1].record.itemKey, shopping.rows[2].record.itemKey })
+    assert.are.equal(0, #crafts.rows)
+    assert.are.equal("1 over the gold left (Reload to re-size)", crafts.more)
+  end)
+
   it("folds on the gold on hand when it's under what's left of the Budget", function()
     local view = marked(entry({ shoppingList = { sell(), flipToCraft() } }), { ["9749 Sell "] = 3000 }, nil, 1000)
 
@@ -1048,6 +1062,41 @@ describe("rows marked Bought (#97)", function()
     local view = marked(entry({ shoppingList = { sell() } }), { ["9749 Sell "] = 3000 }, 50000, 100000)
 
     assert.are.equal("Gold 17g 54s 71c, Budget 5g (Reload to re-size), Bought 30s, Prediction buys 0c", view.header[2])
+  end)
+end)
+
+-- A row the risk caps shrank says why first in its details, in plain words (#170, ADR-0034).
+describe("a row the risk caps shrank", function()
+  -- A 100g Stake: 3g of Unsold Loss and 60g tied up at most, 40g of it up already.
+  local function capped(by)
+    return entry({
+      gold = 600000,
+      stake = 1000000,
+      room = 200000,
+      lossCap = 30000,
+      shoppingList = {
+        { itemKey = "9749", action = "Sell", quantity = 55, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 55000, capped = 241, cappedBy = by },
+      },
+    })
+  end
+
+  it("says what you'd lose at most if none sell, when that's what capped it", function()
+    local row = build(capped("loss")).sections[2].rows[1]
+
+    assert.are.equal("Capped at 55 of 241: if none sell, you'd lose at most 3g (3% of what you're trading with)", row.details[1])
+  end)
+
+  it("says how much would be tied up in auctions, when the room capped it", function()
+    local row = build(capped("room")).sections[2].rows[1]
+
+    assert.are.equal("Capped at 55 of 241: more would put over 60% of what you're trading with into auctions", row.details[1])
+  end)
+
+  it("says nothing on a row the caps didn't shrink", function()
+    local recommendations = capped(nil)
+    recommendations[REALM][FACTION].shoppingList[1].capped = nil
+
+    assert.are.same({}, build(recommendations).sections[2].rows[1].details)
   end)
 end)
 

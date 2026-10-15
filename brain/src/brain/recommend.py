@@ -357,8 +357,9 @@ class Row:
     posts: int | None = field(default=None, compare=False)
     days: float | None = field(default=None, compare=False)
     # A Shopping List option the risk caps shrank (ADR-0034): its units sized by the gold
-    # alone.
+    # alone, and which cap shrank it: "room" if the room alone would, else "loss".
     capped: int | None = None
+    capped_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -596,9 +597,11 @@ class MarketRecommendations:
     # Shopping List option and the Prediction buys spend up to the lesser of the two.
     budget: int | None = None
     # The pooled gold plus the own Listings up at cost, and the room it leaves an option
-    # under the risk caps (ADR-0034); None without them.
+    # and the most Unsold Loss an option may have under the risk caps (ADR-0034); None
+    # without them.
     stake: float = 0.0
     room: float | None = None
+    loss_cap: float | None = None
     # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
@@ -845,6 +848,7 @@ def recommend_market(
         budget=budget,
         stake=gold + tied_up,
         room=None if risk == NO_CAPS else risk.room,
+        loss_cap=None if risk == NO_CAPS else risk.loss,
         window_hours=observation_window_hours(conn, market, config, now),
         holdings=rows,
         shopping_list=shopping,
@@ -1245,7 +1249,7 @@ def _flip_to_disenchant(
     profit = 0.0
     whole = 0  # the steps the gold alone buys
     room, loss = caps.room, caps.loss
-    stopped = False  # by a cap: the later steps are only counted
+    stopped_by = None  # the cap that stopped the steps: the later ones are only counted
     for unit, item_key in sorted(listed):
         net = _mats_value(expected, added, valuer, sources, config)
         net -= config.non_stacking_effort_copper
@@ -1254,8 +1258,11 @@ def _flip_to_disenchant(
         whole += 1
         gold -= unit
         added.update(expected)
-        stopped = stopped or unit > room or unit + mats_unsold > loss
-        if stopped:
+        if stopped_by is None and unit > room:
+            stopped_by = "room"
+        elif stopped_by is None and unit + mats_unsold > loss:
+            stopped_by = "loss"
+        if stopped_by:
             continue
         bought.append(ListingBuy(item_key, unit))
         profit += net - unit
@@ -1276,6 +1283,7 @@ def _flip_to_disenchant(
         listings=n,
         disenchant=DisenchantFlip(group, tuple(bought)),
         capped=whole if whole > n else None,
+        capped_by=stopped_by if whole > n else None,
     )
 
 
@@ -4111,14 +4119,24 @@ def _capped_option(
     buys: list[_VendorBuy | _FlipToSell], crafts: list[_CraftBuy], gold: float, caps: _RiskCaps
 ) -> list[Row]:
     """`_option` within the `caps`, each row they shrank carrying its units sized by the
-    gold alone (ADR-0034)."""
+    gold alone, and which cap shrank it: the room if sizing within the room alone gives as
+    few units (ADR-0034)."""
     rows = _option(buys, crafts, gold, caps)
     if caps == NO_CAPS:
         return rows
     whole = {(r.item_key, r.action): r.quantity for r in _option(buys, crafts, gold)}
+    shrunk = [r for r in rows if whole.get((r.item_key, r.action), 0) > r.quantity]
+    if not shrunk:
+        return rows
+    room_only = _option(buys, crafts, gold, replace(caps, loss=math.inf))
+    by_room = {(r.item_key, r.action): r.quantity for r in room_only}
     return [
-        replace(r, capped=whole[r.item_key, r.action])
-        if whole.get((r.item_key, r.action), 0) > r.quantity
+        replace(
+            r,
+            capped=whole[r.item_key, r.action],
+            capped_by="room" if by_room.get((r.item_key, r.action), 0) <= r.quantity else "loss",
+        )
+        if r in shrunk
         else r
         for r in rows
     ]

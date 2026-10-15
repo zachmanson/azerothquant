@@ -9,7 +9,7 @@ Both are settings. Neither has a floor.
 
 The caps are applied inside sizing, as the Budget is. A Flip to Sell takes the most profitable run that fits them (ADR-0011), so a shorter run posts 1c under the cheapest Listing it leaves, not at the longer run's price. If no run fits and clears the Flip margin, the option drops off. The Flip to Craft and Flip to Disenchant greedy loops stop at the first step that would break a cap. A Flip to Vendor's Unsold Loss is about nothing, so only the room touches it. Buy Unders, Holdings and Prediction buys (ADR-0006) aren't touched.
 
-A row the caps shrank carries `capped` (its units before the cap), and the Addon says why in the tooltip, in plain words. The Bought-mark fold (#97) takes marked costs off the room as well as the gold left. The replay's `options_taken` tracks the room alongside the gold.
+A row the caps shrank carries `capped` (its units before the cap) and `cappedBy` (`room` if the room alone would shrink it as far, else `loss`), and the Addon says why in the row's details, in plain words, using the Market's `lossCap` and `room`. The Bought-mark fold (#97) takes marked costs off the room as well as the gold left. The replay's `options_taken` tracks the room alongside the gold.
 
 ## Why
 

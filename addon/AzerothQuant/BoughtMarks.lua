@@ -52,13 +52,15 @@ function BoughtMarks.spent(marks)
 end
 
 -- What the Budget fold (#86) runs on once something is marked: what's left of the Budget
--- (nil for all the gold), or the gold on hand if that's less. The gold on hand already
--- dropped by what was bought. With nothing marked it's the Budget, as the Brain sized to.
-function BoughtMarks.goldLeft(budget, gold, spent)
+-- (nil for all the gold), or the gold on hand if that's less, or what's left of the risk
+-- caps' room (#170; nil without them) if that's less. The gold on hand already dropped by
+-- what was bought. With nothing marked it's the Budget, as the Brain sized to.
+function BoughtMarks.goldLeft(budget, gold, spent, room)
   if spent == 0 then
     return budget
   end
-  return budget and math.min(budget - spent, gold) or gold
+  local left = budget and math.min(budget - spent, gold) or gold
+  return room and math.min(left, room - spent) or left
 end
 
 ns.BoughtMarks = BoughtMarks

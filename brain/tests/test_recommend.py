@@ -323,7 +323,7 @@ def test_a_flip_to_sell_whose_unsold_loss_breaks_the_cap_buys_the_best_run_that_
     )
 
     [flip] = result[MARKET].shopping_list
-    assert (flip.quantity, flip.post_at, flip.capped) == (3, 14999, 5)
+    assert (flip.quantity, flip.post_at, flip.capped, flip.capped_by) == (3, 14999, 5, "loss")
 
 
 def test_a_flip_to_sell_with_no_run_within_the_risk_caps_is_skipped(db):
@@ -355,12 +355,12 @@ def test_a_flip_to_sell_costs_no_more_than_the_room_the_own_listings_leave(db):
     m = recommend_market(db, CAPPED, MARKET, [], T0 + HOUR, gold=5_000_000, tied_up=6_500_000)
 
     [flip] = m.shopping_list
-    assert (flip.quantity, flip.post_at, flip.capped) == (3, 149999, 5)
+    assert (flip.quantity, flip.post_at, flip.capped, flip.capped_by) == (3, 149999, 5, "room")
 
 
 def test_the_stake_counts_own_listings_no_lot_covers_at_their_best_exit_value(db):
     # 10 Ore up that never sell are worth their 2g Vendor Price: 20g, and 80g of gold. The
-    # room is 60% of the 100g Stake less the 20g up.
+    # room is 60% of the 100g Stake less the 20g up, and the Unsold Loss cap 5% of it.
     result = run(
         db,
         [scan(T0 + n * HOUR, row(ORE, quantity=10, unit=50000, own=True)) for n in range(2)],
@@ -368,7 +368,8 @@ def test_the_stake_counts_own_listings_no_lot_covers_at_their_best_exit_value(db
         config=CAPPED,
     )
 
-    assert (result[MARKET].stake, result[MARKET].room) == (1_000_000, 400_000)
+    m = result[MARKET]
+    assert (m.stake, m.room, m.loss_cap) == (1_000_000, 400_000, 50_000)
 
 
 def test_a_flip_to_vendor_is_capped_by_the_room_alone(db):
@@ -383,7 +384,12 @@ def test_a_flip_to_vendor_is_capped_by_the_room_alone(db):
     m = recommend_market(db, CAPPED, MARKET, [], T0, gold=100_000, tied_up=0)
 
     [flip] = m.shopping_list
-    assert (flip.action, flip.quantity, flip.capped) == (Action.VENDOR, 60, 70)
+    assert (flip.action, flip.quantity, flip.capped, flip.capped_by) == (
+        Action.VENDOR,
+        60,
+        70,
+        "room",
+    )
 
 
 def test_a_flip_with_no_run_the_gold_covers_that_clears_the_margin_is_skipped(db):
@@ -2824,6 +2830,7 @@ def test_a_flip_to_craft_stops_at_the_first_craft_that_breaks_a_risk_cap(db):
 
     [craft] = m.shopping_list
     assert (craft.action, craft.quantity, craft.cost, craft.capped) == (Action.CRAFT, 3, 30, 6)
+    assert craft.capped_by == "loss"
 
 
 def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
