@@ -1,3 +1,13 @@
+2026-10-15 (later 139): #171 grilled. Spec comment on #171 (6206697350), retitled to slice A (Expected Profit gates Flip to Sell), ready-for-agent, **build from Oct 21** (parked past the PoC: brain-only, Backtest-judged, fits the no-game window). Split: #188 several post prices (needs-triage, runs on whichever gate wins A; Cured Medium Hide check), #189 stop reposting non-sellers (later, judge on Live Outcomes: the Backtest's exit is fixed), #190 recency/falling market (later, with the Live re-fit). Pass bar: vendor central beats `brain` by >5g, vendor bounds not lower, worst trade and drawdown no worse, market x0.65 not >5g under 89.4g. No CONTEXT.md/ADR yet: written when A is judged (terms Sell Chance, Expected Profit).
+
+Next, in order (PoC by Oct 20):
+1. #146 when the guildie is free (see later 126).
+2. In game when on the PC: see a capped row's line in the side pane (from later 136); restart `brain watch` so it picks up the 12 h windows.
+3. Anything the PoC turns up before Oct 20.
+4. From Oct 21: #171 (slice A) per its spec comment, then #188.
+
+- Gotchas: same as later 138.
+
 2026-10-15 (later 138): #169 built TDD, reviewed, committed (bc30af2), pushed; CLOSED by the commit. `DEFAULT_OBSERVATION_WINDOW_MAX_MINUTES = 720`; config.example.toml and the observation.py/sell_rate.py/ObservationWindow docstrings cite ADR-0035. New tests in test_observation.py (6 h gap: bucket-4 gone is a Probable Sale, bucket-3 isn't, hours count; Partial Sale in 6 h; 12 h counts, 12 h + 1 s adds nothing). Backtest on a fresh 87-Scan copy matched the prototype exactly: brain vendor 44.7 -> 84.6g, x0.65 47.7 -> 56.8g, x1.2 65.6 -> 88.1g, worst -17.7 -> -16.2g, drawdown 9% both; market-mark x0.65 106.4 -> 89.4g. Posted on #169 (comment 6185337458).
 
 Next, in order (PoC by Oct 20):
