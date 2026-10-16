@@ -1,3 +1,26 @@
+2026-10-16 (later 141): Plan to Beta's end (Oct 21, last day with a game). The user's remaining Claude usage is all there is for this project: spend it on the game-only work and Live day-1 problems first, one short session per issue, and no long experiment loops. v0.2.1 prep for #146: version bumped (Brain `__version__` + Addon .toc), committed with only those files (the #171 work from later 140 stays uncommitted and isn't in the release), tagged v0.2.1 and pushed; CI builds the exe.
+
+Next, in order:
+1. Before Oct 21, needs the game:
+   a. #146 when the guildie is free (pick a day). Check the v0.2.1 Release exe downloads and starts, `brain pool key add <guildie>`, user sends the exe + `docs/setup-guide.md` on Drive with the key, then #146's Checks.
+   b. User at the PC, no Claude needed: restart `brain watch` (12 h windows, capped lines); see a capped row's line in the side pane (#170); #85's open boxes #38, #33, #75, #49, #120, #78 (one Copper Bar at 48h, read the deposit). #50 already passed (comment on #85): just tick it.
+   c. Keep Scanning until Beta closes: it's the Beta history the Live Brain leans on.
+2. After Oct 21 (no game), Live day-1 problems first:
+   a. #147: zero history on Nov 4 (grill first: what's testable offline).
+   b. #179: tell guildies when a newer Brain is out.
+   c. #155: Scan time budget, fed by #146's `Import stages:` numbers.
+   d. #83's Beta read on the saved history (after the last Scans).
+   e. Only with usage left: #171 (rerun the four backtests per later 140), then #188.
+3. Everything else waits until after Nov 4.
+
+- Gotchas: same as later 140. If a fix lands before the guildie installs, bump to 0.2.2 and tag again (the release job fails if the tag and `__version__` differ).
+
+2026-10-16 (later 140, IN PROGRESS, not committed): #171 slice A built TDD, uncommitted in the working tree (brain/src/brain/config.py, recommend.py, tests/test_recommend.py; Recommendations.lua is the usual generated diff, don't commit it). Behind `Config.flip_expected_profit` (off, not read from config.toml) plus `flip_sell_horizon_seconds` (3 d), `flip_buyers_scale` (κ), `flip_min_expected_profit_share` (0.10; the 1s reuses `flip_min_margin_copper`). `_flips_by_expected_profit` + `_SellChance` (Poisson tails cached per mean). Stops buying through once the next unit's Sell Chance < 1% (`_LEAST_SELL_CHANCE`, not in the spec: say so in the ADR). No partial Listings: part of one posts under the rest of it, below cost. 18 new tests, mutation-checked; full suite green but the known test_instance_lock.
+
+Backtest in Z:/aq-check-171 (fresh 87-Scan copy, code snapshot in src/, `run.py config.toml <variant>`): brain.txt done = 84.6g / x0.65 56.8g / x1.2 88.1g, market 115.7g (x0.65 89.4g), worst -16.2g, dd 9% (matches). ep3k1, ep7k1, ep3k05, ep7k05 were started 00:11 Oct 16 but killed by a PC shutdown ~01:15 (no results). Rerun all four from Z:/aq-check-171, 4 at once, in the background: `PYTHONPATH=/z/aq-check-171/src /z/vibing/azerothquant/.venv/Scripts/python run.py config.toml <variant> > <variant>.txt 2> <variant>.err` (src/ is the current code; recopy it first if the code changed). They took over an hour each with 4 at once; brain alone took 32 min. Wait with Monitor or a background until-loop, not sleep.
+
+Next: read the four results against the spec's pass bar; if worst trade got worse, add a Sale Events minimum 2 variant. Then: pass -> flip the default on, migrate the old Flip to Sell tests, ADR + CONTEXT.md (Sell Chance, Expected Profit); fail -> revert the code, short tried-and-lost ADR. Then /code-review and commit. Note: _why_not still explains the old checks when the switch is on.
+
 2026-10-15 (later 139): #171 grilled. Spec comment on #171 (6206697350), retitled to slice A (Expected Profit gates Flip to Sell), ready-for-agent, **build from Oct 21** (parked past the PoC: brain-only, Backtest-judged, fits the no-game window). Split: #188 several post prices (needs-triage, runs on whichever gate wins A; Cured Medium Hide check), #189 stop reposting non-sellers (later, judge on Live Outcomes: the Backtest's exit is fixed), #190 recency/falling market (later, with the Live re-fit). Pass bar: vendor central beats `brain` by >5g, vendor bounds not lower, worst trade and drawdown no worse, market x0.65 not >5g under 89.4g. No CONTEXT.md/ADR yet: written when A is judged (terms Sell Chance, Expected Profit).
 
 Next, in order (PoC by Oct 20):
