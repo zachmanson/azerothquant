@@ -1,3 +1,9 @@
+2026-10-18 (later 143): #171 slice A FAILED the Backtest and is CLOSED (not planned). All four variants lost at the vendor mark (best 68.6g vs `brain` 84.6g) and broke drawdown (17-60% vs 9%); each overbought and the relisted stock lost 95-135g. Code reverted (never committed; the diff is saved at Z:/aq-check-171/slice-a.patch). ADR-0036 has the table; results on #171 (comment 6251649963); #188 told it runs on today's gate. No CONTEXT.md change (Sell Chance / Expected Profit were only for a pass). The 4 runs at once took 85-220 min and ~1.2 GB each; Claude Code killed the wait loop once for low memory (the runs survived).
+
+Next: #146 when the guildie is free; otherwise keep Scanning. After Oct 21: #147, #179, #155, #191/#192, #83's Beta read, then #188.
+
+- Gotchas: same as later 141. Recommendations.lua is still the usual generated diff, don't commit it.
+
 2026-10-16 (later 142): In-game checks done (results on #85): #38, #49, #120, #78, #170's capped line and the Brain-off banner (#146 rehearsal) PASS; #50 ticked. #33/#75 still open (no chained or blocked Craft row showed; screenshot one if it does). Filed #191 (penny Flips to Vendor on the Shopping List, e.g. 20 Star Ruby for 20c) and #192 (1s deposit minimum per auction not modelled); both brain-only, after Oct 21, next to #147/#179. Near misses explained to the user: no Flip to Sell because every ask is within the 5% cut + 10% Flip margin (that's #171's rule). brain watch was restarted by Claude (Start-Process cmd /k scripts\brain-watch.bat); its first Decision Engine took 66.7 s (for #155). The user wants Claude to run Brain-side steps in the background and give only in-game steps, one part at a time.
 
 Next: #146 when the guildie is free (later 141, 1a). Otherwise just keep Scanning.
