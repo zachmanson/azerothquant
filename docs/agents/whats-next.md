@@ -1,3 +1,9 @@
+2026-10-18 (later 144): #147 grilled, spec on the issue (comment 6251948315), relabelled ready-for-agent. Key facts: a fresh Brain backfills only 14 days, so a guildie installing ~Nov 4 gets no Beta Prior (fix: anchor Beta backfill on the newest Beta Scan); vendor prices/item info are per Era (fix: Beta fallback at read time); no "not enough data" text exists (fix: young-Market line, threshold from a yardstick replay). Era never mixes (Market key includes Era). v0.3.0 ships #147 + #179 before ~Nov 2; guildies download it on Nov 4. The spec has a Nov 4 checklist.
+
+Next: before Oct 21, #146 when the guildie is free. If #146 isn't booked by Oct 20, do #147's fallback check instead (Claude: fresh Brain data folder + one real Scan; user: `/reload`, read the table). After Oct 21: #147 slices 1-5 in order (one session each is fine), then #179 and the v0.3.0 release, #155, #191/#192, #83's Beta read, #188.
+
+- Gotchas: same as later 143. Recommendations.lua is still the usual generated diff, don't commit it. The only real SavedVariables fixture is brain/tests/fixtures/AzerothQuant.lua (Era isn't in the file: drop it under a `_classic_` install with Era.LIVE).
+
 2026-10-18 (later 143): #171 slice A FAILED the Backtest and is CLOSED (not planned). All four variants lost at the vendor mark (best 68.6g vs `brain` 84.6g) and broke drawdown (17-60% vs 9%); each overbought and the relisted stock lost 95-135g. Code reverted (never committed; the diff is saved at Z:/aq-check-171/slice-a.patch). ADR-0036 has the table; results on #171 (comment 6251649963); #188 told it runs on today's gate. No CONTEXT.md change (Sell Chance / Expected Profit were only for a pass). The 4 runs at once took 85-220 min and ~1.2 GB each; Claude Code killed the wait loop once for low memory (the runs survived).
 
 Next: #146 when the guildie is free; otherwise keep Scanning. After Oct 21: #147, #179, #155, #191/#192, #83's Beta read, then #188.
