@@ -2,6 +2,7 @@
 player's Scans, pulling everyone else's, and rolling back what the pool rolled back."""
 
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,18 @@ def test_pulled_scans_are_archived_under_pool_and_imported(db, config, pool):
     assert report.pulled == 1
     assert scan_times(db, MARKET) == [T0]
     assert pool_file(config, T0).exists()
+
+
+def test_a_pull_of_both_eras_imports_each_into_its_own_market(db, config, pool):
+    # Once Live opens the pool lists Live Scans beside Beta ones, same realm and faction (#147).
+    pool.upload(Era.BETA, strip_scan(scan(T0, character="Friend")))
+    pool.upload(Era.LIVE, strip_scan(scan(T0 + MINUTE, character="Friend")))
+
+    report = pull(db, pool, config, now=T0 + DAY)
+
+    assert report.pulled == 2
+    assert scan_times(db, MARKET) == [T0]
+    assert scan_times(db, replace(MARKET, era=Era.LIVE)) == [T0 + MINUTE]
 
 
 def test_a_pooled_body_dated_other_than_its_index_entry_is_left_out(db, config, pool):

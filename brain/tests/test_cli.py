@@ -60,6 +60,7 @@ from brain.history import (
 )
 from brain.instance_lock import instance_lock
 from brain.lots import NamedSet
+from brain.lua_literal import assignment
 from brain.pool import PoolError, strip_scan
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import Prediction
@@ -685,6 +686,57 @@ def test_an_install_without_the_addon_gets_no_file(tmp_path):
 
     assert result.error is None
     assert not (install / "Interface").exists()
+
+
+# --- Day 1 on Live (#147) ---
+
+
+def day_one_savedvariables(root: Path) -> Path:
+    """A guildie's first `/reload` on Live: the fixture with only its first Scan."""
+    file = install_with_savedvariables(root)
+    db = parse_savedvariables(file.read_text(encoding="utf-8"))["AzerothQuantDB"]
+    db["scans"] = db["scans"][:1]
+    file.write_text(assignment("AzerothQuantDB", db), encoding="utf-8")
+    return file
+
+
+def test_day_one_on_live_gives_a_fresh_brain_a_table_without_a_problem(tmp_path):
+    # The realm is the fixture's; the Era comes from the install folder alone.
+    live = tmp_path / "_classic_"
+    file = day_one_savedvariables(live)
+    install_addon(live)
+    config = config_for(tmp_path, Install(live, Era.LIVE))
+
+    [result] = run_import(config, [file])
+
+    assert result.error is None
+    written = read_recommendations(live)
+    assert "problem" not in written["brain"]
+    assert written["lastImported"] == {"Classic Beta PvP": {"Alliance": 1790000000}}
+    market = written["recommendations"]["Classic Beta PvP"]["Alliance"]
+    assert market["asOf"] == 1790000000
+    assert "2589" in [row["itemKey"] for row in market["holdings"]]
+
+
+def test_day_one_on_live_still_shows_a_craft_of_held_reagents_without_sales_as_quantity_0(
+    tmp_path,
+):
+    # One Scan has no Sale Events, so the held Linen Cloth has no market data and Bolt of
+    # Linen Cloth is a blocked Craft row (#75). Pins what a guildie sees today: whether to
+    # explain or fold these on day 1 is still open on #147, and this changes with it.
+    live = tmp_path / "_classic_"
+    file = day_one_savedvariables(live)
+    install_addon(live)
+
+    run_import(config_for(tmp_path, Install(live, Era.LIVE)), [file])
+
+    holdings = read_recommendations(live)["recommendations"]["Classic Beta PvP"]["Alliance"][
+        "holdings"
+    ]
+    crafts = [row for row in holdings if row.get("action") == "Craft"]
+    assert [(row["itemKey"], row["quantity"], row["blocked"]) for row in crafts] == [
+        ("2996", 0, {"reason": "noData", "itemKey": "2589"})
+    ]
 
 
 # --- Archive and rebuild (ADR-0005) ---
