@@ -2,7 +2,7 @@
 
 Next: #146 if the guildie is free before Oct 21; otherwise keep Scanning. After Oct 21: #147 slices 1-5 in order (slice 1 asserts on the Qty-0 Craft rows), then #179 and the v0.3.0 release, #155, #191/#192, #83's Beta read, #188.
 
-- Gotchas: same as later 144. To run a second Brain against the game, stop the normal `brain watch` first (it rewrites Recommendations.lua on every import), then restart it with `Start-Process cmd -ArgumentList '/k','Z:ibingzerothquant\scriptsrain-watch.bat'`.
+- Gotchas: same as later 144. To run a second Brain against the game, stop the normal `brain watch` first (it rewrites Recommendations.lua on every import), then restart it with `Start-Process cmd -ArgumentList '/k','Z:\vibing\azerothquant\scripts\brain-watch.bat'`.
 
 2026-10-18 (later 144): #147 grilled, spec on the issue (comment 6251948315), relabelled ready-for-agent. Key facts: a fresh Brain backfills only 14 days, so a guildie installing ~Nov 4 gets no Beta Prior (fix: anchor Beta backfill on the newest Beta Scan); vendor prices/item info are per Era (fix: Beta fallback at read time); no "not enough data" text exists (fix: young-Market line, threshold from a yardstick replay). Era never mixes (Market key includes Era). v0.3.0 ships #147 + #179 before ~Nov 2; guildies download it on Nov 4. The spec has a Nov 4 checklist.
 
