@@ -9,12 +9,12 @@ is lost, and the next cycle carries on from where this one got to.
 import logging
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass, field
 
 from brain.archive import Archive
-from brain.config import Config
+from brain.config import Config, Era
 from brain.history import (
     ImportReport,
     Market,
@@ -27,7 +27,7 @@ from brain.history import (
     scans_to_push,
     set_pool_cursor,
 )
-from brain.pool import Pool, PoolBusy, PoolEntry, PoolError, strip_scan
+from brain.pool import Pool, PoolBusy, PoolEntry, PoolError, PoolPage, strip_scan
 
 log = logging.getLogger(__name__)
 
@@ -114,34 +114,36 @@ def pull(
     conn: sqlite3.Connection,
     pool: Pool,
     config: Config,
-    now: int,
     since: int | None = None,
     catching_up: Callable[[], None] | None = None,
 ) -> SyncReport:
     """Download and import what other members added to the pool since the last pull, and
     take out what it rolled back.
 
-    The first pull reaches back pool_backfill_days from `now`; `since` (Unix time) reaches
-    back to then instead, going over the whole index again. `catching_up` is called once,
-    before the downloads, if a page has CATCHING_UP_SCANS or more to import.
+    The first pull reaches back pool_backfill_days from the newest Scan of each Era in the
+    pool, not from now: Beta stops when Live opens, and a guildie installing then still gets
+    its last days (#147). `since` (Unix time) reaches back to then instead, going over the
+    whole index again. `catching_up` is called once, before the downloads, if a page has
+    CATCHING_UP_SCANS or more to import.
     """
     report = SyncReport()
     cursor = pool_cursor(conn)
     start = cursor
-    oldest = None
-    if since is not None:
-        start, oldest = None, since
-    elif cursor is None:
-        oldest = now - config.pool_backfill_days * DAY_SECONDS
+    # Per Era, the oldest Scan to pull; an Era not in it has no limit.
+    since_by_era: dict[Era, int] = {}
     try:
-        while True:
-            page = pool.list_since(start)
+        if since is not None:
+            start = None
+            since_by_era = {era: since for era in Era}
+        elif cursor is None:
+            since_by_era = _backfill_since(pool, config.pool_backfill_days)
+        for page in _pages(pool, start):
             wanted = [
                 entry
                 for entry in sorted(page.entries, key=lambda e: e.requested_at)
                 if not (
                     entry.mine
-                    or (oldest is not None and entry.requested_at < oldest)
+                    or entry.requested_at < since_by_era.get(entry.era, 0)
                     or has_pooled_scan(
                         conn,
                         entry.id,
@@ -165,13 +167,31 @@ def pull(
             report.add(roll_back_pooled(conn, page.rolled_back, config))
             # A pull `since` a date starts over from the beginning; never move back.
             set_pool_cursor(conn, max(page.cursor, cursor or 0))
-            start = page.cursor
-            if not page.more:
-                return report
+        return report
     except PoolError as e:
         report.warn(f"Couldn't pull from the Scan Pool; will try again: {e}")
         report.failed = True
         return report
+
+
+def _backfill_since(pool: Pool, days: int) -> dict[Era, int]:
+    """For each Era in the pool, `days` before its newest Scan. Reads the whole index: the
+    newest Scan can be on its last page."""
+    newest: dict[Era, int] = {}
+    for page in _pages(pool, None):
+        for entry in page.entries:
+            newest[entry.era] = max(newest.get(entry.era, 0), entry.requested_at)
+    return {era: at - days * DAY_SECONDS for era, at in newest.items()}
+
+
+def _pages(pool: Pool, start: int | None) -> Iterator[PoolPage]:
+    """The pool's index page by page after `start`, or from the beginning for None."""
+    while True:
+        page = pool.list_since(start)
+        yield page
+        if not page.more:
+            return
+        start = page.cursor
 
 
 def _matches(raw: dict, entry: PoolEntry) -> bool:
@@ -265,7 +285,6 @@ class PoolSyncer:
                             conn,
                             self.pool,
                             self.config,
-                            now=int(self.now()),
                             catching_up=catching_up,
                         )
                     )

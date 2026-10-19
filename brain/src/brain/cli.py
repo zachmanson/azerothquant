@@ -1366,7 +1366,7 @@ def _pool(config: Config, command: str, since: date | None) -> int:
                 if since is not None:
                     day = datetime(since.year, since.month, since.day, tzinfo=UTC)
                     start = int(day.timestamp())
-                report = pull(conn, pool, config, now=int(time.time()), since=start)
+                report = pull(conn, pool, config, since=start)
                 if report.pulled or report.rolled_back:
                     _write_recommendations(conn, config)
     except (OSError, sqlite3.Error) as e:

@@ -15,7 +15,8 @@ from brain.pool_sync import pull, push
 
 T0 = 1_790_000_000
 MINUTE = 60
-DAY = 24 * 60 * MINUTE
+HOUR = 60 * MINUTE
+DAY = 24 * HOUR
 
 MARKET = Market(realm="Classic Beta PvP", faction="Alliance", era=Era.BETA)
 LINEN = "item:2589::::::::20:1490"
@@ -102,7 +103,7 @@ def test_a_rate_limited_market_is_pushed_next_cycle_without_a_warning(db, config
 def test_pulled_scans_are_archived_under_pool_and_imported(db, config, pool):
     pool.upload(Era.BETA, strip_scan(scan(T0, character="Friend")))
 
-    report = pull(db, pool, config, now=T0 + MINUTE)
+    report = pull(db, pool, config)
 
     assert report.pulled == 1
     assert scan_times(db, MARKET) == [T0]
@@ -114,7 +115,7 @@ def test_a_pull_of_both_eras_imports_each_into_its_own_market(db, config, pool):
     pool.upload(Era.BETA, strip_scan(scan(T0, character="Friend")))
     pool.upload(Era.LIVE, strip_scan(scan(T0 + MINUTE, character="Friend")))
 
-    report = pull(db, pool, config, now=T0 + DAY)
+    report = pull(db, pool, config)
 
     assert report.pulled == 2
     assert scan_times(db, MARKET) == [T0]
@@ -126,7 +127,7 @@ def test_a_pooled_body_dated_other_than_its_index_entry_is_left_out(db, config, 
     pool.upload(Era.BETA, strip_scan(scan(T0 + 30 * DAY)), header_overrides={"requestedAt": T0})
     import_scans(db, [scan(T0 - MINUTE)], Era.BETA, config)
 
-    report = pull(db, pool, config, now=T0 + MINUTE)
+    report = pull(db, pool, config)
     later = import_scans(db, [scan(T0 + 30 * MINUTE)], Era.BETA, config)
 
     assert report.pulled == 0 and report.rejected == 1 and report.warnings
@@ -141,7 +142,7 @@ def test_a_pooled_body_from_another_market_than_its_index_entry_is_left_out(
 ):
     pool.upload(Era.BETA, strip_scan(scan(T0)), header_overrides=headers)
 
-    report = pull(db, pool, config, now=T0 + MINUTE)
+    report = pull(db, pool, config)
 
     assert report.pulled == 0 and report.rejected == 1
     assert scan_times(db, MARKET) == []
@@ -152,7 +153,7 @@ def test_the_player_s_own_uploads_are_skipped_on_pull(db, config, pool):
     # Uploaded with this key, but not in this history: say, from a history since deleted.
     pool.upload(Era.BETA, strip_scan(scan(T0)), uploader="me")
 
-    report = pull(db, pool, config, now=T0 + MINUTE)
+    report = pull(db, pool, config)
 
     assert report.pulled == 0
     assert pool.fetched == []
@@ -162,40 +163,49 @@ def test_the_player_s_own_uploads_are_skipped_on_pull(db, config, pool):
 def test_a_pull_carries_on_from_where_the_last_one_ended(db, config, pool):
     for i in range(3):
         pool.upload(Era.BETA, strip_scan(scan(T0 + i * MINUTE)))
-    pull(db, pool, config, now=T0 + DAY)
+    pull(db, pool, config)
     pool.upload(Era.BETA, strip_scan(scan(T0 + 3 * MINUTE)))
     pool.listed_since.clear()
 
-    report = pull(db, pool, config, now=T0 + DAY)
+    report = pull(db, pool, config)
 
     assert report.pulled == 1
     assert pool.listed_since == [3]
     assert len(scan_times(db, MARKET)) == 4
 
 
-def test_the_first_pull_backfills_only_the_last_14_days(db, config, pool):
-    # The longest window the Decision Engine reads: an older Scan only makes the guildie's
-    # first pull longer (#159).
+def test_the_first_pull_backfills_14_days_back_from_each_era_s_newest_scan(db, config, pool):
+    # 14 days is the longest window the Decision Engine reads: an older Scan only makes the
+    # guildie's first pull longer (#159). Not back from now: Beta closes Oct 21 and guildies
+    # install on Nov 4, which would leave no Beta at all, so no Beta Prior (#147).
     now = T0 + 40 * DAY
-    pool.upload(Era.BETA, strip_scan(scan(now - 15 * DAY)))
-    pool.upload(Era.BETA, strip_scan(scan(now - 13 * DAY)))
+    beta_end = now - 14 * DAY
+    pool.upload(Era.BETA, strip_scan(scan(beta_end - 15 * DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(beta_end - 13 * DAY)))
+    pool.upload(Era.LIVE, strip_scan(scan(now - 16 * DAY)))
+    pool.upload(Era.LIVE, strip_scan(scan(now - DAY)))
+    # On the last page, so the whole index is read before anything is left out.
+    pool.upload(Era.BETA, strip_scan(scan(beta_end)))
 
-    report = pull(db, pool, config, now=now)
+    report = pull(db, pool, config)
 
-    assert report.pulled == 1
-    assert scan_times(db, MARKET) == [now - 13 * DAY]
+    assert report.pulled == 3
+    assert scan_times(db, MARKET) == [beta_end - 13 * DAY, beta_end]
+    assert scan_times(db, replace(MARKET, era=Era.LIVE)) == [now - DAY]
 
 
 def test_a_pull_since_a_date_goes_further_back(db, config, pool):
+    # A 1-day backfill, so the Scan it leaves out is still close enough to re-match.
+    config = replace(config, pool_backfill_days=1)
     now = T0 + 40 * DAY
-    pool.upload(Era.BETA, strip_scan(scan(now - 15 * DAY)))
-    pool.upload(Era.BETA, strip_scan(scan(now - 13 * DAY)))
-    pull(db, pool, config, now=now)
+    pool.upload(Era.BETA, strip_scan(scan(now - 30 * HOUR)))
+    pool.upload(Era.BETA, strip_scan(scan(now)))
+    pull(db, pool, config)
 
-    report = pull(db, pool, config, now=now, since=now - 20 * DAY)
+    report = pull(db, pool, config, since=now - 2 * DAY)
 
     assert report.pulled == 1
-    assert scan_times(db, MARKET) == [now - 15 * DAY, now - 13 * DAY]
+    assert scan_times(db, MARKET) == [now - 30 * HOUR, now]
 
 
 def test_a_rolled_back_pooled_scan_leaves_the_archive_and_the_history_is_rematched(
@@ -205,10 +215,10 @@ def test_a_rolled_back_pooled_scan_leaves_the_archive_and_the_history_is_rematch
         db, [scan(T0, row(quantity=5)), scan(T0 + 20 * MINUTE, row(quantity=3))], Era.BETA, config
     )
     bad = pool.upload(Era.BETA, strip_scan(scan(T0 + 10 * MINUTE, row(quantity=1))))
-    pull(db, pool, config, now=T0 + DAY)
+    pull(db, pool, config)
     pool.roll_back(bad)
 
-    report = pull(db, pool, config, now=T0 + DAY)
+    report = pull(db, pool, config)
 
     assert report.rolled_back == 1
     assert not pool_file(config, T0 + 10 * MINUTE).exists()
@@ -232,7 +242,7 @@ def test_a_rollback_never_deletes_an_own_scan_but_pushes_it_again(db, config, po
     [pushed_id] = pool.scans
     pool.roll_back(pushed_id)
 
-    pull(db, pool, config, now=T0 + DAY)
+    pull(db, pool, config)
     again = push(db, pool, config)
 
     assert scan_times(db, MARKET) == [T0]
@@ -241,10 +251,10 @@ def test_a_rollback_never_deletes_an_own_scan_but_pushes_it_again(db, config, po
 
 def test_rolling_back_a_scan_this_brain_never_pulled_is_a_no_op(db, config, pool):
     import_scans(db, [scan(T0, row(quantity=5))], Era.BETA, config)
-    pull(db, pool, config, now=T0 + DAY)
+    pull(db, pool, config)
     pool.roll_back("never-seen")
 
-    report = pull(db, pool, config, now=T0 + DAY)
+    report = pull(db, pool, config)
 
     assert report.rolled_back == 0
     assert not report.failed
@@ -257,9 +267,9 @@ def test_a_network_error_warns_and_leaves_the_history_as_it_was(db, config, pool
     pool.upload(Era.BETA, strip_scan(scan(T0 + MINUTE)))
     pool.fail = True
 
-    report = pull(db, pool, config, now=T0 + DAY)
+    report = pull(db, pool, config)
 
     assert report.warnings
     assert scan_times(db, MARKET) == [T0]
     pool.fail = False
-    assert pull(db, pool, config, now=T0 + DAY).pulled == 1
+    assert pull(db, pool, config).pulled == 1

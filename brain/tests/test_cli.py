@@ -297,7 +297,8 @@ def test_watch_pulls_the_pool_before_an_import_and_pushes_right_after(tmp_path):
     watch_step(config, watcher, pool_sync=syncer)  # sees the file for the first time: sync
     watch_step(config, watcher, pool_sync=syncer)  # it has settled: pull, import, push
 
-    assert pool.calls == ["list", "fetch", "list", "push", "push"]
+    # The first pull reads the index twice: once for each Era's newest Scan (#147).
+    assert pool.calls == ["list", "list", "fetch", "list", "push", "push"]
     with closing(open_history(config.history_path)) as conn:
         assert scan_times(conn, MARKET) == [1790000000, FRIEND_SCAN_AT, 1790001200]
 
@@ -338,8 +339,9 @@ def test_watch_pulls_every_pool_sync_minutes_and_retries_a_failed_push(tmp_path)
     assert pool.calls == []
     now[0] = config.pool_sync_seconds
     watch_step(config, watcher, lambda: now[0], pool_sync=syncer)
-    # The two just pushed are in the index too, so it takes two pages.
-    assert pool.calls == ["push", "push", "list", "fetch", "list"]
+    # The two just pushed are in the index too, so it takes two pages, and the first pull
+    # reads them twice: once for each Era's newest Scan (#147).
+    assert pool.calls == ["push", "push", "list", "list", "list", "fetch", "list"]
 
 
 def test_watch_imports_even_when_the_pool_is_down(tmp_path, caplog):
@@ -929,7 +931,7 @@ def test_rebuild_keeps_what_the_scan_pool_already_has(tmp_path):
     pool = FakePool()
     with closing(open_history(config.history_path)) as conn:
         pushed = push(conn, pool, config).pushed
-        pull(conn, pool, config, now=1_790_000_000)
+        pull(conn, pool, config)
 
     run_rebuild(config)
 
@@ -937,7 +939,7 @@ def test_rebuild_keeps_what_the_scan_pool_already_has(tmp_path):
     with closing(open_history(config.history_path)) as conn:
         assert pushed == 2
         assert push(conn, pool, config).pushed == 0
-        pull(conn, pool, config, now=1_790_000_000)
+        pull(conn, pool, config)
     assert pool.listed_since == [2]
 
 
