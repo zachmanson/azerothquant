@@ -914,3 +914,23 @@ def test_a_market_without_risk_caps_has_no_room_or_loss_cap():
 
     lua_m = data["recommendations"]["Quel'Thalas"]["Horde"]
     assert "room" not in lua_m and "lossCap" not in lua_m
+
+
+def test_a_live_market_is_young_until_its_tenth_scan():
+    live = Market("Quel'Thalas", "Horde", Era.LIVE)
+
+    def young(scan_count: int) -> bool | None:
+        m = MarketRecommendations(live, 1790000000, 0, scan_count=scan_count)
+        data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+        return data["recommendations"]["Quel'Thalas"]["Horde"].get("young")
+
+    assert young(9) is True
+    assert young(10) is None
+
+
+def test_a_beta_market_is_never_young():
+    m = MarketRecommendations(MARKET, 1790000000, 0, scan_count=1)
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    assert "young" not in data["recommendations"]["Quel'Thalas"]["Horde"]

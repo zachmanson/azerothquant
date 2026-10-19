@@ -605,6 +605,9 @@ class MarketRecommendations:
     # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
+    # How many Scans the Market has, own and Pooled, for the Young Market flag (#147).
+    # Only `recommend` fills it: a replay or Backtest has no use for it.
+    scan_count: int = 0
     holdings: list[Row] = field(default_factory=list)
     # Options, each sized as if it were the only buy, most profit first (#86).
     shopping_list: list[Row] = field(default_factory=list)
@@ -657,17 +660,16 @@ def recommend(
     for market in character_markets(conn):
         times = scan_times(conn, market)
         if times:
-            result.append(
-                recommend_market(
-                    conn,
-                    config,
-                    market,
-                    predictions,
-                    times[-1],
-                    fair_value_cache=fair_value_cache,
-                    why_not=why_not,
-                )
+            m = recommend_market(
+                conn,
+                config,
+                market,
+                predictions,
+                times[-1],
+                fair_value_cache=fair_value_cache,
+                why_not=why_not,
             )
+            result.append(replace(m, scan_count=len(times)))
     return result
 
 

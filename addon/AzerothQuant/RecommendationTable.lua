@@ -39,9 +39,14 @@ end
 local function header(entry, now, budget, spent)
   local stale = budget ~= entry.budget and " (Reload to re-size)" or ""
   local bought = spent > 0 and ", Bought " .. Money.format(spent) or ""
+  -- A young Live Market (#147) says so in plain words instead of its window hours.
+  local window = string.format(", Observation Window %.1f h", entry.windowHours)
+  if entry.young then
+    window = ". Live just started: the table fills in over the first few Scans."
+      .. (entry.beta and " Beta prices are shown for reference." or "")
+  end
   return {
-    "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf)
-      .. string.format(", Observation Window %.1f h", entry.windowHours),
+    "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf) .. window,
     "Gold " .. Money.format(entry.gold)
       .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale .. bought
       .. ", Prediction buys " .. Money.format(entry.predictionCost),

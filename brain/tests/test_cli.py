@@ -720,12 +720,23 @@ def test_day_one_on_live_gives_a_fresh_brain_a_table_without_a_problem(tmp_path)
     assert "2589" in [row["itemKey"] for row in market["holdings"]]
 
 
+def test_day_one_on_live_flags_the_market_as_young(tmp_path):
+    live = tmp_path / "_classic_"
+    file = day_one_savedvariables(live)
+    install_addon(live)
+
+    run_import(config_for(tmp_path, Install(live, Era.LIVE)), [file])
+
+    market = read_recommendations(live)["recommendations"]["Classic Beta PvP"]["Alliance"]
+    assert market["young"] is True
+
+
 def test_day_one_on_live_still_shows_a_craft_of_held_reagents_without_sales_as_quantity_0(
     tmp_path,
 ):
     # One Scan has no Sale Events, so the held Linen Cloth has no market data and Bolt of
-    # Linen Cloth is a blocked Craft row (#75). Pins what a guildie sees today: whether to
-    # explain or fold these on day 1 is still open on #147, and this changes with it.
+    # Linen Cloth is a blocked Craft row (#75). Kept on day 1: the young-Market line says the
+    # table is still filling in, and a replay of Beta had none left by the third Scan (#147).
     live = tmp_path / "_classic_"
     file = day_one_savedvariables(live)
     install_addon(live)

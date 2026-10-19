@@ -26,6 +26,10 @@ _Avoid_: season, phase
 One Auction House in one Era, identified by realm, faction (Alliance, Horde or Neutral) and Era. Every price and quantity only means something within its own Market.
 _Avoid_: server, AH (when you mean the data scope)
 
+**Young Market**:
+A Live Market with fewer than 10 Scans, own and Pooled. Its table is still filling in, so the Recommendation Table's header says so in plain words in place of the Observation Window hours. 10 is where the Holdings had settled when Beta's first Scans were replayed into a fresh history (#147).
+_Avoid_: new Market, empty Market (it has rows, just fewer)
+
 **Beta Prior**:
 A Beta price shown next to each Recommendation Table row early in Live, as a reference the player reads and never a decision: the Decision Engine doesn't use it, though it may use the Beta Sell Rate. It is the raw price, not scaled to Live: the median Sale Event price over Beta's last 14 days where there are at least 3 Sale Events, else the median of the daily Fair Values over Beta's last 7 days, marked as listed, not sold. It comes from the Beta Market of the same faction, or else the Alliance one, and the row's side pane names that Market and its Beta Sell Rate. It shows for `beta_column_days` (14) from the Live Market's first Scan, then goes away (#90).
 _Avoid_: Beta price as a prior or input (it's display only)

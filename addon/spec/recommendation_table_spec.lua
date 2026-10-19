@@ -364,6 +364,21 @@ describe("RecommendationTable.build", function()
     assert.are.equal(2, #view.header)
   end)
 
+  it("says a young Live Market's table fills in over the first Scans, in place of the window hours", function()
+    local view = build(entry({ young = true }), AS_OF + 3 * 60)
+
+    assert.matches("^as of %d%d:%d%d, 3 min ago%. Live just started: the table fills in over the first few Scans%.$",
+      view.header[1])
+  end)
+
+  it("adds that Beta prices are shown for reference when a young Market has the Beta column", function()
+    local beta = { realm = "Classic Beta PvP", faction = "Alliance", prices = {} }
+    local view = build(entry({ young = true, beta = beta }), AS_OF + 3 * 60)
+
+    assert.matches(" the table fills in over the first few Scans%. Beta prices are shown for reference%.$",
+      view.header[1])
+  end)
+
   it("heads the table with the Budget the player set, and asks for a Reload when the Brain sized for another", function()
     assert.are.equal(
       "Gold 17g 54s 71c, Budget 5g, Prediction buys 0c",

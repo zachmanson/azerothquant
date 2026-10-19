@@ -30,7 +30,7 @@ from pathlib import Path
 
 from brain import __version__
 from brain.beta_prior import BetaPrior
-from brain.config import DEFAULT_POST_DURATION_HOURS, Install
+from brain.config import DEFAULT_POST_DURATION_HOURS, Era, Install
 from brain.disenchant import DisenchantTable, Group, load_table
 from brain.history import (
     Market,
@@ -52,6 +52,9 @@ from brain.recommend import (
 )
 
 FILE_NAME = "Recommendations.lua"
+# A Live Market with fewer Scans than this is young: the Addon says the table is still
+# filling in. By 10 Scans the Holdings had settled in a replay of Beta's first Scans (#147).
+YOUNG_MARKET_SCANS = 10
 GLOBAL_NAME = "AzerothQuantRecommendations"
 
 _HEADER = (
@@ -109,6 +112,7 @@ _HEADER = (
     "-- equipLocs, each a set.\n"
     "-- postDurationHours is how long every post lasts (2, 8 or 24): the Brain charges\n"
     "-- Deposits for that long, so the Addon's Post button posts for it too.\n"
+    "-- young = true while a Live Market has too few Scans for a full table.\n"
     "-- brain is the Brain's status: { version, problem (a line for the player, nil when\n"
     "-- all is well) }. The shipped stub has none, which tells the Addon the Brain has\n"
     "-- never run.\n"
@@ -203,6 +207,8 @@ def _recommendations(
             by_realm[m.market.realm][m.market.faction]["room"] = math.floor(m.room)
         if m.loss_cap is not None:
             by_realm[m.market.realm][m.market.faction]["lossCap"] = math.floor(m.loss_cap)
+        if m.market.era is Era.LIVE and m.scan_count < YOUNG_MARKET_SCANS:
+            by_realm[m.market.realm][m.market.faction]["young"] = True
         if m.market in beta_priors:
             by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
     return by_realm
