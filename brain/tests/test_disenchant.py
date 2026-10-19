@@ -149,6 +149,17 @@ def test_a_character_reads_item_info_is_imported_too(db):
     assert item_info(db, Era.BETA) == {9999: ItemInfo(18, UNCOMMON, ARMOR, "INVTYPE_CHEST")}
 
 
+def test_live_falls_back_to_betas_item_info_until_it_has_its_own(db):
+    # Without item info a fresh Live Brain can't tell what a green disenchants into.
+    import_scans(db, [scan(T0, {7: info(18), 8: info(30)})], Era.BETA, CONFIG)
+    import_scans(db, [scan(T0, {7: info(20)})], Era.LIVE, CONFIG)
+
+    assert item_info(db, Era.LIVE) == {
+        7: ItemInfo(20, UNCOMMON, ARMOR, "INVTYPE_CHEST"),
+        8: ItemInfo(30, UNCOMMON, ARMOR, "INVTYPE_CHEST"),
+    }
+
+
 def read(character, at, professions):
     """A Character Read whose profession windows are {professionID: skillLevel}."""
     return {
@@ -825,3 +836,9 @@ def test_a_way_out_asked_again_in_a_pass_is_the_one_worked_out_afresh(db, monkey
     # One with 3 Dust held ahead has 3 fewer units of room: it doesn't share the answers.
     assert expected_ahead.units == expected[DUST_KEY, True].units - 3
     assert _way_out(DUST_KEY, ahead, config, sources) == expected_ahead
+
+
+def test_beta_never_falls_back_to_lives_item_info(db):
+    import_scans(db, [scan(T0, {7: info(20)})], Era.LIVE, CONFIG)
+
+    assert item_info(db, Era.BETA) == {}

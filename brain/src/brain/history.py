@@ -1960,19 +1960,35 @@ def character_markets(conn: sqlite3.Connection) -> dict[Market, list[str]]:
     return result
 
 
+def _eras_to_read(era: Era) -> tuple[Era, ...]:
+    """The Eras a Vendor Price or item info is read from, fallback first so the Era's own wins.
+    Live falls back to Beta: a fresh Live Brain has seen almost no items yet."""
+    return (Era.BETA, Era.LIVE) if era is Era.LIVE else (era,)
+
+
 def vendor_prices(conn: sqlite3.Connection, era: Era) -> dict[int, int]:
-    """Copper a vendor pays for one unit, by itemID, as last seen in the Era."""
-    rows = conn.execute("SELECT item_id, price FROM vendor_price WHERE era = ?", (era.value,))
-    return dict(rows)
+    """Copper a vendor pays for one unit, by itemID, as last seen in the Era (or Beta, for an
+    item Live hasn't seen yet)."""
+    result: dict[int, int] = {}
+    for source in _eras_to_read(era):
+        rows = conn.execute(
+            "SELECT item_id, price FROM vendor_price WHERE era = ?", (source.value,)
+        )
+        result.update(rows)
+    return result
 
 
 def item_info(conn: sqlite3.Connection, era: Era) -> dict[int, ItemInfo]:
-    """What the client said about each itemID, as last seen in the Era."""
-    rows = conn.execute(
-        "SELECT item_id, item_level, quality, class_id, equip_loc FROM item_info WHERE era = ?",
-        (era.value,),
-    )
-    return {item_id: ItemInfo(*fields) for item_id, *fields in rows}
+    """What the client said about each itemID, as last seen in the Era (or Beta, for an item
+    Live hasn't seen yet)."""
+    result: dict[int, ItemInfo] = {}
+    for source in _eras_to_read(era):
+        rows = conn.execute(
+            "SELECT item_id, item_level, quality, class_id, equip_loc FROM item_info WHERE era = ?",
+            (source.value,),
+        )
+        result.update({item_id: ItemInfo(*fields) for item_id, *fields in rows})
+    return result
 
 
 def disenchant_results(conn: sqlite3.Connection, era: Era) -> list[DisenchantResult]:

@@ -83,3 +83,17 @@ def test_each_era_keeps_its_own_vendor_prices(db):
 
     assert vendor_prices(db, Era.BETA) == {2589: 10}
     assert vendor_prices(db, Era.LIVE) == {2589: 13}
+
+
+def test_live_falls_back_to_betas_vendor_price_until_it_has_its_own(db):
+    # A fresh Live Brain has seen no vendor prices yet, so holdings would read "no data".
+    import_scans(db, [scan(T0, {2589: 10, 6948: 0})], Era.BETA, CONFIG)
+    import_scans(db, [scan(T0, {2589: 13})], Era.LIVE, CONFIG)
+
+    assert vendor_prices(db, Era.LIVE) == {2589: 13, 6948: 0}
+
+
+def test_beta_never_falls_back_to_lives_vendor_prices(db):
+    import_scans(db, [scan(T0, {2589: 13})], Era.LIVE, CONFIG)
+
+    assert vendor_prices(db, Era.BETA) == {}
