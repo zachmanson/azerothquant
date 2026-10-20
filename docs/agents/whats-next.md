@@ -1,6 +1,6 @@
 2026-10-19 (later 150): #147 slice 5 DONE (commit f9111d7). Setup guide names only `_classic_`. New test in test_installer.py: `update` installs the Addon into a `_classic_` that only has `WTF` (characterization: already worked, mutation-checked). Review gap fixed in the guide: a never-launched `_classic_` (no WTF/Interface) is skipped and setup says "Couldn't find the game", so the guide now says to start a never-played WoW version once before installing or updating. Nov 4 guildie step = launch Live once, then run the new exe. Posted on #147. All #147 code slices are done; #147 stays open for its Nov 4 checklist.
 
-Next: #179 (tell guildies when a newer Brain is out), then cut v0.3.0 (bump Brain `__version__` + Addon .toc, tag, push; release job fails if tag and version differ) before ~Nov 2. Then #155, #191/#192, #83's Beta read, #188, #193.
+Next (user's call 2026-10-19: no guildie handoff on Beta; guildie work is in the back pocket until they say it's ready, so #146, #179 and the v0.3.0 guildie release are parked): #155, then #191/#192 (triage first), #83's Beta read, #188, #193.
 
 - Gotchas: same as later 149. Edit tool beats Python heredoc patches on this repo's CRLF files (two anchors missed this session).
 
