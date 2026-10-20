@@ -1,6 +1,6 @@
 2026-10-20 (later 152): #188 grill turned into #194, both PARKED until after Beta (user's call: low on credits, only pre-Beta-end work now). The user wants back the few-unit, high-margin flips (gear, BoEs) that vanished after the #170 caps. Cause: Stake 17.47g, so the 3% Unsold Loss cap is 52s. Named 2g+ rows went from 20-29 a Scan (up to 30g) through 10-11 to 4-7 (max 3.36g) from 10-16. #194 has the evidence, a spec (bags in Stake, Flip to Sell buys no more than it's seen sell, 1g floor variant) and a park comment: part 1 was built and backed out, because live it made the Stake 47.68g but the room 0 (the hides are 24.88g at Best Exit Value, 63% of the Stake), and the user doubts counting held stock at all. #188 has its grill notes (held units still post at the cheapest-undercut; the Hide check as worded can't pass). Nothing committed but this note.
 
-Next: #83's Beta read (due Oct 21, the one pre-Beta-end item), then #191/#192 (triage first), #193. #194 and #188 after Beta. Guildie work stays parked.
+Next: #83's Beta read (due Oct 21, the one pre-Beta-end item), then #191/#192 (triage first), #193. #194, #195 (cap grows with strong sale evidence) and #188 after Beta. Guildie work stays parked.
 
 - Gotchas: same as later 151. The Backtest grader catches only 57% of real Sold mails, so it likely underrates single-unit gear (Lil Timmy's Peashooter: -22g in the Backtest, +3.8g real); worth an issue when #194 resumes. ADR-0034's Backtest is the evidence any cap change must beat (uncapped -49.6g vs 3% +44.7g at the vendor mark).
 
