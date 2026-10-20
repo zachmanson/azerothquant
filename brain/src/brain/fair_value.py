@@ -6,7 +6,9 @@ ask what the Item Key is worth once the units it buys are gone (#23).
 
 import math
 import sqlite3
-from collections.abc import Callable
+from array import array
+from bisect import bisect_left
+from collections.abc import Callable, Mapping
 from statistics import median
 
 from brain.config import Config
@@ -16,7 +18,8 @@ from brain.history import (
     ScanStamp,
     keep_fair_values,
     kept_fair_values,
-    listings,
+    listings_by_id,
+    listings_last_seen_in,
     scan_stamps,
     scan_times,
     supply_at,
@@ -83,8 +86,11 @@ class FairValueCache:
 
     It also keeps what's worked out from a Market's Scans alone (`scan_only`): its
     `listings`, Sell Rates, supply and others' lows (#143). A reload with no new Scan
-    reuses them; any change to the Market's Scans drops them all. `this_pass` holds
-    anything else worked out from the Listings, for the rest of the pass only.
+    reuses them; any change to the Market's Scans drops them all. When the change is only
+    Scans newer than every one seen before, the pass can still see what was dropped
+    (`before_new_scans`), to bring it up to date rather than work it out afresh (#155).
+    `this_pass` holds anything else worked out from the Listings, for the rest of the
+    pass only.
 
     And it keeps what Sell Rate takes from each Observation Window's two Scans
     (`kept_for_window`), so a new Scan only adds its own window to the tally (#142).
@@ -99,6 +105,9 @@ class FairValueCache:
         self._this_pass: dict[_ScanKey, dict[str, float]] = {}
         self._scan_only_last_pass: dict[tuple[Market, tuple], object] = {}
         self._scan_only_this_pass: dict[tuple[Market, tuple], object] = {}
+        # This pass's, by Market: what `scan_only` dropped for Scans newer than every one
+        # seen before, and those Scans' stamps.
+        self._before_new_scans: dict[Market, tuple[dict[tuple, object], list[ScanStamp]]] = {}
         # Keyed by (the type of what's kept, Market).
         self.this_pass: dict[tuple[type, Market], object] = {}
         self._windows_last_pass: dict[_WindowKey, object] = {}
@@ -114,6 +123,7 @@ class FairValueCache:
     def start_pass(self) -> None:
         self._last_pass, self._this_pass = self._this_pass, {}
         self._scan_only_last_pass, self._scan_only_this_pass = self._scan_only_this_pass, {}
+        self._before_new_scans = {}
         self.this_pass = {}
         self._windows_last_pass, self._windows_this_pass = self._windows_this_pass, {}
         self._checked = set()
@@ -127,15 +137,19 @@ class FairValueCache:
         now = scan_stamps(conn, market)
         last = self._stamps.get(market, [])
         self._stamps[market] = now
+        dropped = {}
         if now != last:
             for kept in (self._scan_only_last_pass, self._scan_only_this_pass):
                 for key in [k for k in kept if k[0] == market]:
-                    del kept[key]
+                    dropped[key[1]] = kept.pop(key)
         unchanged = 0
         while unchanged < min(len(last), len(now)) and last[unchanged] == now[unchanged]:
             unchanged += 1
         if unchanged == len(last):
-            return  # only Scans after every one seen before, if any
+            # Only Scans after every one seen before, if any.
+            if dropped:
+                self._before_new_scans[market] = dropped, now[unchanged:]
+            return
         first_new = now[unchanged][0] if unchanged < len(now) else math.inf
         stale_from = min(first_new, last[unchanged][0])
         for kept in (self._last_pass, self._this_pass):
@@ -161,9 +175,27 @@ class FairValueCache:
                 self._scan_only_this_pass[key] = work()
         return self._scan_only_this_pass[key]  # type: ignore[return-value]
 
+    def before_new_scans(
+        self, conn: sqlite3.Connection, market: Market
+    ) -> tuple[Mapping[tuple, object], list[ScanStamp]] | None:
+        """What `scan_only` kept for the Market until this pass found new Scans in it, by
+        `what`, and those Scans' stamps, oldest first, when they are all newer than every
+        Scan it had seen (#155). None otherwise, or with nothing kept."""
+        self._check_scans(conn, market)
+        return self._before_new_scans.get(market)
+
     def listings(self, conn: sqlite3.Connection, market: Market) -> list[Listing]:
-        """The Market's `listings`, loaded again only once its Scans change."""
-        return self.scan_only(conn, market, ("listings",), lambda: listings(conn, market))
+        """The Market's `listings`, loaded again only once its Scans change, and then only
+        those the new Scans saw when they're all newer than the rest (#155)."""
+
+        def work() -> tuple[array, list[Listing]]:
+            before, new = self.before_new_scans(conn, market) or ({}, [])
+            if ("listings",) not in before:
+                return listings_by_id(conn, market)
+            ids, seen = before[("listings",)]  # type: ignore[misc]
+            return _with_changes(ids, seen, *listings_last_seen_in(conn, [s[1] for s in new]))
+
+        return self.scan_only(conn, market, ("listings",), work)[1]
 
     def fair_values(
         self, conn: sqlite3.Connection, market: Market, config: Config, at: int
@@ -214,6 +246,22 @@ class FairValueCache:
         self, market: Market, start: int, end: int, config_fields: tuple, value: object
     ) -> None:
         self._windows_this_pass[(market, start, end, config_fields)] = value
+
+
+def _with_changes(
+    ids: array, seen: list[Listing], changed_ids: array, changed: list[Listing]
+) -> tuple[array, list[Listing]]:
+    """`seen`, with IDs `ids`, with each of `changed` (IDs `changed_ids`, ascending) in
+    place of the Listing with its ID, or after them all if new."""
+    ids, seen = array("q", ids), list(seen)
+    for id_, listing in zip(changed_ids, changed, strict=True):
+        at = bisect_left(ids, id_)
+        if at < len(ids) and ids[at] == id_:
+            seen[at] = listing
+        else:
+            ids.append(id_)
+            seen.append(listing)
+    return ids, seen
 
 
 _ScanKey = tuple[Market, int, float, float]

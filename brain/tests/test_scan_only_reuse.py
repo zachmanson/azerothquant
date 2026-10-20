@@ -4,10 +4,11 @@ kept."""
 
 import dataclasses
 import random
+from functools import partial
 
 import pytest
 from test_character_reads import character_read, item, profession, recipe
-from test_rematch import CONFIG, MINUTE, T0, row, scan, simulated_market
+from test_rematch import CONFIG, MARKET, MINUTE, T0, row, scan, simulated_market
 
 from brain.config import Era
 from brain.fair_value import FairValueCache
@@ -16,10 +17,12 @@ from brain.history import (
     import_character_reads,
     import_pooled_scans,
     import_scans,
+    listings,
     open_history,
     roll_back_pooled,
+    scan_times,
 )
-from brain.recommend import recommend
+from brain.recommend import _others_lows, _others_lows_as_of, recommend
 
 LINEN = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
 WOOL = "|cffffffff|Hitem:2592::::::::20:1490:::::::::|h[Wool Cloth]|h|r"
@@ -106,6 +109,50 @@ def test_a_kept_pass_matches_a_fresh_one_as_scans_and_character_reads_arrive(see
             db, [read(at, money=rng.randint(0, 50_000), bags=bags)], Era.BETA, config
         )
         assert_kept_pass_matches_a_fresh_one(db, config, cache)
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_kept_listings_match_fresh_ones_as_scans_arrive_one_or_several_at_a_time(seed, db, config):
+    # #155: a new Scan reloads only the Listings seen in it. In `simulated_market` they
+    # sell down, lose time-left and turn own (a Pooled Scan showed them as others').
+    rng = random.Random(seed)
+    cache = FairValueCache()
+    import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=12)
+    while scans:
+        take = rng.randint(1, 3)
+        import_scans(db, scans[:take], Era.BETA, config)
+        scans = scans[take:]
+        assert_kept_pass_matches_a_fresh_one(db, config, cache)
+        assert cache.listings(db, MARKET) == listings(db, MARKET)
+
+
+def test_kept_others_lows_match_fresh_ones_as_scans_arrive_and_listings_turn_own(db, config):
+    # #155: a new Scan's others' lows are added to the kept ones; an Item Key with a
+    # Listing that turned own (no longer others' in any Scan) is worked out afresh.
+    cache = FairValueCache()
+    brought_up_to_date = 0
+    for seed in range(10):
+        rng = random.Random(seed)
+        market = dataclasses.replace(MARKET, realm=f"Realm {seed}")
+        scans = [{**s, "realm": market.realm} for s in simulated_market(rng, 12)]
+        while scans:
+            take = rng.randint(1, 3)
+            import_scans(db, scans[:take], Era.BETA, config)
+            scans = scans[take:]
+            cache.start_pass()
+            brought_up_to_date += cache.before_new_scans(db, market) is not None
+            at = scan_times(db, market)[-1]
+            seen = cache.listings(db, market)
+            kept = cache.scan_only(
+                db,
+                market,
+                ("others_lows", at),
+                partial(_others_lows_as_of, db, market, at, seen, cache),
+            )
+            assert kept == _others_lows(listings(db, market), scan_times(db, market))
+    assert brought_up_to_date > 30
+    assert db.execute("SELECT COUNT(*) FROM turned_own").fetchone()[0] > 0
 
 
 @pytest.mark.parametrize("seed", range(10))

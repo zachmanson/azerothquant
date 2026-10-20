@@ -171,6 +171,28 @@ def test_the_sell_rate_at_a_price_counts_only_the_sale_events_at_or_above_it():
     assert rate.at_or_above(151).sale_events == 0
 
 
+def test_the_sell_rate_at_a_price_keeps_its_sale_events_in_the_order_they_were_seen():
+    # #155: the cut is worked out from the prices sorted, but the Sale Events it keeps
+    # stay in their own order, at any price between two of them, and on every call.
+    rate = SellRate(
+        units_per_day=10 / 10 * 24,
+        sale_events=4,
+        window_hours=10,
+        reposts=0,
+        coincidences=0,
+        sale_units=10,
+        sale_prices=((150, 3, T0), (99, 1, T0 + 1), (120, 4, T0 + 2), (100, 2, T0 + 3)),
+    )
+
+    for price in (99.5, 100, 100, 99.5):
+        cut = rate.at_or_above(price)
+        assert cut.sale_prices == ((150, 3, T0), (120, 4, T0 + 2), (100, 2, T0 + 3))
+        assert (cut.sale_events, cut.sale_units, cut.units_per_day) == (3, 9, 9 / 10 * 24)
+    assert rate.at_or_above(120.5).sale_prices == ((150, 3, T0),)
+    assert rate.at_or_above(0).sale_prices == rate.sale_prices
+    assert rate.at_or_above(150).sale_units == 3
+
+
 # --- Cut at the Scan the cheapest Listings showed up in (#132) ---
 
 CUTOFF = T0 + 10 * HOUR

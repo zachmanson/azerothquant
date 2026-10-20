@@ -2,9 +2,11 @@
 only (ADR-0004), gaps of up to 12 h by default (ADR-0035)."""
 
 import sqlite3
+from bisect import bisect_left
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from functools import cached_property
 from statistics import median
 
 from brain.config import Config
@@ -43,15 +45,30 @@ class SellRate:
         """This Sell Rate from only the Sale Events priced at or above `price` (#107): the
         demand a unit posted at `price` can count on. The window hours and the typical
         sale size stay the Market's and the Item Key's."""
-        kept = tuple(sale for sale in self.sale_prices if sale[0] >= price)
-        units = sum(n for _, n, _ in kept)
-        return replace(
-            self,
-            units_per_day=units / self.window_hours * 24,
-            sale_events=len(kept),
-            sale_units=units,
-            sale_prices=kept,
-        )
+        # Hot in Flips and the ways out (#155). Which Sale Events are kept turns only on
+        # how many are priced under `price`, so each cut is worked out once.
+        under = bisect_left(self._ascending_prices, price)
+        if under not in self._cuts:
+            kept = tuple(sale for sale in self.sale_prices if sale[0] >= price)
+            units = sum(n for _, n, _ in kept)
+            self._cuts[under] = replace(
+                self,
+                units_per_day=units / self.window_hours * 24,
+                sale_events=len(kept),
+                sale_units=units,
+                sale_prices=kept,
+            )
+        return self._cuts[under]
+
+    @cached_property
+    def _ascending_prices(self) -> list[int]:
+        return sorted(price for price, _, _ in self.sale_prices)
+
+    @cached_property
+    def _cuts(self) -> dict[int, "SellRate"]:
+        """`at_or_above`'s results so far, by how many Sale Events each leaves out. A memo
+        of this instance's own, so it's not a field: equality and `replace` don't see it."""
+        return {}
 
     def since_cheap(self, cutoff: int | None) -> "SellRate":
         """This Sell Rate from only the Sale Events and Observation Window hours after

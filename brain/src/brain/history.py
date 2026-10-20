@@ -17,6 +17,8 @@ import math
 import os
 import sqlite3
 import statistics
+from array import array
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1668,17 +1670,54 @@ def _market_params(market: Market) -> tuple[str, str, str]:
 
 def listings(conn: sqlite3.Connection, market: Market) -> list[Listing]:
     """Every Listing ever seen in the Market, oldest first."""
+    return listings_by_id(conn, market)[1]
+
+
+def listings_by_id(conn: sqlite3.Connection, market: Market) -> tuple[array, list[Listing]]:
+    """`listings`, and each one's ID in the history (ascending) at the same place."""
+    return _listings_where(conn, _MARKET_FILTER, _market_params(market))
+
+
+def listings_last_seen_in(
+    conn: sqlite3.Connection, scan_ids: Sequence[int]
+) -> tuple[array, list[Listing]]:
+    """The Listings last seen in any of the Scans `scan_ids`, as `listings_by_id`. After a
+    Market's newest Scans are imported, these are the only Listings they changed or added
+    (#155): each Scan is matched only against the one before it."""
+    marks = ", ".join("?" * len(scan_ids))
+    return _listings_where(conn, f"l.last_seen_scan_id IN ({marks})", tuple(scan_ids))
+
+
+def item_keys_turned_own_in(conn: sqlite3.Connection, scan_ids: Sequence[int]) -> set[str]:
+    """The Item Keys with a Listing first seen as another player's that turned own in any
+    of the Scans `scan_ids`."""
+    marks = ", ".join("?" * len(scan_ids))
     rows = conn.execute(
-        "SELECT l.item_key, l.unit_buyout, l.own, l.quantity, l.time_left,"
+        "SELECT DISTINCT l.item_key FROM turned_own t JOIN listing l ON l.id = t.listing_id"
+        f" WHERE t.scan_id IN ({marks})",
+        tuple(scan_ids),
+    )
+    return {item_key for (item_key,) in rows}
+
+
+def _listings_where(
+    conn: sqlite3.Connection, where: str, params: tuple
+) -> tuple[array, list[Listing]]:
+    rows = conn.execute(
+        "SELECT l.id, l.item_key, l.unit_buyout, l.own, l.quantity, l.time_left,"
         " first.requested_at, last.requested_at, l.item_name"
         " FROM listing l"
         " JOIN market m ON m.id = l.market_id"
         " JOIN scan first ON first.id = l.first_seen_scan_id"
         " JOIN scan last ON last.id = l.last_seen_scan_id"
-        f" WHERE {_MARKET_FILTER} ORDER BY l.id",
-        _market_params(market),
+        f" WHERE {where} ORDER BY l.id",
+        params,
     )
-    return [Listing(k, u, bool(o), q, t, f, la, n) for k, u, o, q, t, f, la, n in rows]
+    ids, found = array("q"), []
+    for id_, k, u, o, q, t, f, la, n in rows:
+        ids.append(id_)
+        found.append(Listing(k, u, bool(o), q, t, f, la, n))
+    return ids, found
 
 
 def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]:

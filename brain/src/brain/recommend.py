@@ -49,6 +49,7 @@ from brain.history import (
     enchanting_skills,
     holdings,
     item_info,
+    item_keys_turned_own_in,
     known_recipes,
     listings,
     market_budget,
@@ -1830,12 +1831,34 @@ def _valuer(
             conn,
             market,
             ("others_lows", at),
-            lambda: _others_lows(seen, [t for t in scan_times(conn, market) if t <= at]),
+            lambda: _others_lows_as_of(conn, market, at, seen, cache),
         )
         if scanned
         else {},
     )
     return valuer.flips(under, unbound)
+
+
+def _others_lows_as_of(
+    conn: sqlite3.Connection,
+    market: Market,
+    at: int,
+    seen: Sequence[Listing],
+    cache: FairValueCache | None,
+) -> dict[str, tuple[tuple[int, int], ...]]:
+    """`_others_lows` in the Market's Scans up to `at`, brought up to date from the
+    cache's when the only new Scans since are the latest ones, up to `at` (#155)."""
+    scans = [t for t in scan_times(conn, market) if t <= at]
+    if cache is None:
+        return _others_lows(seen, scans)
+    kept, new = cache.before_new_scans(conn, market) or ({}, [])
+    if not 0 < len(new) < len(scans) or new[-1][0] != at:
+        return _others_lows(seen, scans)
+    before = ("others_lows", scans[-len(new) - 1])
+    if before not in kept:
+        return _others_lows(seen, scans)
+    turned = item_keys_turned_own_in(conn, [s[1] for s in new])
+    return _others_lows_after(kept[before], seen, scans, len(new), turned)  # type: ignore[arg-type]
 
 
 def _scan_only[T](
@@ -1880,6 +1903,32 @@ def _others_lows(
                 (scans[i], unit_at[i]) for i in reversed(range(start, len(scans)))
             )
     return stretches
+
+
+def _others_lows_after(
+    before: Mapping[str, tuple[tuple[int, int], ...]],
+    seen: Sequence[Listing],
+    scans: Sequence[int],
+    new_scans: int,
+    turned_own: set[str],
+) -> dict[str, tuple[tuple[int, int], ...]]:
+    """`_others_lows(seen, scans)` from `before`, what it was in all but the last
+    `new_scans` of `scans` (#155). Only the Listings up in the new Scans count there, and a stretch
+    that reaches back to the first of them runs on into its `before` one. The Item Keys
+    `turned_own` had a Listing turn own in them, so it's no longer others' in any Scan:
+    those are worked out afresh."""
+    first_new = scans[-new_scans]
+    recent, redo = [], []
+    for x in seen:
+        if x.item_key in turned_own:
+            redo.append(x)
+        elif x.last_seen >= first_new:
+            recent.append(x)
+    lows = _others_lows(redo, scans)
+    for item_key, stretch in _others_lows(recent, scans[-new_scans:]).items():
+        reaches_back = len(stretch) == new_scans
+        lows[item_key] = stretch + before.get(item_key, ()) if reaches_back else stretch
+    return lows
 
 
 def _by_item(rates: Mapping[str, SellRate]) -> dict[int, tuple[str, ...]]:
