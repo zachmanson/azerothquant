@@ -26,6 +26,7 @@ from brain.instance_lock import LOCK_FILE
 from brain.recommendations import DATA_SLOTS
 
 STUB = "-- the stub the Addon ships\n"
+NEW_SCAN = "-- new Scan\n"
 
 
 def _places(tmp_path: Path) -> Places:
@@ -41,7 +42,7 @@ def _bundled_addon(tmp_path: Path) -> Path:
     addon.mkdir(parents=True, exist_ok=True)
     (addon / "AzerothQuant.toc").write_text("## Interface: 16001\n## Title: AQ\n", encoding="utf-8")
     (addon / "Recommendations.lua").write_text(STUB, encoding="utf-8")
-    (addon / "Scan.lua").write_text("-- new Scan\n", encoding="utf-8")
+    (addon / "Scan.lua").write_text(NEW_SCAN, encoding="utf-8")
     return addon
 
 
@@ -157,7 +158,7 @@ def test_install_copies_the_brain_installs_the_addons_writes_the_config_and_make
     config = load_config(places.app_dir / "config.toml")
     assert (config.installs, config.pool_key) == ((beta,), "secret")
     addons = beta.path / "Interface" / "AddOns"
-    assert (addons / "AzerothQuant" / "Scan.lua").read_text(encoding="utf-8") == "-- new Scan\n"
+    assert (addons / "AzerothQuant" / "Scan.lua").read_text(encoding="utf-8") == NEW_SCAN
     for slot in DATA_SLOTS:
         assert (addons / slot / "Recommendations.lua").read_text(encoding="utf-8") == STUB
         assert (
@@ -282,6 +283,34 @@ def test_an_update_replaces_the_brain_keeps_the_key_and_picks_up_a_new_game_fold
     assert config.installs == (beta, live)
     assert (config.pool_url, config.pool_key) == ("https://pool.example", "secret")
     assert (live.path / "Interface" / "AddOns" / "AzerothQuant" / "Scan.lua").exists()
+
+
+def test_an_update_installs_the_addon_into_a_live_folder_that_only_has_wtf_so_far(tmp_path):
+    # Live's first launch makes WTF; Interface only comes once an addon is installed.
+    places = _places(tmp_path)
+    install(
+        places,
+        exe=_downloaded_exe(tmp_path, b"brain v0.1"),
+        addon=_bundled_addon(tmp_path),
+        installs=[_game(tmp_path, "_classic_beta_", Era.BETA)],
+        pool_url="https://pool.example",
+        pool_key="",
+        make_shortcut=FakeShortcuts(),
+    )
+    live = tmp_path / "World of Warcraft" / "_classic_"
+    (live / "WTF").mkdir(parents=True)
+
+    update(
+        places,
+        exe=_downloaded_exe(tmp_path, b"brain v0.2"),
+        addon=_bundled_addon(tmp_path),
+        pool_url="https://pool.example",
+        make_shortcut=FakeShortcuts(),
+    )
+
+    assert Install(live, Era.LIVE) in load_config(places.app_dir / "config.toml").installs
+    scan = live / "Interface" / "AddOns" / "AzerothQuant" / "Scan.lua"
+    assert scan.read_text(encoding="utf-8") == NEW_SCAN
 
 
 HOLD_THE_LOCK = """
