@@ -1,3 +1,9 @@
+2026-10-21 (later 153): #83's Beta read POSTED (comment 6311523547), issue left open. The overnight script from later 152 never ran; reran as one `brain replay --since D --until D` per day, 6 at once (`brain/replay-83/run.sh`, ~3.4 h, not committed). 86 of 97 Scans graded (to Oct 13). Summed: Brain +51.82g, Auctionator -4273.97g, TSM -5463.67g; ablations: Sub-crafts +3.50g, Flips to Craft +139.65g, Deposits +109.58g, own-Market Sell Rate +2580.31g. Brain up through Oct 7 (+206.55g), down every day Oct 8-13 (-154.73g). Realized profit 114.13g; 111 sessions (30-min gap), 31.4-40 h: 2.85-3.63g/h (lower bound), 1.03g/session.
+
+Next: #191/#192 (triage first), #193. #194, #195 and #188 after Beta. Guildie work stays parked.
+
+- Gotchas: same as later 152. One day's replay takes 15 min to 3 h (Sep 27, 20 Scans, was slowest); run days in parallel. `brain/replay-83/` is safe to delete.
+
 2026-10-20 (later 152): #188 grill turned into #194, both PARKED until after Beta (user's call: low on credits, only pre-Beta-end work now). The user wants back the few-unit, high-margin flips (gear, BoEs) that vanished after the #170 caps. Cause: Stake 17.47g, so the 3% Unsold Loss cap is 52s. Named 2g+ rows went from 20-29 a Scan (up to 30g) through 10-11 to 4-7 (max 3.36g) from 10-16. #194 has the evidence, a spec (bags in Stake, Flip to Sell buys no more than it's seen sell, 1g floor variant) and a park comment: part 1 was built and backed out, because live it made the Stake 47.68g but the room 0 (the hides are 24.88g at Best Exit Value, 63% of the Stake), and the user doubts counting held stock at all. #188 has its grill notes (held units still post at the cheapest-undercut; the Hide check as worded can't pass). Nothing committed but this note.
 
 Next: #83's Beta read (due Oct 21, the one pre-Beta-end item), then #191/#192 (triage first), #193. #194, #195 (cap grows with strong sale evidence) and #188 after Beta. Guildie work stays parked.
