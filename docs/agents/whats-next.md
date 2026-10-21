@@ -1,6 +1,8 @@
 2026-10-21 (later 153): #83's Beta read POSTED (comment 6311523547), issue left open. The overnight script from later 152 never ran; reran as one `brain replay --since D --until D` per day, 6 at once (`brain/replay-83/run.sh`, ~3.4 h, not committed). 86 of 97 Scans graded (to Oct 13). Summed: Brain +51.82g, Auctionator -4273.97g, TSM -5463.67g; ablations: Sub-crafts +3.50g, Flips to Craft +139.65g, Deposits +109.58g, own-Market Sell Rate +2580.31g. Brain up through Oct 7 (+206.55g), down every day Oct 8-13 (-154.73g). Realized profit 114.13g; 111 sessions (30-min gap), 31.4-40 h: 2.85-3.63g/h (lower bound), 1.03g/session.
 
-Next: #191/#192 (triage first), #193. #194, #195 and #188 after Beta. Guildie work stays parked.
+Correction posted on #83: the summed baseline values are mostly 7 reposting Deposits on everything they post (one Scan broken down: TSM -11.38g, 7.71g Deposits), so "Brain beats both" is unproven vs realistic setups. Filed #196 (post caps + fair Deposits for the baselines, rerun).
+
+Next: #191/#192 (triage first), #193. #194, #195, #196 and #188 after Beta. Guildie work stays parked.
 
 - Gotchas: same as later 152. One day's replay takes 15 min to 3 h (Sep 27, 20 Scans, was slowest); run days in parallel. `brain/replay-83/` is safe to delete.
 
