@@ -1,3 +1,9 @@
+2026-10-22 (later 155): #192 DONE (commit 2edbf74, closes on push). A post's Deposit is max(ah_deposit_min_copper (new, default 100), rate x stack), split over `_Valuer.stack` units, held units included; invoices at or under the minimum teach no rate. `deposit_of` now builds its Valuer at the Market's latest Scan (with at=None it had no Sell Rates, so every stack was 1 and the Backtest would pay 1s a unit). ADR-0013 and CONTEXT.md corrected. Several old tests are pinned to ah_deposit_min_copper=0 to keep their worked examples.
+
+Next: #191 (grill: Flip to Vendor rows worth pennies; still needs-triage), then #193. #194, #195, #196 and #188 after Beta. Guildie work stays parked.
+
+- Gotchas: same as later 154. NEW: on this Z: drive, `git stash` + `git stash pop` left a 32-byte .git/index (every file showed staged-deleted plus untracked). `git reset` (mixed) fixed it with nothing lost. Don't stash here; compare against HEAD another way (e.g. `git worktree` or `git show HEAD:path`). Replay and Backtest numbers move with this change (more Deposits on cheap items), so #83's figures are from before #192.
+
 2026-10-22 (later 154): #192 TRIAGED -> bug + ready-for-agent; agent brief is comment 6344465756. Verified on all 135 Beta Sold invoices with a Vendor Price: max(1s, floor(0.60 x VP x units)) per auction fits 123 (current per-unit 0.60 x VP fits 76). ADR-0013's "no 1s minimum" note is wrong (Copper Bar paid 1s on 09-28); the brief says to correct it. Cured Medium Hide settled: VP is 200c (tooltip 40s per stack of 20), stored 200c since the Oct 20 Character Read. User's call: held units assume the same post size as Flips (`_Valuer.stack`, #98). Steel Bar check skipped (user has none).
 
 Next: /implement #192 (last full Beta day is 2026-10-22; #192 needs no game). Then #191 (grill), #193. #194, #195, #196 and #188 after Beta. Guildie work stays parked.
