@@ -1,3 +1,9 @@
+2026-10-22 (later 158): #193 TRIAGED -> bug + ready-for-agent; agent brief is comment 6345305541. Cause confirmed, but it can't fire until the pool index passes one page (1000 entries, the Worker's MAX_PAGE; the pool has ~100), so not before Nov 4. User's call: a first pull saves its cursor only after the last page; no schema change. Queued after the others.
+
+Next: #194, #195, #196, #188, then #193. Guildie work stays parked (user: skipping guildie stuff for now).
+
+- Gotchas: same as later 157.
+
 2026-10-22 (later 157): #191 DONE (commit 1299bb3, closes on push). A Flip to Vendor unit must clear max(flip_min_margin_share x unit, flip_min_margin_copper) after its buy effort, plus still > 0 so a zero margin (Backtest) keeps break-even units out as before. `_flip_margin` in recommend.py is now the one copy of the margin rule (Sell, Vendor, Craft, Disenchant). The brief's guess that --why-not needed no change was wrong: the chain checks Sale Events/Room first, so a dropped Vendor-only Item Key said "Sale Events". New branch: when the best way out is Vendor and the cheapest ask was under Vendor Price less effort (`_vendors_at_a_profit`), it's Check.MARGIN. A first, wider version (any Vendor way out) misreported unsold items with tiny Vendor Prices as margin failures with a negative clear-at; the review caught it and a test pins it. Old penny-Vendor tests pinned to NO_MARGIN (test_recommend, test_replay); the two Flip-to-Craft tests and test_cli's `_near_misses` raised Vendor Prices instead, since margin 0 would change their other rows (Linen turns into a Flip to Sell; the CLI's Linen row is a margin miss).
 
 Next: #193 (interrupted first pull loses the window). #194, #195, #196 and #188 after Beta. Guildie work stays parked.
