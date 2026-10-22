@@ -1016,6 +1016,8 @@ def _why_not(
             failed = Check.ROW_CAP if rank[item_key] > rows else None
         elif item_key in cost:
             failed = Check.DROPPED if item_id_of(item_key) in dropped else Check.BUDGET
+        elif _vendors_at_a_profit(out, cheapest[0], valuer.effort(item_key)):
+            failed = Check.MARGIN  # a vendor needs no Sale Events or room (#191)
         elif sale_events < config.flip_min_sale_events:
             failed = Check.SALE_EVENTS
         elif room < held + needs:
@@ -1044,6 +1046,12 @@ def _why_not(
             )
         )
     return result
+
+
+def _vendors_at_a_profit(out: "_WayOut | None", unit: int, effort: int) -> bool:
+    """Whether a unit bought at `unit` with the way `out` is Vendor would make a profit
+    before the Flip margin: a Flip to Vendor only the margin dropped (#191)."""
+    return out is not None and out.way is Action.VENDOR and out.value - effort - unit > 0
 
 
 @dataclass(frozen=True)
@@ -1240,7 +1248,6 @@ def _flip_to_disenchant(
     that would break one (ADR-0034): a step's Unsold Loss is its buyout less its mats'
     Vendor Price, plus one posting's Deposits on them."""
     expected = {str(mat): q for mat, q in group.expected.items()}
-    share, floor = config.flip_min_margin_share, config.flip_min_margin_copper
     # What a step's mats add to its Unsold Loss over its buyout: their Deposits less their
     # Vendor Price.
     mats_unsold = sum(
@@ -1256,7 +1263,7 @@ def _flip_to_disenchant(
     for unit, item_key in sorted(listed):
         net = _mats_value(expected, added, valuer, sources, config)
         net -= config.non_stacking_effort_copper
-        if unit > gold or net - unit < max(unit * share, floor):
+        if unit > gold or net - unit < _flip_margin(unit, config):
             break
         whole += 1
         gold -= unit
@@ -3346,9 +3353,7 @@ def _flips_to_craft(
         step = _flip_step(plan, sources, out)
         if step is None or step.gold > gold:
             break
-        if step.profit < max(
-            step.gold * config.flip_min_margin_share, config.flip_min_margin_copper
-        ):
+        if step.profit < _flip_margin(step.gold, config):
             break
         result.append(step)
         gold -= step.gold
@@ -3636,10 +3641,10 @@ def _flips(
     within Days to Sell (#109), so a lone ask far above every sale isn't
     taken at its word (#41). The post price never falls as a run grows, so neither does the
     room grow. The resale is never above what a merchant charges (#63). Anything else under
-    the Vendor Price is bought to Vendor. Each unit bought costs the `effort` of buying it,
-    and one bought to Sell the effort of posting it too (#73), and the deposits it's
-    expected to lose waiting its turn in the `queue` after the `held` units (#78), at the
-    Sell Rate at its post price.
+    the Vendor Price by the Flip margin is bought to Vendor (#191). Each unit bought costs
+    the `effort` of buying it, and one bought to Sell the effort of posting it too (#73),
+    and the deposits it's expected to lose waiting its turn in the `queue` after the `held`
+    units (#78), at the Sell Rate at its post price.
 
     A `pricer` (`_Valuer.priced`) sets the post price instead, with no room limit and no
     minimum of Sale Events (#84). With the `cheap` Listings, a run counts the demand at its
@@ -3697,9 +3702,10 @@ def _flips(
         to_sell = flip.whole.units
     if vendor_price is not None:
         buys += [
-            _VendorBuy(item_key, unit, quantity, vendor_price - effort - unit)
+            _VendorBuy(item_key, unit, quantity, net)
             for unit, quantity in _listings_left(offers, to_sell)
-            if vendor_price - effort - unit > 0
+            # Over 0 too, so with no margin a unit that only breaks even isn't bought.
+            if (net := vendor_price - effort - unit) > 0 and net >= _flip_margin(unit, config)
         ]
     return buys
 
@@ -4125,11 +4131,14 @@ def _resells(
     Sell: less the `effort` of buying and of posting it (#73) and the deposits it's
     expected to have `lost` (#78), it clears the Flip margin, and no vendor pays as much
     (that's a Flip to Vendor, which isn't posted)."""
-    if resale is None or resale - 2 * effort - lost - unit < max(
-        unit * config.flip_min_margin_share, config.flip_min_margin_copper
-    ):
+    if resale is None or resale - 2 * effort - lost - unit < _flip_margin(unit, config):
         return False
     return vendor_price is None or resale - effort - lost > vendor_price
+
+
+def _flip_margin(unit: float, config: Config) -> float:
+    """The Flip margin a buy of `unit` copper must clear, whatever its way out (#191)."""
+    return max(unit * config.flip_min_margin_share, config.flip_min_margin_copper)
 
 
 def _options(

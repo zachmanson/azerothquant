@@ -1735,7 +1735,7 @@ def test_disenchants_says_when_there_are_none(tmp_path):
 
 def _near_misses(tmp_path):
     """Linen, selling 2 an hour at 4s, with one at 2s 80c: 1c over what clears the margin.
-    Two Copper Ore at 20c that a vendor buys for 25c, over the 10c Budget. A Bolt of Linen
+    Two Copper Ore at 20c that a vendor buys for 1s 25c, over the 10c Budget. A Bolt of Linen
     Cloth at 9s that never sold. The player's own Linen and Bolt Listings name them."""
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
@@ -1775,7 +1775,7 @@ def _near_misses(tmp_path):
         "faction": "Alliance",
         "money": 123456,
         "budget": 10,
-        "vendorPrices": {2770: 25},
+        "vendorPrices": {2770: 125},
         "bags": [],
     }
     scans = [

@@ -49,6 +49,9 @@ CONFIG = replace(
     flip_min_sale_events=1,
     risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
 )
+# No Flip margin, for the Flips to Vendor worth a few copper, which the margin drops
+# since #191.
+NO_MARGIN = replace(CONFIG, flip_min_margin_share=0.0, flip_min_margin_copper=0)
 
 
 def scan(at, *rows):
@@ -254,6 +257,7 @@ def test_the_brains_buys_to_vendor_bring_the_vendor_price(db):
         [character_read(money=10_000, vendor_prices={2589: 10, 2770: 50})],
         since=T0 + HOUR,
         until=T0 + HOUR,
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(3 * (50 - 5))
@@ -270,6 +274,7 @@ def test_the_brain_takes_its_options_most_profit_first_while_the_gold_lasts(db):
         [character_read(money=20, vendor_prices={2589: 10, 2770: 50, 2771: 30})],
         since=T0 + HOUR,
         until=T0 + HOUR,
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(3 * (50 - 5))
@@ -288,7 +293,7 @@ def test_the_brain_takes_only_the_most_profitable_flips_as_before_the_other_meas
         [character_read(money=10_000, vendor_prices={2589: 10, 2770: 10, 2771: 10})],
         since=T0 + HOUR,
         until=T0 + HOUR,
-        config=replace(CONFIG, shopping_list_rows=1),
+        config=replace(NO_MARGIN, shopping_list_rows=1),
     )
 
     assert result[MARKET].graded[Policy.BRAIN] == pytest.approx(10 * 10 - 50)

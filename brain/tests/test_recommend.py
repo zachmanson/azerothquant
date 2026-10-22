@@ -84,6 +84,11 @@ CONFIG = replace(
     # are gaps no Sell Rate is read from (ADR-0035 raised the default to 12 h).
     observation_window_max_seconds=HOUR,
 )
+# No Flip margin, for the worked examples of Flips to Vendor worth a few copper, which
+# the margin drops since #191.
+NO_MARGIN = replace(CONFIG, flip_min_margin_share=0.0, flip_min_margin_copper=0)
+# The user's Flip margin (#191): 10% of the unit, over a 1 silver floor.
+TEN_PERCENT_MARGIN = replace(CONFIG, flip_min_margin_share=0.1, flip_min_margin_copper=100)
 # Pinned, so the worked examples don't move when the default is tuned.
 CAPPED = replace(CONFIG, risk_caps=True, flip_unsold_loss_share=0.05, flip_tied_up_share=0.6)
 
@@ -705,6 +710,7 @@ def test_listings_under_the_vendor_price_are_bought_to_vendor(db):
         db,
         [scan(T0, row(ORE, quantity=3, unit=5), row(ORE, unit=6), row(ORE, unit=10))],
         [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=NO_MARGIN,
     )
 
     # Any quantity: a vendor takes them all. The price is the most to pay per unit.
@@ -1122,6 +1128,47 @@ def test_own_listings_are_never_bought(db):
     assert result[MARKET].shopping_list == []
 
 
+def test_a_unit_under_its_vendor_price_by_less_than_the_flip_margin_isnt_bought_to_vendor(db):
+    # #191's Star Ruby: a Vendor Price of 50s, 20 at 49s 99c. 1c each is under the margin.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=4999))],
+        [character_read(money=GOLD, vendor_prices={2589: 5000})],
+        config=TEN_PERCENT_MARGIN,
+    )
+
+    assert [r for r in result[MARKET].shopping_list if r.action is Action.VENDOR] == []
+
+
+@pytest.mark.parametrize(("unit", "bought"), [(833, True), (834, False)])
+def test_a_flip_to_vendor_is_bought_at_its_buy_under_and_not_a_copper_over(db, unit, bought):
+    # A Vendor Price of 10s and the 20% margin: the Buy Under is 1000 / 1.2 = 833 (see
+    # test_the_vendor_way_buys_under_the_vendor_price_less_the_margin), so the row and the
+    # Buy Under agree on what's worth paying.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=unit))],
+        [character_read(money=GOLD, vendor_prices={2589: 1000})],
+    )
+
+    vendor = [r for r in result[MARKET].shopping_list if r.action is Action.VENDOR]
+    assert [r.price for r in vendor] == ([unit] if bought else [])
+
+
+@pytest.mark.parametrize(("unit", "bought"), [(900, True), (901, False)])
+def test_a_flip_to_vendor_clears_the_margins_floor_even_with_no_share(db, unit, bought):
+    # A Vendor Price of 10s, no share and the 1 silver floor: 99c a unit isn't enough.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=unit))],
+        [character_read(money=GOLD, vendor_prices={2589: 1000})],
+        config=replace(CONFIG, flip_min_margin_share=0.0),
+    )
+
+    vendor = [r for r in result[MARKET].shopping_list if r.action is Action.VENDOR]
+    assert [r.price for r in vendor] == ([unit] if bought else [])
+
+
 def test_a_unit_a_vendor_pays_more_for_than_it_resells_for_is_bought_to_vendor(db):
     # Resale of the 700 would be 950 after the cut, but a vendor pays 960.
     result = run(
@@ -1147,6 +1194,7 @@ def test_each_option_is_sized_on_its_own_and_ranked_by_profit(db):
             character_read(money=25, vendor_prices={2770: 25, 2771: 10}),
             character_read(money=15, character="Alt-One"),
         ],
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].shopping_list == [
@@ -1162,6 +1210,7 @@ def test_an_option_the_gold_cant_buy_whole_buys_what_fits(db):
         db,
         [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
         [character_read(money=35, vendor_prices={2770: 25, 2771: 10})],
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].shopping_list == [
@@ -1177,7 +1226,7 @@ def test_the_shopping_list_shows_only_the_most_profitable_options(db):
         db,
         [scan(T0, row(ORE, quantity=2, unit=20), row(tin, quantity=3, unit=5))],
         [character_read(money=GOLD, vendor_prices={2770: 25, 2771: 10})],
-        config=replace(CONFIG, shopping_list_rows=1),
+        config=replace(NO_MARGIN, shopping_list_rows=1),
     )
 
     assert [r.item_key for r in result[MARKET].shopping_list] == ["2771"]
@@ -1194,6 +1243,7 @@ def test_a_budget_caps_what_each_option_spends(db):
             character_read(money=GOLD, vendor_prices={2770: 25, 2771: 10}, budget=100),
             character_read(money=GOLD, character="Alt-One", at=T0 + 1, budget=20),
         ],
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].budget == 20
@@ -1211,6 +1261,7 @@ def test_no_budget_in_the_latest_character_read_means_all_the_gold(db):
             character_read(money=GOLD, vendor_prices={2770: 25}, budget=20),
             character_read(money=GOLD, character="Alt-One", at=T0 + 1),
         ],
+        config=NO_MARGIN,
     )
 
     assert result[MARKET].budget is None
@@ -1559,6 +1610,7 @@ def test_a_flip_to_vendor_counts_every_listing_it_buys_even_at_the_same_price(db
         db,
         [scan(T0, row(ORE, unit=5), row(ORE, quantity=2, unit=5), row(ORE, unit=5))],
         [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=NO_MARGIN,
     )
 
     [flip] = result[MARKET].shopping_list
@@ -1582,6 +1634,7 @@ def test_a_flip_to_vendor_posts_nothing(db):
         db,
         [scan(T0, row(ORE, quantity=2, unit=5))],
         [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=NO_MARGIN,
     )
 
     [flip] = result[MARKET].shopping_list
@@ -1607,6 +1660,7 @@ def test_a_flip_to_vendor_has_no_wait(db):
         db,
         [scan(T0, row(ORE, quantity=2, unit=5))],
         [character_read(money=GOLD, vendor_prices={2770: 10})],
+        config=NO_MARGIN,
     )
 
     [flip] = result[MARKET].shopping_list
@@ -1642,7 +1696,7 @@ def test_an_option_in_the_top_rows_only_by_profit_per_click_is_kept(db):
         db,
         [scan(T0, *[row(ORE, quantity=2, unit=5)] * 5, row(tin, quantity=3, unit=6))],
         [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10})],
-        config=replace(CONFIG, shopping_list_rows=1),
+        config=replace(NO_MARGIN, shopping_list_rows=1),
     )
 
     assert [(r.item_key, r.profit) for r in result[MARKET].shopping_list] == [
@@ -1755,10 +1809,26 @@ def test_a_unit_that_doesnt_stack_is_bought_to_vendor_only_if_it_pays_for_the_bu
         db,
         [scan(T0, row(BELT, unit=600))],
         [character_read(money=GOLD, vendor_prices={6539: vendor_price})],
+        config=NO_MARGIN,
     )
 
     vendor = Row(BELT_KEY, Action.VENDOR, 1, price=600, profit=1, cost=600)
     assert result[MARKET].shopping_list == ([vendor] if bought else [])
+
+
+@pytest.mark.parametrize(("vendor_price", "bought"), [(1219, False), (1220, True)])
+def test_a_unit_that_doesnt_stack_clears_the_flip_margin_after_paying_for_the_buy(
+    db, vendor_price, bought
+):
+    # The 6s Belt costs 5s to buy, so a vendor must pay 6s + 5s + 20% of 6s.
+    result = run(
+        db,
+        [scan(T0, row(BELT, unit=600))],
+        [character_read(money=GOLD, vendor_prices={6539: vendor_price})],
+    )
+
+    vendor = [r for r in result[MARKET].shopping_list if r.action is Action.VENDOR]
+    assert [r.profit for r in vendor] == ([120] if bought else [])
 
 
 @pytest.mark.parametrize(("stacks", "effort"), [(True, 0), (False, 500)])
@@ -2783,8 +2853,9 @@ def test_a_flip_to_crafts_output_counts_only_the_sale_events_at_or_above_its_pos
 
 
 def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db):
-    # #86: 15 copper. A Bolt from 2 Linen at 5 (10 copper) and all 3 Ore to Vendor (15)
-    # are both shown, and so is the Tin to Hold under its Prediction.
+    # #86: 15 copper. A Bolt from 2 Linen at 5 (10 copper) and all 3 Ore to Vendor (15,
+    # each 1s over its 5 copper, the Flip margin's floor) are both shown, and so is the Tin
+    # to Hold under its Prediction.
     tin = "item:2771::::::::20:1490"
     scans = linen_and_bolts_selling()
     scans[1]["listings"] += [row(quantity=2, unit=5), row(ORE, quantity=3, unit=5)]
@@ -2792,7 +2863,7 @@ def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db
     result = run(
         db,
         scans,
-        [character_read(money=15, vendor_prices={2770: 6, 2771: 1}, recipes=[recipe()])],
+        [character_read(money=15, vendor_prices={2770: 105, 2771: 1}, recipes=[recipe()])],
         predictions=[prediction("2771")],
     )
 
@@ -2804,8 +2875,8 @@ def test_flips_to_craft_plain_flips_and_prediction_buys_each_get_all_the_gold(db
 
 
 def test_flips_to_craft_are_cut_apart_from_flips_to_sell_and_to_vendor(db):
-    # #87: shopping_list_rows cuts the Tin and Ore to the Tin alone, and the Bolt, under
-    # craft_list_rows, is still shown. One list, most profit first.
+    # #87: shopping_list_rows cuts the Tin (3 x 2s 2c) and Ore (3 x 1s) to the Tin alone,
+    # and the Bolt, under craft_list_rows, is still shown. One list, most profit first.
     tin = "item:2771::::::::20:1490"
     scans = linen_and_bolts_selling()
     scans[1]["listings"] += [row(quantity=2, unit=5), row(ORE, quantity=3, unit=5)]
@@ -2813,7 +2884,7 @@ def test_flips_to_craft_are_cut_apart_from_flips_to_sell_and_to_vendor(db):
     result = run(
         db,
         scans,
-        [character_read(money=GOLD, vendor_prices={2770: 6, 2771: 3}, recipes=[recipe()])],
+        [character_read(money=GOLD, vendor_prices={2770: 105, 2771: 203}, recipes=[recipe()])],
         config=replace(CONFIG, shopping_list_rows=1),
     )
 
@@ -4385,6 +4456,32 @@ def test_why_not_an_ask_just_over_the_clearing_price_says_by_how_much(db):
     assert (linen.failed, linen.ask, linen.clear_at) == (Check.MARGIN, 280, 279)
 
 
+def test_why_not_a_unit_under_its_vendor_price_by_less_than_the_margin_says_by_how_much(db):
+    # #191: Ore nobody buys, a Vendor Price of 10s and the 1 silver floor alone: the 9s 1c
+    # is 1c over the Vendor way's Buy Under of 9s.
+    _, why = why_not(
+        db,
+        [scan(T0, row(ORE, quantity=20, unit=901))],
+        [character_read(money=GOLD, vendor_prices={2770: 1000})],
+        config=replace(CONFIG, flip_min_margin_share=0.0),
+    )
+
+    ore = why[ORE_KEY]
+    assert (ore.failed, ore.ask, ore.clear_at) == (Check.MARGIN, 901, 900)
+
+
+def test_why_not_an_ask_over_its_vendor_price_with_no_sale_events_says_so(db):
+    # Vendor is the Ore's only way out, but no unit was ever under its 10c Vendor Price, so
+    # no Flip to Vendor was dropped: the Flip to Sell's check is what failed.
+    _, why = why_not(
+        db,
+        [scan(T0, row(ORE, quantity=20, unit=5000))],
+        [character_read(money=GOLD, vendor_prices={2770: 10})],
+    )
+
+    assert why[ORE_KEY].failed is Check.SALE_EVENTS
+
+
 @pytest.mark.parametrize("held", [0, 2])
 def test_why_not_a_wall_too_big_for_the_room_above_it_says_room_not_margin(db, held):
     # A wall of 10 at 500 under the 1000s. The cheapest alone posts at 499 under the rest
@@ -4409,6 +4506,7 @@ def test_why_not_a_flip_the_budget_cant_buy_one_of_says_what_it_costs(db):
         db,
         [scan(T0, row(ORE, quantity=2, unit=20))],
         [character_read(money=GOLD, vendor_prices={2770: 25}, budget=10)],
+        config=NO_MARGIN,
     )
 
     ore = why[ORE_KEY]
@@ -4421,6 +4519,7 @@ def test_why_not_a_flip_of_an_item_the_latest_scan_dropped_rows_of_says_so(db):
         db,
         dropping([scan(T0, row(ORE, quantity=2, unit=20))], 2770),
         [character_read(money=GOLD, vendor_prices={2770: 25})],
+        config=NO_MARGIN,
     )
 
     assert market.shopping_list == []
@@ -4435,7 +4534,7 @@ def test_why_not_a_flip_outside_the_kept_rows_says_its_best_place(db):
         db,
         [scan(T0, *[row(ORE, quantity=2, unit=5)] * 5, row(tin, quantity=3, unit=8))],
         [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10})],
-        config=replace(CONFIG, shopping_list_rows=1),
+        config=replace(NO_MARGIN, shopping_list_rows=1),
     )
 
     assert (why["2771"].failed, why["2771"].rank, why["2771"].rows) == (Check.ROW_CAP, 2, 1)
@@ -4457,7 +4556,7 @@ def test_why_not_says_made_the_list_for_exactly_the_flips_on_the_shopping_list(d
             unit=1000,
         ),
         [character_read(money=GOLD, vendor_prices={2770: 10, 2771: 10, 2840: 20})],
-        config=replace(CONFIG, shopping_list_rows=1),
+        config=replace(NO_MARGIN, shopping_list_rows=1),
     )
 
     made = {k for k, w in why.items() if w.failed is None}
