@@ -1,3 +1,9 @@
+2026-10-22 (later 156): #191 TRIAGED -> bug + ready-for-agent; agent brief is comment 6344822337. User's call: a Flip to Vendor unit must clear the same Flip margin as a Flip to Sell, max(flip_min_margin_share x unit, flip_min_margin_copper) after its buy effort. No new settings, no Addon change. Why: the Buy Under's Vendor way already charges that margin (ADR-0019), so the row (Star Ruby at 49s 99c) and its Buy Under (45s 45c) disagreed. Docs amended in place (CONTEXT.md Flip, ADR-0011), no new ADR.
+
+Next: /implement #191 (Brain-only, no game). Then #193. #194, #195, #196 and #188 after Beta. Guildie work stays parked.
+
+- Gotchas: same as later 155. Backtest pins both margins to 0, so it won't move; the replay will lose its penny Vendor flips.
+
 2026-10-22 (later 155): #192 DONE (commit 2edbf74, closes on push). A post's Deposit is max(ah_deposit_min_copper (new, default 100), rate x stack), split over `_Valuer.stack` units, held units included; invoices at or under the minimum teach no rate. `deposit_of` now builds its Valuer at the Market's latest Scan (with at=None it had no Sell Rates, so every stack was 1 and the Backtest would pay 1s a unit). ADR-0013 and CONTEXT.md corrected. Several old tests are pinned to ah_deposit_min_copper=0 to keep their worked examples.
 
 Next: #191 (grill: Flip to Vendor rows worth pennies; still needs-triage), then #193. #194, #195, #196 and #188 after Beta. Guildie work stays parked.
