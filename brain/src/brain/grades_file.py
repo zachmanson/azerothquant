@@ -59,6 +59,8 @@ class Named:
     profit: float  # expected, for all `units`
     days: float | None  # expected until its last unit sells
     sale_horizon: int  # seconds, in force then
+    # A Risky row's (#194, ADR-0037), so its Flip Grades can be split out from the rest.
+    risky: bool = False
 
 
 @dataclass(frozen=True)
@@ -273,6 +275,7 @@ def _named(row: dict, sale_horizon: int) -> Named:
         float(_typed(row["profit"], int | float)),
         None if days is None else float(_typed(days, int | float)),
         sale_horizon,
+        _flag(row.get("risky", False)),
     )
 
 
@@ -306,6 +309,7 @@ def freeze_shown(
         f"{{ item_key = {_string(n.item_key)}, units = {n.units}, dearest = {n.dearest}, "
         f"post_at = {float(n.post_at)!r}, profit = {float(n.profit)!r}"
         + ("" if n.days is None else f", days = {float(n.days)!r}")
+        + (", risky = true" if n.risky else "")
         + " }"
         for n in named
     )
@@ -416,4 +420,10 @@ def _typed[T](value: object, kind: type[T]) -> T:
     # bool is an int in Python, but never a count of copper or units.
     if not isinstance(value, kind) or isinstance(value, bool):
         raise TypeError(f"{value!r} is not {kind}")
+    return value
+
+
+def _flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"{value!r} is not a bool")
     return value

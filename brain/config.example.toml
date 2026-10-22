@@ -76,6 +76,12 @@
 # flip_unsold_loss_share = 0.03
 # flip_tied_up_share = 0.6
 
+# Optional: a Flip to Sell the Unsold Loss cap above drops still shows, as a Risky row at
+# full size, if it buys no more than risky_max_units units. Its details say what you'd lose
+# if none of it sold; the risk is yours to take. 0 turns Risky rows off. Default to 5.
+# Must come before the first [[installs]].
+# risky_max_units = 5
+
 # Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
 # evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours
 # of Observation Windows had been watched with no sales, so one sale in a short window

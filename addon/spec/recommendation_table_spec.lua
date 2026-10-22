@@ -1115,6 +1115,51 @@ describe("a row the risk caps shrank", function()
   end)
 end)
 
+-- A Flip to Sell the Unsold Loss cap dropped, back at full size (#194, ADR-0037): tagged
+-- Risky, and its details say first what it loses if none of it sells.
+describe("a Risky row", function()
+  local function risky(flag)
+    return entry({
+      gold = 170000,
+      stake = 170000,
+      room = 102000,
+      lossCap = 5100,
+      shoppingList = {
+        { itemKey = "9749", action = "Sell", quantity = 1, price = 15000, postAt = 30000.0, profit = 12500.0, cost = 15000, listings = 1, posts = 1, days = 2.0, risky = flag, unsoldLoss = flag and 14000 or nil },
+      },
+    })
+  end
+
+  it("is tagged Risky in its Item cell", function()
+    local row = build(risky(true), AS_OF, names).sections[2].rows[1]
+
+    assert.are.equal(RecommendationTable.RISKY .. " item:9749", row.cells[1])
+  end)
+
+  it("says first in its details what it loses if none of it sells", function()
+    local row = build(risky(true)).sections[2].rows[1]
+
+    assert.are.equal("Over your risk cap: if none of it sells you lose 1g 40s.", row.details[1])
+  end)
+
+  it("says its risk ahead of why the room capped it", function()
+    local recommendations = risky(true)
+    local r = recommendations[REALM][FACTION].shoppingList[1]
+    r.capped, r.cappedBy = 3, "room"
+    local row = build(recommendations).sections[2].rows[1]
+
+    assert.are.equal("Over your risk cap: if none of it sells you lose 1g 40s.", row.details[1])
+    assert.are.equal("Capped at 1 of 3: more would put over 60% of what you're trading with into auctions", row.details[2])
+  end)
+
+  it("isn't tagged when it's an ordinary row", function()
+    local row = build(risky(nil), AS_OF, names).sections[2].rows[1]
+
+    assert.are.equal("item:9749", row.cells[1])
+    assert.are.equal("1 Listing + 1 post, sells in ~2.0 days", row.details[1])
+  end)
+end)
+
 -- A selected row (#77) is found again after a redraw by its Item Key and action.
 describe("selecting a Recommendation Table row", function()
   it("finds the row with the same Item Key and action after a redraw", function()

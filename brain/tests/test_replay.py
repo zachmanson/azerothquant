@@ -788,3 +788,17 @@ def test_options_are_taken_while_the_room_lasts_as_well_as_the_gold():
     shopping, _ = options_taken(m, flip_rows=50)
 
     assert shopping == [ore, linen]
+
+
+def test_a_risky_row_is_never_taken_nor_counted_in_the_rows_kept():
+    # #194, ADR-0037: the Backtest and the replay take only the rows the risk caps leave. The
+    # Risky Ore is the most profit, but it's skipped and takes none of the 2 places, so both
+    # the Bolt and the Linen are taken.
+    ore = Row("2770", Action.SELL, 4, price=10, profit=300, cost=4000, risky=True)
+    bolt = Row("2996", Action.SELL, 3, price=10, profit=200, cost=3000)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=1000)
+    m = MarketRecommendations(MARKET, T0, 10000, shopping_list=[ore, bolt, linen])
+
+    shopping, _ = options_taken(m, flip_rows=2)
+
+    assert shopping == [bolt, linen]

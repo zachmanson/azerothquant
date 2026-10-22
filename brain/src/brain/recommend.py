@@ -361,6 +361,12 @@ class Row:
     # alone, and which cap shrank it: "room" if the room alone would, else "loss".
     capped: int | None = None
     capped_by: str | None = None
+    # A Flip to Sell the Unsold Loss cap dropped, back at full size because its run is
+    # short (#194, ADR-0037): the player takes the risk, so it's named but not backtested.
+    risky: bool = False
+    # A Flip to Sell's Unsold Loss (ADR-0034): what it loses if none of it sells. Not
+    # compared, so rows are checked on it apart.
+    unsold_loss: float | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -370,6 +376,9 @@ class _RiskCaps:
 
     loss: float = math.inf
     room: float = math.inf
+    # The most units a Flip to Sell the loss cap drops may have to come back as a Risky
+    # row (#194, ADR-0037).
+    risky_units: int = 0
 
     def fit(self, cost: float, unsold_loss: float) -> bool:
         return cost <= self.room and unsold_loss <= self.loss
@@ -911,6 +920,7 @@ def _risk_caps(gold: float, tied_up: float, config: Config) -> _RiskCaps:
     return _RiskCaps(
         loss=config.flip_unsold_loss_share * stake,
         room=max(0.0, config.flip_tied_up_share * stake - tied_up),
+        risky_units=config.risky_max_units,
     )
 
 
@@ -1661,6 +1671,7 @@ def rework(
             r.profit,
             r.days,
             config.sale_horizon_seconds,
+            r.risky,
         )
         for r in m.shopping_list
         if r.action is Action.SELL
@@ -4083,6 +4094,7 @@ def _option(
                 # A hair under, so 4 units in stacks of 2.0000001 are still 2 posts.
                 posts=math.ceil(run.quantity / buy.stack - 1e-9),
                 days=run.days,
+                unsold_loss=run.unsold_loss,
             )
             continue
         affords = min(gold, room) // buy.unit_buyout
@@ -4157,9 +4169,14 @@ def _options(
     `flip_rows` by any of Profit, Per click, Per day (Flips to Sell only) or ROI (#98),
     and the Flips to Craft,
     apart, to the top `craft_rows` by Profit (#87), and the Flips to Disenchant likewise
-    to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011)."""
+    to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011).
+    Risky rows (#194) are ranked against all the Flips, but take no place from the rest,
+    which are cut as if there were none: the Backtest takes only those (ADR-0037)."""
     flips = _flip_options(buys, gold, caps)
     ranks = _best_ranks(flips)
+    normal = [i for i, r in enumerate(flips) if not r.risky]
+    for i, rank in zip(normal, _best_ranks([flips[i] for i in normal]), strict=True):
+        ranks[i] = rank
     crafted = [row for recipe in crafts if recipe for row in _capped_option([], recipe, gold, caps)]
     crafted.sort(key=lambda r: -r.profit)
     disenchanted = sorted(disenchants, key=lambda r: -r.profit)
@@ -4187,15 +4204,24 @@ def _capped_option(
 ) -> list[Row]:
     """`_option` within the `caps`, each row they shrank carrying its units sized by the
     gold alone, and which cap shrank it: the room if sizing within the room alone gives as
-    few units (ADR-0034)."""
+    few units (ADR-0034). A Flip to Sell they drop whose run within the room alone is no
+    more than `caps.risky_units` comes back whole as a Risky row (#194, ADR-0037)."""
     rows = _option(buys, crafts, gold, caps)
     if caps == NO_CAPS:
         return rows
+    room_only = _option(buys, crafts, gold, replace(caps, loss=math.inf))
+    kept = {(r.item_key, r.action) for r in rows}
+    rows += [
+        replace(r, risky=True)
+        for r in room_only
+        if r.action is Action.SELL
+        and (r.item_key, r.action) not in kept
+        and r.quantity <= caps.risky_units
+    ]
     whole = {(r.item_key, r.action): r.quantity for r in _option(buys, crafts, gold)}
     shrunk = [r for r in rows if whole.get((r.item_key, r.action), 0) > r.quantity]
     if not shrunk:
         return rows
-    room_only = _option(buys, crafts, gold, replace(caps, loss=math.inf))
     by_room = {(r.item_key, r.action): r.quantity for r in room_only}
     return [
         replace(

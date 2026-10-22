@@ -49,10 +49,10 @@ def test_frozen_entries_come_back_as_written(tmp_path):
 
 def test_frozen_flip_entries_come_back_as_written(tmp_path):
     # #60: what two Scans named, one of them nothing, and two Flip Grades, one without a
-    # sale or an own Listing seen.
+    # sale or an own Listing seen. The Ore was a Risky row (#194).
     path = tmp_path / "grades.toml"
     linen = Named("2589", 5, 200, 999.0, 3745.25, 0.1 + 0.2, 10_800)
-    ore = Named("2770", 3, 40, 80.5, 60.0, None, 10_800)
+    ore = Named("2770", 3, 40, 80.5, 60.0, None, 10_800, risky=True)
     sold = FlipGrade(1_790_015_000, 5, 1000, 3, 2997.0, 2847.15, 20.0, (0.03, 0.5), 3000, 1)
     unsold = FlipGrade(1_790_015_001, 3, 120, 0, 0.0, 0.0, 0.1 + 0.2, (), None, 0)
     freeze_shown(path, MARKET, 1_790_003_600, 10_800, [linen, ore])

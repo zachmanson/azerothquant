@@ -70,7 +70,9 @@ _HEADER = (
     "-- plus the own Listings up at cost, room what an option may cost and lossCap the\n"
     "-- most Unsold Loss it may have under the risk caps (nil without them); a row they\n"
     "-- shrank has capped, its units by the gold alone, and cappedBy, the cap that shrank\n"
-    '-- it ("room" or "loss"). A Flip to Sell or Flip to Vendor row has listings (bought),\n'
+    '-- it ("room" or "loss"). A Flip to Sell the loss cap dropped that comes back whole as\n'
+    "-- a Risky row has risky = true and unsoldLoss, what it loses if none of it sells.\n"
+    "-- A Flip to Sell or Flip to Vendor row has listings (bought),\n"
     "-- posts (stacks posted) and days (until its last unit sells; nil on a Flip to\n"
     "-- Vendor, which sells now). A\n"
     "-- Flip to Craft's row (action Craft on the shoppingList) lists its reagent buys:\n"
@@ -263,6 +265,11 @@ def _row(row: Row) -> dict[str, object]:
         out[key] = str(value) if isinstance(value, Action) else value
     if row.roi_hint:
         out["roiHint"] = True
+    # Only a Risky row states its Unsold Loss (#194): its details tell the player the risk.
+    if row.risky:
+        out["risky"] = True
+        if row.unsold_loss is not None:
+            out["unsoldLoss"] = math.floor(row.unsold_loss)
     # A Prediction buy's room is partly the Beta Sell Rate's only when Beta added to it (#110).
     if row.beta_room and row.beta_room.from_beta > 0:
         out["roomFromBeta"] = True

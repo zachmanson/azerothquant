@@ -221,6 +221,10 @@ RecommendationTable.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:
 -- Marks a Holdings row the logged-in Character has in its bags (#38): the backpack icon.
 RecommendationTable.BAG = "|TInterface\\Buttons\\Button-Backpack-Up:0|t"
 
+-- Tags a Risky row (#194, ADR-0037): over the risk cap, the player's call. A word, not only
+-- a color, in orange, ahead of the name so a narrow Item column doesn't clip it.
+RecommendationTable.RISKY = "|cffff8000Risky|r"
+
 local GAIN_COLOR, LOSS_COLOR, HINT_COLOR = "|cff1eff00", "|cffff2020", "|cff80ff80"
 
 local function wholePercent(share)
@@ -406,6 +410,9 @@ end
 -- with Per click, Per day and ROI after Profit.
 local function flipCells(r, name)
   local cells = shoppingCells(r, name)
+  if r.risky then
+    cells[1] = RecommendationTable.RISKY .. " " .. cells[1]
+  end
   local perClick, perDay, roi = measures(r)
   local day = perDay == math.huge and "now" or money(perDay)
   local share = roi and string.format("%d%%", wholePercent(roi)) or ""
@@ -531,6 +538,14 @@ local function cappedLine(r, caps)
   end
   return capped .. "if none sell, you'd lose at most " .. Money.format(caps.lossCap)
     .. " (" .. percent(caps.lossCap / caps.stake) .. " of what you're trading with)"
+end
+
+-- A Risky row's risk (#194, ADR-0037), in plain words, or nil if it isn't one.
+local function riskyLine(r)
+  if not (r.risky and r.unsoldLoss) then
+    return nil
+  end
+  return "Over your risk cap: if none of it sells you lose " .. Money.format(r.unsoldLoss) .. "."
 end
 
 -- What the side pane says to do with a row, in plain words (#160), and the Action it heads
@@ -697,9 +712,14 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         rowCells[noteAt], rowKeys[noteAt] = nil, nil
       end
       local rowDetails = paneLines(r, note, nameOf, held, holdersOf)
+      -- Why first: a Risky row's risk, then why the caps shrank it, as the room may (#194).
       local why = cappedLine(r, caps)
       if why then
         table.insert(rowDetails, 1, why)
+      end
+      local risk = riskyLine(r)
+      if risk then
+        table.insert(rowDetails, 1, risk)
       end
       if beta then
         local p = betaPrice(beta, r.itemKey)

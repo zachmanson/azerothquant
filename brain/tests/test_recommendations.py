@@ -907,6 +907,21 @@ def test_a_market_carries_its_stake_and_caps_and_a_capped_row_its_units_before_t
     )
 
 
+def test_a_risky_row_carries_the_flag_and_its_unsold_loss_and_a_normal_row_neither():
+    # #194, ADR-0037: the Addon tags a Risky row and states what it loses if none sells.
+    risky = Row(
+        "2589", Action.SELL, 1, price=150, profit=125, cost=150, risky=True, unsold_loss=24000.7
+    )
+    normal = Row("2770", Action.SELL, 3, price=10, profit=20, cost=30, unsold_loss=25.0)
+    m = MarketRecommendations(MARKET, 1790000000, 600000, shopping_list=[risky, normal])
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    lua_risky, lua_normal = data["recommendations"]["Quel'Thalas"]["Horde"]["shoppingList"]
+    assert (lua_risky["risky"], lua_risky["unsoldLoss"]) == (True, 24000)
+    assert "risky" not in lua_normal and "unsoldLoss" not in lua_normal
+
+
 def test_a_market_without_risk_caps_has_no_room_or_loss_cap():
     m = MarketRecommendations(MARKET, 1790000000, 600000, stake=600000)
 

@@ -42,6 +42,7 @@ from brain.recommend import (
     deposit_of,
     grades,
     held_at_writing,
+    market_lots,
     named_set,
     per_day,
     recommend,
@@ -333,10 +334,13 @@ def test_a_flip_to_sell_whose_unsold_loss_breaks_the_cap_buys_the_best_run_that_
 
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at, flip.capped, flip.capped_by) == (3, 14999, 5, "loss")
+    assert not flip.risky  # the cap only shrank it (#194)
 
 
-def test_a_flip_to_sell_with_no_run_within_the_risk_caps_is_skipped(db):
-    # As above, but 5% of a 50g Stake is 2g 50s: even the 3 at 1g would lose more unsold.
+def test_a_few_unit_flip_to_sell_the_loss_cap_drops_comes_back_risky_at_full_size(db):
+    # #194: as above, but 5% of a 50g Stake is 2g 50s, so even the 3 at 1g would lose more
+    # unsold. The 5 units are no more than risky_max_units, so all 5 come back as a Risky
+    # row, its Unsold Loss stated: 6g less 5 at the 10c Vendor Price, plus 1s a post of 2.
     result = run(
         db,
         selling_two_linen_an_hour(
@@ -346,7 +350,87 @@ def test_a_flip_to_sell_with_no_run_within_the_risk_caps_is_skipped(db):
         config=CAPPED,
     )
 
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.quantity, flip.post_at, flip.risky, flip.unsold_loss) == (
+        Action.SELL,
+        5,
+        29999,
+        True,
+        60200,
+    )
+    assert (flip.capped, flip.capped_by) == (None, None)
+
+
+def test_a_flip_to_sell_with_no_run_within_the_risk_caps_is_skipped(db):
+    # As above, but the 5 units are one more than risky_max_units: no Risky row.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD // 2, vendor_prices={2589: 10})],
+        config=replace(CAPPED, risky_max_units=4),
+    )
+
     assert result[MARKET].shopping_list == []
+
+
+def test_a_risky_row_takes_no_place_from_the_rows_kept(db):
+    # #194: the Risky Linen above beats a 1 Ore Flip at 2g by every measure, but with one
+    # row kept, the Ore still makes the list: the Backtest takes only the rows the caps
+    # leave, so a Risky row can't push one out. The Linen is kept too, ranked first.
+    result = run(
+        db,
+        [
+            scan(T0, row(quantity=20, unit=30000), row(ORE, quantity=20, unit=30000)),
+            scan(
+                T0 + HOUR,
+                row(quantity=18, unit=30000),
+                row(quantity=3, unit=10000),
+                row(quantity=2, unit=15000),
+                row(ORE, quantity=18, unit=30000),
+                row(ORE, quantity=1, unit=20000),
+            ),
+        ],
+        [character_read(item(), money=GOLD // 2, vendor_prices={2589: 10})],
+        config=replace(CAPPED, shopping_list_rows=1),
+    )
+
+    assert [(r.item_key, r.quantity, r.risky) for r in result[MARKET].shopping_list] == [
+        (LINEN_KEY, 5, True),
+        (ORE_KEY, 1, False),
+    ]
+
+
+def test_a_flip_to_sell_the_room_alone_drops_gets_no_risky_row(db):
+    # #194: 10g of gold and 8g up make an 18g Stake, whose 60% leaves 2g 80s of room after
+    # the 8g up, under the 3g of the 3 at 1g. The room is gold the player can't spare, so
+    # the 5 units don't come back as a Risky row.
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), vendor_prices={2589: 10})],
+    )
+
+    m = recommend_market(db, CAPPED, MARKET, [], T0 + HOUR, gold=100_000, tied_up=80_000)
+
+    assert m.shopping_list == []
+
+
+def test_without_the_risk_caps_there_are_no_risky_rows(db):
+    # #194: the Risky row's case above, with the caps off: an ordinary row.
+    result = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD // 2, vendor_prices={2589: 10})],
+    )
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.quantity, flip.risky) == (5, False)
 
 
 def test_a_flip_to_sell_costs_no_more_than_the_room_the_own_listings_leave(db):
@@ -2965,6 +3049,28 @@ def test_a_flip_to_craft_stops_at_the_first_craft_that_breaks_a_risk_cap(db):
     assert craft.capped_by == "loss"
 
 
+def test_a_flip_to_craft_the_loss_cap_drops_gets_no_risky_row(db):
+    # #194: as above, but the gold buys 5 crafts, all of which the room covers, and 5% of
+    # the 50c Stake is 2.5c, under one Bolt's 9.6c: no craft fits, and only a Flip to Sell
+    # comes back as a Risky row.
+    run(
+        db,
+        linen_and_bolts_selling(),
+        [
+            character_read(
+                vendor_prices={2996: 1},
+                recipes=[recipe(reagents=[(2320, 1)])],
+                merchant_costs={2320: 10},
+            )
+        ],
+    )
+
+    config = replace(CAPPED, ah_deposit_min_copper=0, flip_tied_up_share=1)
+    m = recommend_market(db, config, MARKET, [], T0 + HOUR, gold=50, tied_up=0)
+
+    assert m.shopping_list == []
+
+
 def test_a_held_merchant_reagent_is_used_before_one_is_bought(db):
     # The Thread held goes into the first Bolt; the other 5 buy theirs from a merchant.
     result = run(
@@ -4901,3 +5007,23 @@ def test_a_loot_alert_values_one_unit_alone_ahead_of_the_held_ones(db):
     assert result[MARKET].loot_alert.items == {
         LINEN_KEY: LootValue(pytest.approx(99 * 0.95), Action.SELL)
     }
+
+
+def test_a_purchase_a_risky_row_named_starts_a_lot_and_grades_keep_it_risky(db, tmp_path):
+    # #194, ADR-0037: a Risky row is named like any other. The Risky Linen's 5 bought after
+    # its Scan start a Lot, and grades.toml keeps the row it showed as risky.
+    config = replace(CAPPED, grades_path=tmp_path / "grades.toml")
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD // 2, vendor_prices={2589: 10})],
+        config=config,
+        mailbox_reads=[won(T0 + 13 * HOUR + 10 * MINUTE, count=5, price=60000)],
+    )
+
+    [lot] = market_lots(db, config, MARKET, [])
+    assert (lot.item_key, lot.units, lot.cost) == (LINEN_KEY, 5, 60000)
+    shown = load_frozen(config.grades_path, MARKET).shown[T0 + HOUR]
+    assert shown[LINEN_KEY].risky

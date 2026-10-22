@@ -138,6 +138,9 @@ DEFAULT_SUFFIX_POOL_WEIGHT = 0.5
 # 5% by 12g and 17g at the vendor and market marks in the Backtest on 87 Scans.
 DEFAULT_FLIP_UNSOLD_LOSS_SHARE = 0.03
 DEFAULT_FLIP_TIED_UP_SHARE = 0.60
+# A Flip to Sell the Unsold Loss cap drops comes back as a Risky row if its run is no more
+# than this many units (#194, ADR-0037): the few-unit dear flips the cap hid made the money.
+DEFAULT_RISKY_MAX_UNITS = 5
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -196,6 +199,8 @@ class Config:
     # the Stake, and its cost at most this share of the Stake less the own Listings up.
     flip_unsold_loss_share: float = DEFAULT_FLIP_UNSOLD_LOSS_SHARE
     flip_tied_up_share: float = DEFAULT_FLIP_TIED_UP_SHARE
+    # The most units a Risky row may have (#194, ADR-0037).
+    risky_max_units: int = DEFAULT_RISKY_MAX_UNITS
     # Hours of no sales added to the Observation Windows before Sell Rate becomes a
     # quantity, for Holdings and for Flips.
     sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
@@ -555,6 +560,9 @@ def load_config(path: Path) -> Config:
             ("flip_tied_up_share", DEFAULT_FLIP_TIED_UP_SHARE),
         )
     )
+    risky_units = _parse_whole(
+        path, raw.get("risky_max_units", DEFAULT_RISKY_MAX_UNITS), "risky_max_units", 0
+    )
     pool_weight = _parse_number(
         path,
         raw.get("suffix_pool_weight", DEFAULT_SUFFIX_POOL_WEIGHT),
@@ -608,6 +616,7 @@ def load_config(path: Path) -> Config:
         flip_min_margin_copper=margin_copper,
         flip_unsold_loss_share=unsold_loss_share,
         flip_tied_up_share=tied_up_share,
+        risky_max_units=risky_units,
         sell_rate_prior_hours_holdings=prior_holdings,
         sell_rate_prior_hours_flips=prior_flips,
         sale_size_prior_events_holdings=size_prior_holdings,

@@ -258,8 +258,12 @@ How long the player is willing to wait for held units to sell. Only the units Se
 _Avoid_: timeout, patience
 
 **Shopping List**:
-The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, each recipe's Flips to Craft, and each Disenchant source group's Flip to Disenchant, sized as if it were the only buy within the Budget and the risk caps (its Unsold Loss and the gold tied up in posts, each a share of the Stake), and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day (Flips to Sell only) or ROI, Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab, and Flips to Disenchant up to `disenchant_list_rows` (10) by Profit, in theirs. Taking two may need more than the Budget, and the player picks (ADR-0017).
+The Recommendations for things to buy on the Auction House, as options: each Item Key's Flip to Sell and Flip to Vendor, each recipe's Flips to Craft, and each Disenchant source group's Flip to Disenchant, sized as if it were the only buy within the Budget and the risk caps (its Unsold Loss and the gold tied up in posts, each a share of the Stake), and priced after only its own buys. The most profitable options are shown first, Flips to Sell and Flips to Vendor in the top `shopping_list_rows` (50) by any of Profit, Per click, Per day (Flips to Sell only) or ROI, Flips to Craft up to `craft_list_rows` (25) by Profit, in their own tab, and Flips to Disenchant up to `disenchant_list_rows` (10) by Profit, in theirs. Taking two may need more than the Budget, and the player picks (ADR-0017). A Flip to Sell the Unsold Loss cap drops can come back as a Risky row (ADR-0037).
 _Avoid_: buy list, snipes, basket
+
+**Risky row**:
+A Flip to Sell on the Shopping List that the Unsold Loss cap would drop, shown anyway at full size because its run is short: no more than `risky_max_units` (5) units, sized within the gold, the Budget and the room, and clearing every other check. The Addon tags it Risky and says what it loses if none of it sells: the player takes the risk. It's named, so a buy from it starts a Lot, and its Flip Grades are flagged risky. The Backtest never takes one (ADR-0037).
+_Avoid_: uncapped row, override
 
 **Per click**:
 A Flip to Sell's or Flip to Vendor's Profit for each click it takes: each Listing it buys (in Era every Listing is its own buyout) and each stack it posts, at the Item Key's usual Sale Event size. A Flip to Vendor posts nothing.
