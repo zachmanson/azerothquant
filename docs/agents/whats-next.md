@@ -1,3 +1,9 @@
+2026-10-22 (later 159): #194 GRILLED -> ready-for-agent, retitled "Risky rows"; agent brief is comment 6346324624 (supersedes the 10-20 spec). Claim confirmed: at the ~17g Stake the 51s Unsold Loss cap cuts every Flip to Sell over ~1g on every Scan since 10-14, and the mail record's winners are few-unit dear flips. Decision: caps unchanged, Backtest unchanged; a Flip to Sell the loss cap drops entirely comes back inline as a "Risky" row if its run is <= risky_max_units (5). It's named, gets Lots, and is flagged in grades. Split out: #197 (min Profit growing with the Stake, needs-triage) and #198 (part 2 clip+cap, parked; caps scale away at a big Stake).
+
+Next: #194, #195, #196, #188, then #193. Guildie work stays parked.
+
+- Gotchas: same as later 157. `recommend_market` over 14 Scans with caps on/off takes >10 min on a fresh copy (no Fair Value cache); run it in the background.
+
 2026-10-22 (later 158): #193 TRIAGED -> bug + ready-for-agent; agent brief is comment 6345305541. Cause confirmed, but it can't fire until the pool index passes one page (1000 entries, the Worker's MAX_PAGE; the pool has ~100), so not before Nov 4. User's call: a first pull saves its cursor only after the last page; no schema change. Queued after the others.
 
 Next: #194, #195, #196, #188, then #193. Guildie work stays parked (user: skipping guildie stuff for now).
