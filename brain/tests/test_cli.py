@@ -1108,10 +1108,11 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Sell", "3", "6s 99c", "19s 92c", "6s 54c", "1"] in lines
     assert "Shopping List, options each sized on its own within 12g 34s 56c\n" in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
-    # and loses one 6c deposit (60% of the 10c Vendor Price) first (#78).
-    # #98: 1 Listing bought and 1 stack posted, 2s 46c a click. Behind the 3 held, the
-    # last of the 5 sells at 48 a day / 25 (the 24 h Flip prior) in 2.6 days, 1s 89c a day.
-    # 4s 92c on 14s is 35.1%.
+    # and loses one deposit first (#78): 6c a unit (60% of the 10c Vendor Price), but a
+    # post of 2 pays the 1s minimum, so 50c a unit (#192).
+    # #98: 1 Listing bought and 1 stack posted, 2s 24c a click. Behind the 3 held, the
+    # last of the 5 sells at 48 a day / 25 (the 24 h Flip prior) in 2.6 days, 1s 72c a day.
+    # 4s 48c on 14s is 32.0%.
     assert [
         "Item",
         "Action",
@@ -1130,10 +1131,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
         "Sell",
         "2",
         "7s 00c",
-        "4s 92c",
-        "2s 46c",
-        "1s 89c",
-        "35.1%",
+        "4s 48c",
+        "2s 24c",
+        "1s 72c",
+        "32.0%",
         "14s 00c",
         "1",
     ] in lines

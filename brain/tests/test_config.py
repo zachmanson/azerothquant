@@ -296,6 +296,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.roi_hint == 0.2
     assert config.non_stacking_effort_copper == 500
     assert config.ah_deposit_share == 0.6
+    assert config.ah_deposit_min_copper == 100
     assert config.post_duration_hours == 24
     assert config.suffix_pool_weight == 0.5
     assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.03, 0.6)
@@ -329,6 +330,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "roi_hint = 0.5\n"
         "non_stacking_effort_copper = 0\n"
         "ah_deposit_share = 0.15\n"
+        "ah_deposit_min_copper = 50\n"
         "post_duration_hours = 12\n"
         "suffix_pool_weight = 0.25\n"
         "flip_unsold_loss_share = 0.04\n"
@@ -362,6 +364,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert config.roi_hint == 0.5
     assert config.non_stacking_effort_copper == 0
     assert config.ah_deposit_share == 0.15
+    assert config.ah_deposit_min_copper == 50
     assert config.post_duration_hours == 12
     assert config.suffix_pool_weight == 0.25
     assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.04, 0.5)
@@ -431,6 +434,9 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("non_stacking_effort_copper", "-1"),
         ("ah_deposit_share", "-0.1"),
         ("ah_deposit_share", "true"),
+        ("ah_deposit_min_copper", "-1"),
+        ("ah_deposit_min_copper", "0.5"),
+        ("ah_deposit_min_copper", "true"),
         ("post_duration_hours", "0"),
         ("post_duration_hours", '"48"'),
         ("suffix_pool_weight", "-0.1"),

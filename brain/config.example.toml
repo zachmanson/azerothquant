@@ -191,11 +191,14 @@
 # would post the deposits it expects that unit to lose while it waits its turn to sell,
 # so slow sellers look as good as they are. The deposit per unit is learned from the
 # latest Sold invoice of the Item Key; one never seen Sold is charged ah_deposit_share of
-# its Vendor Price per posting (nothing without a Vendor Price). The 0.60 default is the
-# 24 h rate, checked in game (Forever offers 2, 8 or 24 h). post_duration_hours must match the
-# duration you post at (and the rate behind ah_deposit_share). Defaults to 0.60 and 24.
+# its Vendor Price per posting (nothing without a Vendor Price). Every post pays at least
+# ah_deposit_min_copper, however few units are in it (#192), so an invoice at that minimum
+# teaches no rate. The 0.60 default is the 24 h rate, checked in game (Forever offers 2, 8
+# or 24 h). post_duration_hours must match the duration you post at (and the rate behind
+# ah_deposit_share). Defaults to 0.60, 100 (1 silver) and 24.
 # Must come before the first [[installs]].
 # ah_deposit_share = 0.60
+# ah_deposit_min_copper = 100
 # post_duration_hours = 24
 
 # Optional: Sibling suffixes (#58, ADR-0022). Random suffixes split an item's sales thin,

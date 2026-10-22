@@ -512,7 +512,8 @@ def test_the_brain_is_replayed_without_sub_crafts(db):
 
 
 def test_the_brain_is_replayed_without_deposits_and_graded_with_them(db):
-    # Each posting lasts 1 h and costs a 48 deposit (60% of the 80 Vendor Price).
+    # Each posting lasts 1 h. Linen sells 2 a Sale Event, so it posts 2 a stack: 96 (60%
+    # of the 80 Vendor Price for each), raised to the 100 minimum (#192), 50 a unit.
     result = run(
         db,
         linen_selling_then_crashing(),
@@ -529,7 +530,7 @@ def test_the_brain_is_replayed_without_deposits_and_graded_with_them(db):
     graded = result[MARKET].graded
     assert graded[Policy.BRAIN] == pytest.approx(2 * 99 * 0.95 + 4 * 80 - 6 * 80)
     assert graded[Policy.BRAIN_WITHOUT_DEPOSITS] == pytest.approx(
-        6 * 99 * 0.95 - 2 * 48 - 2 * 2 * 48 - 6 * 80
+        6 * 99 * 0.95 - 2 * 50 - 2 * 2 * 50 - 6 * 80
     )
 
 

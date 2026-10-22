@@ -124,6 +124,9 @@ DEFAULT_NON_STACKING_EFFORT_COPPER = 500
 # per unit per posting at 24 h: Classic's 5% per 2 h, checked in game 2026-09-28
 # (floor(Vendor Price x 5%) x 12; 8c/32c/96c at 2/8/24 h for a 162c Vendor Price).
 DEFAULT_AH_DEPOSIT_SHARE = 0.60
+# Every post pays at least 1 silver, however few units or cheap (#192): a post's deposit is
+# the larger of this and the share above times the units in it.
+DEFAULT_AH_DEPOSIT_MIN_COPPER = 100
 # How long the player posts for: a unit still unsold after it expires and loses its deposit.
 # Forever offers 2, 8 or 24 h (no 48 h, checked 2026-09-28).
 DEFAULT_POST_DURATION_HOURS = 24
@@ -247,8 +250,10 @@ class Config:
     # doesn't stack.
     non_stacking_effort_copper: int = DEFAULT_NON_STACKING_EFFORT_COPPER
     # The deposit per unit per posting, as a share of the Vendor Price, for an Item Key
-    # without a Sold invoice to learn it from, and how long a posting lasts.
+    # without a Sold invoice to learn it from, the least any one post pays, and how long
+    # a posting lasts.
     ah_deposit_share: float = DEFAULT_AH_DEPOSIT_SHARE
+    ah_deposit_min_copper: int = DEFAULT_AH_DEPOSIT_MIN_COPPER
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS
     # What each sibling suffix's Sale Event counts for in a held unit's Sell Rate (#58).
     suffix_pool_weight: float = DEFAULT_SUFFIX_POOL_WEIGHT
@@ -531,6 +536,11 @@ def load_config(path: Path) -> Config:
         lambda x: x >= 0,
         "of at least 0",
     )
+    deposit_min = _parse_copper(
+        path,
+        raw.get("ah_deposit_min_copper", DEFAULT_AH_DEPOSIT_MIN_COPPER),
+        "ah_deposit_min_copper",
+    )
     post_hours = _parse_number(
         path,
         raw.get("post_duration_hours", DEFAULT_POST_DURATION_HOURS),
@@ -624,6 +634,7 @@ def load_config(path: Path) -> Config:
         roi_hint=roi_hint,
         non_stacking_effort_copper=effort,
         ah_deposit_share=deposit_share,
+        ah_deposit_min_copper=deposit_min,
         post_duration_hours=post_hours,
         suffix_pool_weight=pool_weight,
     )

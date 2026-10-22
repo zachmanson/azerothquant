@@ -39,6 +39,7 @@ from brain.recommend import (
     _Caps,
     _HoldBuy,
     _spend_on_predictions,
+    deposit_of,
     grades,
     held_at_writing,
     named_set,
@@ -1793,6 +1794,8 @@ def test_a_flip_to_craft_pays_to_buy_each_reagent_that_doesnt_stack(db, stacks, 
 # Posted for an hour at a time, so with 2 Linen selling an hour, units 0-1 of the queue
 # sell in their first posting, 2-3 lose one deposit first, and 4-5 lose two.
 HOURLY_POSTS = replace(CONFIG, post_duration_hours=1)
+# Without the 1 silver minimum a post pays (#192), so a deposit is the rate alone.
+NO_MINIMUM_DEPOSIT = replace(CONFIG, ah_deposit_min_copper=0)
 
 
 @pytest.mark.parametrize(("hours", "lost"), [(3, 0), (1, 2 * 6 + 2 * 12)])
@@ -1803,7 +1806,7 @@ def test_held_units_down_the_queue_lose_a_deposit_per_expiry_before_they_sell(db
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
-        config=replace(CONFIG, post_duration_hours=hours),
+        config=replace(NO_MINIMUM_DEPOSIT, post_duration_hours=hours),
     )
 
     sell, _ = result[MARKET].holdings
@@ -1840,7 +1843,7 @@ def test_the_deposit_is_learned_from_the_latest_sold_invoice(db):
         db,
         selling_two_linen_an_hour(),
         [character_read(item(count=10), vendor_prices={2589: 10})],
-        config=HOURLY_POSTS,
+        config=replace(NO_MINIMUM_DEPOSIT, post_duration_hours=1),
         mailbox_reads=[linen_sold_for_deposits((1, 50), (2, 20))],
     )
 
@@ -1849,17 +1852,67 @@ def test_the_deposit_is_learned_from_the_latest_sold_invoice(db):
     assert sell.profit == pytest.approx(6 * 99 * 0.95 - (2 * 10 + 2 * 20))
 
 
-@pytest.mark.parametrize("vendor_prices", [None, {2589: 0}])
-def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_no_deposit(db, vendor_prices):
+def deposit_per_unit(db, vendor_price, stack, config=CONFIG, mailbox_reads=()):
+    """What posting one unit of Linen costs, with `vendor_price` (None for none) and a
+    Flip's post size of `stack`: its one Sale Event in the Scans sold that many."""
+    vendor_prices = None if vendor_price is None else {2589: vendor_price}
+    run(
+        db,
+        [scan(T0, row(quantity=100)), scan(T0 + HOUR, row(quantity=100 - stack))],
+        [character_read(item(count=1), vendor_prices=vendor_prices)],
+        config=config,
+        mailbox_reads=mailbox_reads,
+    )
+    return deposit_of(db, config, MARKET)(LINEN_KEY)
+
+
+@pytest.mark.parametrize(
+    ("vendor_price", "stack", "deposit"),
+    [
+        (10, 1, 100),  # 6 for the post, raised to the 1 silver minimum
+        (1, 20, 5),  # 12 for the post, raised to 100: 5 a unit
+        (10, 20, 6),  # 120 for the post, above the minimum
+        (33, 56, 0.6 * 33),  # 1108.8 for the post, above it
+        (0, 1, 100),  # no Vendor Price still pays the minimum
+        (None, 4, 25),
+    ],
+)
+def test_a_post_pays_at_least_the_minimum_deposit(db, vendor_price, stack, deposit):
+    assert deposit_per_unit(db, vendor_price, stack) == pytest.approx(deposit)
+
+
+def test_an_invoice_at_the_minimum_deposit_teaches_no_rate(db):
+    # 20 Linen for 100 is the minimum, not 5 a unit: posting 56 costs 60% of the 10
+    # Vendor Price, 6 a unit, not 5.
+    floored = linen_sold_for_deposits((20, 100))
+
+    assert deposit_per_unit(db, 10, 56, mailbox_reads=[floored]) == pytest.approx(6)
+
+
+def test_an_invoice_above_the_minimum_deposit_sets_the_rate(db):
+    above = linen_sold_for_deposits((56, 1107))
+
+    assert deposit_per_unit(db, 10, 56, mailbox_reads=[above]) == pytest.approx(1107 / 56)
+
+
+def test_no_deposit_is_charged_with_deposits_switched_off(db):
+    off = replace(CONFIG, deposits=False)
+
+    assert deposit_per_unit(db, 10, 1, config=off) == 0
+
+
+def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_the_minimum_deposit(db):
+    # Linen sells 2 a Sale Event, so it posts 2 a stack, and each post pays the 100
+    # minimum: 50 a unit. Posted hourly, units 3-4 of the queue lose one and 5-6 two.
     result = run(
         db,
-        selling_two_linen_an_hour(),
-        [character_read(item(count=10), vendor_prices=vendor_prices)],
+        selling_two_linen_an_hour(unit=200),
+        [character_read(item(count=10))],
         config=HOURLY_POSTS,
     )
 
     sell = next(r for r in result[MARKET].holdings if r.action is Action.SELL)
-    assert (sell.quantity, sell.profit) == (6, pytest.approx(6 * 99 * 0.95))
+    assert (sell.quantity, sell.profit) == (6, pytest.approx(6 * 199 * 0.95 - 6 * 50))
 
 
 def test_a_held_unit_whose_deposits_eat_its_edge_over_vendor_goes_to_vendor(db):
@@ -1928,8 +1981,11 @@ def one_sale_in_18_minutes(*latest_rows):
 
 def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
     # As if 24 more hours had been watched with no sales: 1 / 24.3 h * 24 * 7 days = 6.9,
-    # not the raw 80 a day * 7 = 560.
-    config = replace(DEFAULTS, sell_rate_prior_hours_flips=24, flip_min_sale_events=1)
+    # not the raw 80 a day * 7 = 560. No minimum deposit, which the slow units would
+    # lose day after day (#192).
+    config = replace(
+        DEFAULTS, sell_rate_prior_hours_flips=24, flip_min_sale_events=1, ah_deposit_min_copper=0
+    )
     result = run(
         db,
         one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700)),
@@ -1944,8 +2000,9 @@ def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
 def test_holdings_are_discounted_less_than_flips(db, other_db):
     # The default Sell Rate Prior for Holdings, 3 h: 1 / 3.3 h * 24 * 7 days = 50.9 of the 100
     # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought. Held
-    # units take the room before Flips (#67), so the Flips are judged with none held.
-    config = replace(DEFAULTS, flip_min_sale_events=1)
+    # units take the room before Flips (#67), so the Flips are judged with none held. No
+    # minimum deposit, which the slow units would lose day after day (#192).
+    config = replace(DEFAULTS, flip_min_sale_events=1, ah_deposit_min_copper=0)
     scans = one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700))
     holding = run(
         db, scans, [character_read(item(count=100), vendor_prices={2589: 10})], config=config
@@ -2816,7 +2873,7 @@ def test_a_flip_to_craft_from_merchant_reagents_alone_is_bounded_by_gold(db):
 def test_a_flip_to_craft_stops_at_the_first_craft_that_breaks_a_risk_cap(db):
     # A Bolt from 1 Thread at 10c Vendors for 1c, so each Bolt posted loses 9.6c unsold
     # (10c less 1c, plus a 0.6c Deposit). 6 would Sell, but 5% of a 6s Stake is 30c: 3
-    # crafts lose 28.8c, and a 4th would make it 38.4c.
+    # crafts lose 28.8c, and a 4th would make it 38.4c. No minimum deposit (#192).
     run(
         db,
         linen_and_bolts_selling(),
@@ -2829,7 +2886,8 @@ def test_a_flip_to_craft_stops_at_the_first_craft_that_breaks_a_risk_cap(db):
         ],
     )
 
-    m = recommend_market(db, CAPPED, MARKET, [], T0 + HOUR, gold=600, tied_up=0)
+    config = replace(CAPPED, ah_deposit_min_copper=0)
+    m = recommend_market(db, config, MARKET, [], T0 + HOUR, gold=600, tied_up=0)
 
     [craft] = m.shopping_list
     assert (craft.action, craft.quantity, craft.cost, craft.capped) == (Action.CRAFT, 3, 30, 6)

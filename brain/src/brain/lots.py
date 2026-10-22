@@ -354,13 +354,18 @@ def _named(
     return named
 
 
-def deposits(outcomes: list[Outcome]) -> dict[str, float]:
+def deposits(outcomes: list[Outcome], minimum: int) -> dict[str, float]:
     """What posting one unit of each Item Key cost (#78): the deposit per unit on its
-    latest Sold Outcome's invoice, from `outcomes` already linked (`link_sales`)."""
+    latest Sold Outcome's invoice, from `outcomes` already linked (`link_sales`). An
+    invoice that paid no more than the `minimum` deposit shows the minimum, not the rate
+    (#192), so it teaches none."""
     sold = [
         o
         for o in outcomes
-        if o.kind is MailKind.SOLD and o.item_key is not None and o.deposit is not None
+        if o.kind is MailKind.SOLD
+        and o.item_key is not None
+        and o.deposit is not None
+        and o.deposit > minimum
     ]
     return {o.item_key: o.deposit / o.count for o in sorted(sold, key=happened_at)}
 

@@ -19,6 +19,7 @@ The Decision Engine now charges every unit it would post the deposits it expects
 ## Consequences
 
 - No UI change: the deposit only shows inside profit and margin. A Holdings Sell's margin is its average profit per unit over the Vendor Price.
-- `ah_deposit_share` checked in game 2026-09-28: Forever offers 2, 8 or 24 h (no 48 h) and charges floor(Vendor Price x 5%) x 1, 4 or 12, as Classic Era. So 0.60 is the 24 h rate, the default duration is 24 h, and there is no 1s minimum (one Copper Bar, 10c Vendor Price, costs 0c).
+- `ah_deposit_share` checked in game 2026-09-28: Forever offers 2, 8 or 24 h (no 48 h), and 0.60 is the 24 h rate, the default duration 24 h.
+- Corrected 2026-10-22 (#192): every post pays at least 1s (`ah_deposit_min_copper`), and the rate is rounded on the post's total, not per unit: max(1s, floor(0.60 x Vendor Price x units)). That fits 123 of the 135 Beta Sold invoices with a Vendor Price (the per-unit 0.60 fit 76). The earlier note, no minimum because one Copper Bar cost 0c, was wrong: a Copper Bar posted alone paid 1s on 09-28, and a Vendor Price of 0 pays 1s too. So an invoice at the minimum shows the floor, not the rate, and teaches none, and each unit is charged its post's deposit split over the units in it, at the post size Flips assume (#98), held units included.
 - Cancels aren't modelled; a cancelled posting loses its deposit too.
 - `deposit` isn't part of what identifies a mail across Mailbox Reads, so a history built before it was kept still matches its live Sold mail. Those mails keep no deposit until `brain rebuild`.

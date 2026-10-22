@@ -1758,8 +1758,10 @@ def market_bound(
 
 
 def deposit_of(conn: sqlite3.Connection, config: Config, market: Market) -> Callable[[str], float]:
-    """What posting one unit of an Item Key costs in the Market (`_Valuer.deposit`)."""
-    return _valuer(conn, config, market, None)[0].deposit
+    """What posting one unit of an Item Key costs in the Market (`_Valuer.deposit`), at
+    the post size as of its latest Scan (#192): like the rate, the latest seen."""
+    times = scan_times(conn, market)
+    return _valuer(conn, config, market, times[-1] if times else None)[0].deposit
 
 
 def _valuer(
@@ -1818,7 +1820,7 @@ def _valuer(
         merchant,
         cut,
         non_stacking(conn, market, seen),
-        deposits(linked),
+        deposits(linked, config.ah_deposit_min_copper),
         config,
         disenchanting=_Disenchanting(
             _disenchant_table(),
@@ -2059,14 +2061,19 @@ class _Valuer:
         return _Cheap(self.listed.get(item_key, ()))
 
     def deposit(self, item_key: str) -> float:
-        """What posting one unit of an Item Key costs (#78): as on its latest Sold invoice,
-        else the config share of its Vendor Price, or nothing without one. Nothing when
-        Deposits are switched off (a replay's ablation, #80)."""
-        if not self._config.deposits:
+        """What posting one unit of an Item Key costs (#78), posted `stack` units a post
+        (held units too, #192): each post pays its units at the rate on the latest Sold
+        invoice, else the config share of the Vendor Price, or nothing without one, but
+        never under the minimum deposit. Nothing when Deposits are switched off (a
+        replay's ablation, #80)."""
+        c = self._config
+        if not c.deposits:
             return 0.0
-        if item_key in self.deposits:
-            return self.deposits[item_key]
-        return self._config.ah_deposit_share * self.vendor.get(item_id_of(item_key), 0)
+        rate = self.deposits.get(item_key)
+        if rate is None:
+            rate = c.ah_deposit_share * self.vendor.get(item_id_of(item_key), 0)
+        stack = self.stack(item_key)
+        return max(c.ah_deposit_min_copper, rate * stack) / stack
 
     def queue(self, item_key: str, flips: bool) -> _Queue:
         """The Item Key's sale queue, at its Sell Rate under the Flip priors, or at its
