@@ -1,3 +1,9 @@
+2026-10-24 (later 163): #157 closed as not planned, no code. Its premise was wrong: nothing writes the old `AzerothQuant_Data` folder; the write into `AddOns/AzerothQuant/Recommendations.lua` is ADR-0030's startup copy (TOC loads it, `DataAddon.atLoad` judges freshness and the Addon prunes by it). User's call: keep the write. On the dev checkout `git update-index --skip-worktree addon/AzerothQuant/Recommendations.lua` is now set, as development.md says, so the junction's writes no longer show in git.
+
+Next, in order: grill #91's new groups, then #164, #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161.
+
+- Gotchas: same as later 162. The stub is skip-worktree on this PC: if a commit ever needs to change the shipped stub, run `git update-index --no-skip-worktree` on it first, and a pull that changes it will refuse until you do.
+
 2026-10-24 (later 162): #199 done. `GAME_FOLDERS` maps `_forever_` to Live; `_classic_` (MoP) maps to nothing. Setup guide, development.md and CONTEXT.md (Era) say `_forever_`; Live test fixtures moved off `_classic_`. Dev PC: `_forever_/Interface/AddOns/AzerothQuant` is now a junction to the repo, `brain/config.toml` has the `_forever_` Live install, and `brain watch` was restarted and watches both. The Oct 21 `_forever_` save had no Scans and no Mailbox Reads, only 3 Character Reads from test realm "CAMWOW US2 Realm 4 PvP". User's call: backed up (with the old Addon copy) to `brain/archive/forever-2026-10-21/` and cleared. Era comes only from the folder (`_era_of`); user's call: no realm guard, noted on the issue.
 
 Next, in order: #157 (stop writing the old Addon path), grill #91's new groups, then #164, #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161.
