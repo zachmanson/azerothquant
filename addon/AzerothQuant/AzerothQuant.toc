@@ -32,6 +32,7 @@ DisenchantGroup.lua
 BoughtMarks.lua
 RecommendationTable.lua
 ColumnLayout.lua
+Placement.lua
 CraftChain.lua
 TooltipLines.lua
 BuyUnderMatch.lua

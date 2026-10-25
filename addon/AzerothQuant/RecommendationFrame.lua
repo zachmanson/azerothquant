@@ -38,17 +38,19 @@ local Character = ns.Character
 local TooltipLines = ns.TooltipLines
 local NextStep = ns.NextStep
 local Nudge = ns.Nudge
+local Placement = ns.Placement
 
 -- Templates below were probed on the Beta client (#46): ButtonFrameTemplate (portrait
 -- panel with an inset), PanelTabButtonTemplate, ColumnDisplayButtonTemplate (the AH's
 -- column headers). The Classic-era names (CharacterFrameTabButtonTemplate,
 -- WhoFrameColumnHeaderTemplate) are missing there.
 -- The frame is resizable from its bottom-right corner, and its size is saved (#136). It
--- opens at WIDTH, which fits beside the AH at 1920 px. At MIN_WIDTH the Shopping List's rows
--- get 690 beside the side pane, which ColumnLayout fits by hiding Beta, Cost, ROI and Per
--- click.
+-- opens at WIDTH, narrowed to the room beside the AH, or below the AH when MIN_WIDTH doesn't
+-- fit there (#164). At MIN_WIDTH the Shopping List's rows get 690 beside the side pane, which
+-- ColumnLayout fits by hiding Beta, Cost, ROI and Per click.
 local WIDTH, HEIGHT = 1100, 540
 local MIN_WIDTH, MIN_HEIGHT = 1000, 400
+local AH_GAP = 10 -- between the AH and the frame on first open
 local PORTRAIT = "Interface\\Icons\\INV_Misc_Coin_01"
 local INSET_TOP = -64 -- the Craft Chain panel's: room for a header under the title bar
 -- Top to bottom under the title bar: the tabs, the banner (BANNER_HEIGHT, or QUIET_HEIGHT
@@ -756,9 +758,10 @@ local function selectTab(title)
   redraw()
 end
 
+-- From the frame's corner, not GetPoint: a resize before the first drag may leave it
+-- anchored to the AH, and restorePosition anchors to UIParent.
 local function savePosition()
-  local point, _, relativePoint, x, y = frame:GetPoint()
-  db.recommendationFrame = { point = point, relativePoint = relativePoint, x = x, y = y }
+  db.recommendationFrame = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = frame:GetLeft(), y = frame:GetTop() }
 end
 
 local function saveSize()
@@ -787,7 +790,15 @@ local function restorePosition()
     frame:SetPoint(saved.point, UIParent, saved.relativePoint, saved.x, saved.y)
   elseif AuctionHouseFrame and AuctionHouseFrame:IsShown() then
     -- Next to the AH until first dragged; dragging re-anchors to UIParent before saving.
-    frame:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", 10, 0)
+    -- Narrowed to the room right of it, or below it when that's too narrow (#164).
+    local room = UIParent:GetRight() - AuctionHouseFrame:GetRight() - AH_GAP
+    local place = Placement.firstOpen(room, frame:GetWidth(), MIN_WIDTH)
+    frame:SetWidth(place.width)
+    if place.side == "right" then
+      frame:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", AH_GAP, 0)
+    else
+      frame:SetPoint("TOPLEFT", AuctionHouseFrame, "BOTTOMLEFT", 0, -AH_GAP)
+    end
   else
     frame:SetPoint("CENTER")
   end
