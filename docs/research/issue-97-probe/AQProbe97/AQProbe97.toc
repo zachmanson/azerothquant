@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: AQProbe97
+## Notes: Dev-only probe for #97 slice 2: logs what the client fires on an AH buy. Never buys; only listens.
+## Version: 0.1.0
+## SavedVariables: AQProbe97DB
+
+AQProbe97.lua
