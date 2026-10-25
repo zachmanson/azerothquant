@@ -1,3 +1,9 @@
+2026-10-24 (later 167): #97 slice 1 was already done (8976314, passed in game 2026-09-30); the queue's "#97" meant slice 2, which waits on the #85 buy-event probe that never ran. Wrote the probe instead (e3b5435): `docs/research/issue-97-probe/AQProbe97/`, a read-only addon (events + `hooksecurefunc` post-hooks on the AH buy calls, own `AQProbe97DB`). Named apart from the old #39 `AQProbe`, whose save file is still in both WTF folders. `_forever_/Interface/AddOns/AQProbe97` is a junction to it. Smoke-run under lupa with stubbed WoW calls only; not loaded in game yet.
+
+Next, in order: #193 before Nov 4. Rest same as later 161. On Nov 4 at the PC: run the AQProbe97 steps (README in that folder), read `SavedVariables/AQProbe97.lua`, post results on #85, then grill/build #97 slice 2 from them. Also the #164 and #180 checks (later 165/166).
+
+- Gotchas: same as later 166. If AQProbe97 errors at load in game, check `/aqp` works and the first log entry's `missing` list. Remove the junction once the probe is done.
+
 2026-10-24 (later 166): #180 done (720e104). New pure `Nudge.pingIn(lastScanAt, now)` (seconds until the cooldown ends, nil if none running) and `Nudge.togglePing`/`pingOn` (`/aq ping`, saved as `AzerothQuantDB.pingOff`, on by default). Scanner.lua sets a one-shot timer at the Scan request and at load; it plays `SOUNDKIT.AUCTION_WINDOW_OPEN`, plus "You can Scan again at the Auction House." in chat unless the AH is open. Chat.lua's header names the exception. Not checked in game yet.
 
 Next, in order: #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161. On Nov 4: check #164 (as later 165 says) and #180: Scan, walk off, /reload, and the sound + line should come ~15 min after the request; with the AH open, sound only.
