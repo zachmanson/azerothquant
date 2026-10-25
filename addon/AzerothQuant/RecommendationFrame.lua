@@ -1496,8 +1496,10 @@ SlashCmdList.AZEROTHQUANT = function(msg)
     reload()
   elseif msg:match("^%s*debug%s*$") then
     Chat.toggleDebug()
+  elseif msg:match("^%s*ping%s*$") then
+    Nudge.togglePing(AzerothQuantDB, Chat.say)
   else
     Chat.say("Usage: /aq recs (toggle the Recommendation Table), /aq reload,"
-      .. " /aq debug (toggle chat lines you don't need to act on)")
+      .. " /aq ping (toggle the ping when you can Scan again), /aq debug (toggle chat lines you don't need to act on)")
   end
 end

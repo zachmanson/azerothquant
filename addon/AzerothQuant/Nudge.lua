@@ -5,6 +5,7 @@
 -- enabled: AH open, cooldown over, no Scan pending (Scanner.lua, #48). And after a
 -- load with unimported Scans, it decides when to say the Brain should be done (#71),
 -- or that it's behind: Scans saved long ago are still waiting, so brain watch is off (#104).
+-- It also times the Scan-ready ping and keeps its /aq ping setting (#180).
 --
 -- Plain Lua with no WoW API calls, so it runs under busted. See Money.lua for
 -- the namespace fallback.
@@ -29,6 +30,31 @@ function Nudge.due(lastScanAt, since, now)
   local readyAt = lastScanAt + Nudge.COOLDOWN_SECONDS
   -- The Brain counts a gap of exactly the cap as an Observation Window.
   return since < readyAt and readyAt <= now and now - lastScanAt <= Nudge.WINDOW_CAP_SECONDS
+end
+
+-- The Scan-ready ping (#180): a chat line and a sound when the cooldown ends, wherever the
+-- player is, so a guildie who walked off doesn't forget to Scan. Seconds from `now` until
+-- it's due, or nil with no cooldown running: so no ping for someone just questing.
+function Nudge.pingIn(lastScanAt, now)
+  local left = lastScanAt and lastScanAt + Nudge.COOLDOWN_SECONDS - now
+  if left and left > 0 then
+    return left
+  end
+  return nil
+end
+
+Nudge.PING_LINE = "You can Scan again at the Auction House."
+
+-- db is AzerothQuantDB. The ping is on unless pingOff is set, so older saves get it too.
+function Nudge.pingOn(db)
+  return not db.pingOff
+end
+
+-- /aq ping.
+function Nudge.togglePing(db, say)
+  db.pingOff = Nudge.pingOn(db) or nil
+  say(Nudge.pingOn(db) and "You'll get a ping when you can Scan again."
+    or "No more ping when you can Scan again. /aq ping turns it back on.")
 end
 
 -- How long after a load `brain watch` should have imported the Scans it saved and

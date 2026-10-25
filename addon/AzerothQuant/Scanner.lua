@@ -3,7 +3,9 @@
 -- All shaping happens in Scan.lua; this file only talks to the WoW API.
 -- On load it also deletes the Scans the Brain has imported (Prune.lua). While
 -- the AH is open the button pulses whenever a Scan can run, and it says in chat when a
--- Scan would complete an Observation Window (Nudge.lua).
+-- Scan would complete an Observation Window (Nudge.lua). Wherever the player is, it pings
+-- when the cooldown ends: a sound, plus a chat line unless the AH is open and the button
+-- pulsing says it already (#180, /aq ping turns it off).
 -- ns.Scanner.busy() says whether a Scan is in flight, and reloadReady() whether the Brain
 -- should have imported the Scans saved at load (#71). At logout it stamps each Scan with
 -- when it was first saved, so the next load can tell the Brain is behind (#104). It also
@@ -50,6 +52,7 @@ local reading = false
 local rereading -- while waiting to re-read dropped rows: { rows, waitingFor, startedAt, capTimer }
 local debounceTimer, noResponseTimer
 local button, pulse, ticker
+local pingTimer -- the Scan-ready ping (#180)
 local checkedAt -- last Nudge check while the AH is open
 local savedAtLoad = 0 -- Scans left after pruning on load: saved, not imported by the Brain
 local reloadReady = false -- the Brain should have imported them by now (Nudge.lua, #71)
@@ -130,6 +133,21 @@ local function refreshButton()
     button:Enable()
     setPulsing(pulse, true)
   end
+end
+
+-- Sets the Scan-ready ping for when the cooldown ends, if one is running (Nudge.pingIn).
+local function schedulePing()
+  cancel(pingTimer)
+  local wait = Nudge.pingIn(db.lastScanAt, GetServerTime())
+  pingTimer = wait and C_Timer.NewTimer(wait, function()
+    if not Nudge.pingOn(db) then
+      return
+    end
+    PlaySound(SOUNDKIT.AUCTION_WINDOW_OPEN)
+    if not ahOpen then
+      Chat.say(Nudge.PING_LINE)
+    end
+  end)
 end
 
 local function tick()
@@ -275,6 +293,7 @@ local function requestScan()
   }
   -- The server's throttle starts at the request, so the cooldown does too.
   db.lastScanAt = pending.requestedAt
+  schedulePing()
   AH.ReplicateItems()
   noResponseTimer = C_Timer.NewTimer(NO_RESPONSE_SECONDS, function()
     abort("No response from the Auction House (probably throttled). Try again when the button unlocks.")
@@ -394,6 +413,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       end
       -- What's left is newer than the Brain's last import, so it isn't in the table yet.
       savedAtLoad = #db.scans
+      schedulePing()
       tryDataSlots()
       behindAtLoad = Nudge.afterLoad(db.scans, GetServerTime(), C_Timer.After, function()
         -- The Data slots are tried instead: their outcome sets reloadReady and says so.

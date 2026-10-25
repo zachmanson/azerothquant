@@ -223,3 +223,37 @@ describe("Nudge.atLogin", function()
     assert.are.same({}, said({ brain = { version = "0.1.0" } }))
   end)
 end)
+
+describe("Nudge.pingIn", function()
+  it("waits until the Scan cooldown ends after a Scan (#180)", function()
+    assert.are.equal(15 * MIN, Nudge.pingIn(SCAN, SCAN))
+    assert.are.equal(1, Nudge.pingIn(SCAN, SCAN + 15 * MIN - 1))
+  end)
+
+  it("doesn't ping for a cooldown that has already ended, e.g. at a login long after the Scan", function()
+    assert.is_nil(Nudge.pingIn(SCAN, SCAN + 15 * MIN))
+    assert.is_nil(Nudge.pingIn(SCAN, SCAN + 3 * 60 * MIN))
+  end)
+
+  it("doesn't ping with no previous Scan", function()
+    assert.is_nil(Nudge.pingIn(nil, SCAN))
+  end)
+end)
+
+describe("Nudge.togglePing", function()
+  it("is on by default, and /aq ping turns it off and back on, saying which (#180)", function()
+    local db, lines = {}, {}
+    local function say(line)
+      lines[#lines + 1] = line
+    end
+    assert.is_true(Nudge.pingOn(db))
+
+    Nudge.togglePing(db, say)
+    assert.is_false(Nudge.pingOn(db))
+
+    Nudge.togglePing(db, say)
+    assert.is_true(Nudge.pingOn(db))
+    assert.are.same({ "No more ping when you can Scan again. /aq ping turns it back on.",
+      "You'll get a ping when you can Scan again." }, lines)
+  end)
+end)
