@@ -24,7 +24,7 @@ def test_maps_each_install_folder_to_its_era(tmp_path):
             era = "beta"
 
             [[installs]]
-            path = 'C:\WoW\_classic_'
+            path = 'C:\WoW\_forever_'
             era = "live"
             """,
         )
@@ -32,7 +32,7 @@ def test_maps_each_install_folder_to_its_era(tmp_path):
 
     assert [(i.path, i.era) for i in config.installs] == [
         (Path(r"C:\WoW\_classic_beta_"), Era.BETA),
-        (Path(r"C:\WoW\_classic_"), Era.LIVE),
+        (Path(r"C:\WoW\_forever_"), Era.LIVE),
     ]
 
 
@@ -62,11 +62,11 @@ def test_rejects_the_same_folder_listed_twice(tmp_path):
         tmp_path,
         r"""
         [[installs]]
-        path = 'C:\WoW\_classic_'
+        path = 'C:\WoW\_forever_'
         era = "beta"
 
         [[installs]]
-        path = 'C:\WoW\_classic_'
+        path = 'C:\WoW\_forever_'
         era = "live"
         """,
     )
@@ -85,7 +85,7 @@ def test_rejects_install_missing_its_era(tmp_path):
         tmp_path,
         r"""
         [[installs]]
-        path = 'C:\WoW\_classic_'
+        path = 'C:\WoW\_forever_'
         """,
     )
 
@@ -108,7 +108,7 @@ def test_rejects_install_missing_its_path(tmp_path):
 
 def test_rejects_installs_that_are_not_tables(tmp_path):
     # installs = "x" would otherwise be iterated character by character.
-    path = write_config(tmp_path, 'installs = "C:/WoW/_classic_"')
+    path = write_config(tmp_path, 'installs = "C:/WoW/_forever_"')
 
     with pytest.raises(ConfigError, match="must be a list of tables"):
         load_config(path)
@@ -116,7 +116,7 @@ def test_rejects_installs_that_are_not_tables(tmp_path):
 
 INSTALL = r"""
 [[installs]]
-path = 'C:\WoW\_classic_'
+path = 'C:\WoW\_forever_'
 era = "beta"
 """
 

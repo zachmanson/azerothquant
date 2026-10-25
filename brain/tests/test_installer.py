@@ -73,9 +73,9 @@ class FakeShortcuts:
 
 def test_the_wow_folder_is_the_parent_of_the_game_folder_the_registry_names(tmp_path):
     wow = tmp_path / "World of Warcraft"
-    (wow / "_classic_").mkdir(parents=True)
+    (wow / "_forever_").mkdir(parents=True)
 
-    assert wow_folder(wow / "_classic_", default=tmp_path / "nowhere") == wow
+    assert wow_folder(wow / "_forever_", default=tmp_path / "nowhere") == wow
 
 
 def test_without_the_registry_the_default_wow_folder_is_used_when_it_is_there(tmp_path):
@@ -83,26 +83,34 @@ def test_without_the_registry_the_default_wow_folder_is_used_when_it_is_there(tm
     default.mkdir()
 
     assert wow_folder(None, default=default) == default
-    assert wow_folder(tmp_path / "uninstalled" / "_classic_", default=default) == default
+    assert wow_folder(tmp_path / "uninstalled" / "_forever_", default=default) == default
 
 
 def test_no_wow_folder_when_neither_is_there(tmp_path):
     assert wow_folder(None, default=tmp_path / "World of Warcraft") is None
 
 
-def test_classic_is_live_and_classic_beta_is_beta_and_every_other_game_is_left_out(tmp_path):
-    for game in ("_classic_", "_classic_beta_", "_classic_era_", "_classic_era_ptr_", "_retail_"):
+def test_forever_is_live_and_classic_beta_is_beta_and_every_other_game_is_left_out(tmp_path):
+    # `_classic_` is MoP Classic, not Live (#199).
+    for game in (
+        "_forever_",
+        "_classic_",
+        "_classic_beta_",
+        "_classic_era_",
+        "_classic_era_ptr_",
+        "_retail_",
+    ):
         (tmp_path / game / "WTF").mkdir(parents=True)
 
     assert game_installs(tmp_path) == [
         Install(tmp_path / "_classic_beta_", Era.BETA),
-        Install(tmp_path / "_classic_", Era.LIVE),
+        Install(tmp_path / "_forever_", Era.LIVE),
     ]
 
 
 def test_a_game_folder_never_played_is_left_out(tmp_path):
     (tmp_path / "_classic_beta_" / "Interface").mkdir(parents=True)
-    (tmp_path / "_classic_").mkdir()
+    (tmp_path / "_forever_").mkdir()
 
     assert game_installs(tmp_path) == [Install(tmp_path / "_classic_beta_", Era.BETA)]
 
@@ -110,7 +118,7 @@ def test_a_game_folder_never_played_is_left_out(tmp_path):
 def test_the_config_setup_writes_loads_with_the_installs_and_the_pool(tmp_path):
     installs = [
         Install(tmp_path / "World of Warcraft" / "_classic_beta_", Era.BETA),
-        Install(tmp_path / "World of Warcraft" / "_classic_", Era.LIVE),
+        Install(tmp_path / "World of Warcraft" / "_forever_", Era.LIVE),
     ]
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -268,7 +276,7 @@ def test_an_update_replaces_the_brain_keeps_the_key_and_picks_up_a_new_game_fold
         pool_key="secret",
         make_shortcut=FakeShortcuts(),
     )
-    live = _game(tmp_path, "_classic_", Era.LIVE)  # Live launched since
+    live = _game(tmp_path, "_forever_", Era.LIVE)  # Live launched since
 
     update(
         places,
@@ -297,7 +305,7 @@ def test_an_update_installs_the_addon_into_a_live_folder_that_only_has_wtf_so_fa
         pool_key="",
         make_shortcut=FakeShortcuts(),
     )
-    live = tmp_path / "World of Warcraft" / "_classic_"
+    live = tmp_path / "World of Warcraft" / "_forever_"
     (live / "WTF").mkdir(parents=True)
 
     update(
@@ -407,7 +415,7 @@ def test_uninstall_names_what_it_could_not_delete_because_it_is_running(tmp_path
 
 def test_a_registry_path_that_is_already_the_wow_folder_is_used_as_is(tmp_path):
     wow = tmp_path / "World of Warcraft"
-    (wow / "_classic_").mkdir(parents=True)
+    (wow / "_forever_").mkdir(parents=True)
 
     assert wow_folder(wow, default=tmp_path / "nowhere") == wow
 

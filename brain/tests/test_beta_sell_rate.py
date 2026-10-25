@@ -30,7 +30,7 @@ GOLD = 100 * 100 * 100
 # Event, so the room is the pooled rate taken at its word; and a Beta Sell Rate weight of
 # a half.
 CONFIG = replace(
-    Config(installs=(Install(path=Path("C:/WoW/_classic_"), era=Era.LIVE),)),
+    Config(installs=(Install(path=Path("C:/WoW/_forever_"), era=Era.LIVE),)),
     sale_horizon_seconds=3 * HOUR,
     sell_rate_prior_hours_flips=0,
     sale_size_prior_events_flips=0,

@@ -12,7 +12,7 @@ It only works on Windows.
 1. If you've never played this version of WoW on this PC, start it once and get to the character screen. Then close WoW.
 2. Get `AzerothQuantBrain.exe` from whoever gave you this guide.
 3. Double-click it. Windows will probably say "Windows protected your PC". That's because the app isn't signed. Click **More info**, then **Run anyway**.
-4. It asks if it found your World of Warcraft folder. Click **Yes**. If it's wrong, click **No** and pick the folder WoW is in (the one with `_classic_` inside).
+4. It asks if it found your World of Warcraft folder. Click **Yes**. If it's wrong, click **No** and pick the folder WoW is in (the one with `_forever_` inside).
 5. It asks for a code to share scans with the guild. Paste the code you were given and click **OK**. No code? Leave it empty and click **OK**. You can still use it alone.
 6. It says "All set". Done.
 

@@ -92,7 +92,7 @@ def config_for(tmp_path: Path, *installs: Install) -> Config:
 
 def test_finds_the_savedvariables_file_of_every_account_in_every_install(tmp_path):
     beta = tmp_path / "_classic_beta_"
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     a = install_with_savedvariables(beta, "ACCOUNT1")
     b = install_with_savedvariables(beta, "ACCOUNT2")
     c = install_with_savedvariables(live, "ACCOUNT1")
@@ -605,7 +605,7 @@ def test_import_tells_the_addon_the_latest_scan_imported_for_each_market(tmp_pat
 
 def test_each_install_only_hears_about_its_own_era(tmp_path):
     beta = tmp_path / "_classic_beta_"
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     file = install_with_savedvariables(beta)
     install_addon(beta)
     install_addon(live)
@@ -626,7 +626,7 @@ def test_each_install_only_hears_about_its_own_era(tmp_path):
 
 def test_import_hands_the_addon_each_markets_recommendations_for_its_own_era(tmp_path):
     beta = tmp_path / "_classic_beta_"
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     file = install_with_savedvariables(beta)
     install_addon(beta)
     install_addon(live)
@@ -704,7 +704,7 @@ def day_one_savedvariables(root: Path) -> Path:
 
 def test_day_one_on_live_gives_a_fresh_brain_a_table_without_a_problem(tmp_path):
     # The realm is the fixture's; the Era comes from the install folder alone.
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     file = day_one_savedvariables(live)
     install_addon(live)
     config = config_for(tmp_path, Install(live, Era.LIVE))
@@ -721,7 +721,7 @@ def test_day_one_on_live_gives_a_fresh_brain_a_table_without_a_problem(tmp_path)
 
 
 def test_day_one_on_live_flags_the_market_as_young(tmp_path):
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     file = day_one_savedvariables(live)
     install_addon(live)
 
@@ -737,7 +737,7 @@ def test_day_one_on_live_still_shows_a_craft_of_held_reagents_without_sales_as_q
     # One Scan has no Sale Events, so the held Linen Cloth has no market data and Bolt of
     # Linen Cloth is a blocked Craft row (#75). Kept on day 1: the young-Market line says the
     # table is still filling in, and a replay of Beta had none left by the third Scan (#147).
-    live = tmp_path / "_classic_"
+    live = tmp_path / "_forever_"
     file = day_one_savedvariables(live)
     install_addon(live)
 
@@ -2063,7 +2063,7 @@ def _linen_early_in_live(tmp_path, weight=0.5) -> Config:
     Sell Rate makes room for 6 at the 1s 19c post price."""
     live_start = 1_795_000_000  # 2026-11-18
     config = dataclasses.replace(
-        config_for(tmp_path, Install(tmp_path / "_classic_", Era.LIVE)),
+        config_for(tmp_path, Install(tmp_path / "_forever_", Era.LIVE)),
         predictions_path=tmp_path / "predictions.toml",
         sale_horizon_seconds=3 * 3600,
         sell_rate_prior_hours_flips=0,

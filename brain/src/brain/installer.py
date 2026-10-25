@@ -26,13 +26,14 @@ from brain.recommendations import (
 
 EXE_NAME = "AzerothQuantBrain.exe"
 DEFAULT_WOW_FOLDER = Path(r"C:\Program Files (x86)\World of Warcraft")
-# The game folders the Brain reads, by Era. Only these: the Classic Era client sits in
-# `_classic_era_`, a different game whose Scans must never mix with Live's.
-GAME_FOLDERS = {"_classic_beta_": Era.BETA, "_classic_": Era.LIVE}
+# The game folders the Brain reads, by Era. Only these: `_classic_` is MoP Classic and
+# `_classic_era_` is Classic Era, different games whose Scans must never mix with Live's
+# (#199).
+GAME_FOLDERS = {"_classic_beta_": Era.BETA, "_forever_": Era.LIVE}
 
 
 def wow_folder(registry_path: Path | None, default: Path = DEFAULT_WOW_FOLDER) -> Path | None:
-    """The WoW folder, the one holding the game folders (`_classic_`, `_retail_`, ...).
+    """The WoW folder, the one holding the game folders (`_forever_`, `_retail_`, ...).
     Blizzard's registry InstallPath names one of the game folders (then it's its parent),
     or the WoW folder itself. None when neither the registry's nor the default folder is
     there."""

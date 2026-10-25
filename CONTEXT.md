@@ -19,7 +19,7 @@ _Avoid_: model, AI
 ## Market data
 
 **Era**:
-Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed: no decision reads the other Era, with one exception. The Beta Prior only puts a Beta price on screen beside Live's. The exception is the Beta Sell Rate, which may count toward a Prediction buy's Max Loss room early in Live, when switched on (ADR-0024). Facts about an item rather than its economy, its Vendor Price and item info, aren't Era data in this sense: Live reads Beta's for an item it hasn't seen yet, and its own once it has (#147).
+Which economy data comes from: Beta or Live. The Live economy starts from zero at launch, so data from the two Eras is never mixed: no decision reads the other Era, with one exception. The Beta Prior only puts a Beta price on screen beside Live's. The exception is the Beta Sell Rate, which may count toward a Prediction buy's Max Loss room early in Live, when switched on (ADR-0024). Facts about an item rather than its economy, its Vendor Price and item info, aren't Era data in this sense: Live reads Beta's for an item it hasn't seen yet, and its own once it has (#147). The Era comes from the game folder the data was read in, never from the realm: Live is `_forever_`, Beta is `_classic_beta_`, and every other game folder is never read: `_classic_` is MoP Classic (#199).
 _Avoid_: season, phase
 
 **Market**:
