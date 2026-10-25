@@ -1,3 +1,9 @@
+2026-10-24 (later 166): #180 done (720e104). New pure `Nudge.pingIn(lastScanAt, now)` (seconds until the cooldown ends, nil if none running) and `Nudge.togglePing`/`pingOn` (`/aq ping`, saved as `AzerothQuantDB.pingOff`, on by default). Scanner.lua sets a one-shot timer at the Scan request and at load; it plays `SOUNDKIT.AUCTION_WINDOW_OPEN`, plus "You can Scan again at the Auction House." in chat unless the AH is open. Chat.lua's header names the exception. Not checked in game yet.
+
+Next, in order: #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161. On Nov 4: check #164 (as later 165 says) and #180: Scan, walk off, /reload, and the sound + line should come ~15 min after the request; with the AH open, sound only.
+
+- Gotchas: same as later 163. The cooldown math `lastScanAt + COOLDOWN_SECONDS - now` now lives in four places (Nudge.due, Nudge.pingIn, NextStep.lua, Scanner.lua cooldownRemaining); review flagged it, not filed.
+
 2026-10-24 (later 165): #164 done (c320087). New pure `Placement.firstOpen(room, width, minWidth)`: with the AH up and no saved spot, the Recommendation Table narrows to the room right of the AH (down to MIN_WIDTH 1000), else keeps its size and opens below the AH. The pane can't collapse: it holds Post/Search, and the pane plus the columns that never hide need ~976. `savePosition` now saves the frame's TOPLEFT against UIParent (GetLeft/GetTop), not GetPoint. Not checked in game yet. The Beta Config.wtf has no uiScale, so the screen is ~1365 wide and there's only ~550 beside the AH: expect "below", clamped up over the AH's lower part.
 
 Next, in order: #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161. On Nov 4, when at the AH, check #164: first open with no saved spot (clear `recommendationFrame`/`recommendationFrameSize` in SavedVariables), then resize, close, reopen.
