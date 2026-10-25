@@ -20,7 +20,13 @@ from dataclasses import dataclass, field, replace
 from brain.config import Config
 from brain.fair_value import FairValueCache
 from brain.history import Market, character_markets, scan_times, supply_at, vendor_prices
-from brain.observation import GraderCalibration, SaleRecord, grader_calibration, sale_records
+from brain.observation import (
+    Calibration,
+    SaleRecord,
+    grader_calibration,
+    sale_records,
+    sell_rate_calibration,
+)
 from brain.predictions import Prediction
 from brain.recommend import Action, auction_cut, deposit_of, recommend_market
 from brain.replay import options_taken
@@ -245,13 +251,14 @@ def _expire(sim: Simulation, at: int, terms: Terms, end: bool = False) -> None:
 @dataclass(frozen=True)
 class MarketBacktest:
     """One Market's Backtest: each policy's run over its Scans, its runs at the grader's
-    low and high bounds, and the grader checked on own Listings."""
+    low and high bounds, and the grader and Sell Rate checked on own Listings."""
 
     market: Market
     scans: int
     runs: dict[str, Simulation]  # by policy name
     bounds: dict[str, tuple[Simulation, Simulation]]  # (low, high), by policy name
-    calibration: GraderCalibration
+    grader_calibration: Calibration
+    sell_rate_calibration: Calibration
 
 
 def backtest(
@@ -301,7 +308,8 @@ def backtest(
         runs = {name: central for name, (central, _, _) in graded.items()}
         bounds = {name: (low, high) for name, (_, low, high) in graded.items()}
         calibration = grader_calibration(conn, market, config)
-        result.append(MarketBacktest(market, len(times), runs, bounds, calibration))
+        sell_rate = sell_rate_calibration(conn, market, config, cache)
+        result.append(MarketBacktest(market, len(times), runs, bounds, calibration, sell_rate))
     return result
 
 

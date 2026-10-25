@@ -10,7 +10,7 @@ cap recomputes the past (ADR-0002).
 import sqlite3
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 
@@ -19,6 +19,7 @@ from brain.fair_value import FairValueCache
 from brain.history import (
     Listing,
     Market,
+    Outcome,
     dropped_item_ids,
     listings,
     outcomes,
@@ -204,13 +205,14 @@ def sell_rate_evidence(
     `fair_value_cache` is the past Scans' Fair Values, when the caller keeps them, and
     the tally of what each window adds (#142). Each window's evidence is its own: its
     Disappearances can only pair with Listings new in it, and their Sale Events are its.
-    Reposts and coincidences come window by window, not ordered across them."""
+    Reposts and coincidences come window by window, not ordered across them. An own
+    Listing whose Outcome, read before `until`, says it was Cancelled or Expired is never
+    a Probable Sale (#153).
+    """
     seen = listings(conn, market) if seen is None else seen
     cache = FairValueCache() if fair_value_cache is None else fair_value_cache
     windows = observation_windows_between(conn, market, config, since, until)
-    ends = _ends_of_windows(conn, market, config, windows, seen, cache)
-    new = _new_listings(market, seen, cache)
-    evidence = [_window_evidence(conn, market, config, w, ends[w], new, cache) for w in windows]
+    evidence = _evidence_of_windows(conn, market, config, windows, seen, cache, until)
     return SellRateEvidence(
         window_hours=window_hours(windows),
         sale_events=[e for w in evidence for e in w.sale_events],
@@ -218,6 +220,23 @@ def sell_rate_evidence(
         coincidences=[d for w in evidence for d in w.coincidences],
         windows=windows,
     )
+
+
+def _evidence_of_windows(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    windows: list[ObservationWindow],
+    seen: Sequence[Listing],
+    cache: FairValueCache,
+    read_before: int | None,
+) -> list["_WindowEvidence"]:
+    """Each window's `_WindowEvidence`, dropping own Probable Sales by the Outcomes read
+    before `read_before` (None: all of them)."""
+    ends = _ends_of_windows(conn, market, config, windows, seen, cache)
+    new = _new_listings(market, seen, cache)
+    unsold = _unsold_own(conn, market, config, seen, cache, read_before)
+    return [_window_evidence(conn, market, config, w, ends[w], new, unsold, cache) for w in windows]
 
 
 @dataclass(frozen=True)
@@ -279,6 +298,8 @@ class _WindowEvidence:
     sale_events: list[SaleEvent]
     reposts: list[Disappearance]
     coincidences: list[Disappearance]
+    # Own Disappearances the rule calls Probable Sales before any Outcome drops them.
+    own_probable_sales: list[Disappearance]
 
 
 @dataclass(frozen=True)
@@ -314,11 +335,15 @@ def _window_evidence(
     window: ObservationWindow,
     ends: _EndsOfWindow,
     new: _NewListings,
+    unsold: "_UnsoldOwn",
     cache: FairValueCache,
 ) -> _WindowEvidence:
-    """One Observation Window's Sale Events, Reposts and coincidences, once a pass."""
+    """One Observation Window's Sale Events, Reposts and coincidences, once a pass. Own
+    Probable Sales in `unsold` are just gone, not sales. They are taken out after pairing,
+    so Reposts pair as they would with them in."""
     key = (
         window,
+        unsold.read_before,
         config.time_left_max_seconds,
         config.probable_sale_max_fair_value_multiple,
         config.fair_value_slice_share,
@@ -343,17 +368,91 @@ def _window_evidence(
         return d.unit_buyout <= config.probable_sale_max_fair_value_multiple * fair_value
 
     probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]
+    dropped = unsold.taken_from(probable_sales)
     # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
     sales = ends.partial_sales + [
-        (d.item_key, d.gone_at, d.unit_buyout, d.quantity) for d in probable_sales
+        (d.item_key, d.gone_at, d.unit_buyout, d.quantity)
+        for d in probable_sales
+        if id(d) not in dropped
     ]
     evidence = _WindowEvidence(
         sale_events=_sale_events(sales),
         reposts=pairing.reposts,
-        coincidences=[d for d in pairing.coincidences if priced_like_a_sale(d)],
+        coincidences=[
+            d for d in pairing.coincidences if priced_like_a_sale(d) and id(d) not in dropped
+        ],
+        own_probable_sales=[d for d in probable_sales if d.own],
     )
     new.evidence[key] = evidence
     return evidence
+
+
+# (Item Key, unit buyout, quantity, last seen, gone at): identical own Disappearances
+# are interchangeable.
+_OwnKey = tuple[str, int, int, int, int]
+
+
+def _own_key(d: Disappearance) -> _OwnKey:
+    return d.item_key, d.unit_buyout, d.quantity, d.last_seen, d.gone_at
+
+
+def _own_key_of(listing: Listing, after: dict[int, int], config: Config) -> _OwnKey:
+    """The `_own_key` of an own Listing that went missing; `after` maps each Scan's time
+    to the next's."""
+    return _own_key(_disappearance(listing, after[listing.last_seen], config))
+
+
+@dataclass(frozen=True)
+class _UnsoldOwn:
+    """This pass's own Disappearances matched to a Cancelled or Expired Outcome read
+    before `read_before` (None: any), counted by `_own_key`. Mail read later changes it,
+    so it is only good for the pass."""
+
+    seen: Sequence[Listing]
+    read_before: int | None
+    keys: Counter[_OwnKey]
+
+    def taken_from(self, ds: list[Disappearance]) -> set[int]:
+        """The ids of the Disappearances among `ds` these account for, first come first."""
+        left = Counter(self.keys)
+        taken = set()
+        for d in ds:
+            key = _own_key(d)
+            if d.own and left[key] > 0:
+                left[key] -= 1
+                taken.add(id(d))
+        return taken
+
+
+def _unsold_own(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    seen: Sequence[Listing],
+    cache: FairValueCache,
+    read_before: int | None,
+) -> _UnsoldOwn:
+    """The Market's `_UnsoldOwn`, worked out once a pass (again if a caller brings other
+    Listings or another `read_before`)."""
+    key = (_UnsoldOwn, market)
+    unsold = cache.this_pass.get(key)
+    if (
+        not isinstance(unsold, _UnsoldOwn)
+        or unsold.seen is not seen
+        or unsold.read_before != read_before
+    ):
+        after = dict(pairwise(scan_times(conn, market)))
+        unsold = _UnsoldOwn(
+            seen,
+            read_before,
+            Counter(
+                _own_key_of(listing, after, config)
+                for listing, outcome in own_outcomes(conn, market, seen, read_before)
+                if outcome.kind is not MailKind.SOLD
+            ),
+        )
+        cache.this_pass[key] = unsold
+    return unsold
 
 
 def _sale_events(sales: list[tuple[str, int, int, int]]) -> list[SaleEvent]:
@@ -461,31 +560,23 @@ def _left_out(
     return item_id_of(item_key) in either
 
 
-@dataclass(frozen=True)
-class GraderCalibration:
-    """The Sale Record rule tried on the player's own Listings, whose mail says what
-    became of them (#167): of the own Listings it calls gone that a mail matched,
-    how many sold, and how many Sold mails matched an own Listing that went missing at
-    all (the sales it could have caught)."""
-
-    matched: int
-    sold: int
-    sold_mails: int
-
-
-def grader_calibration(
-    conn: sqlite3.Connection, market: Market, config: Config
-) -> GraderCalibration:
-    """Each own Listing that went missing, oldest last seen first, matched to the first
-    Sold, Cancelled or Expired mail not matched yet with its item name and count (and,
-    when Sold, its stack price) read after it was last seen. Only those the Sale Record
-    rule calls gone are counted. It doesn't move the grader's bounds."""
+def own_outcomes(
+    conn: sqlite3.Connection,
+    market: Market,
+    seen: Sequence[Listing] | None = None,
+    read_before: int | None = None,
+) -> list[tuple[Listing, Outcome]]:
+    """Each own Listing that went missing, oldest last seen first, with the first Sold,
+    Cancelled or Expired mail not matched yet with its item name and count (and, when
+    Sold, its stack price) first read at or after it was last seen. Listings no mail
+    matched are left out. `seen` as in `disappearances`; with `read_before`, only mail
+    first read before it."""
+    seen = listings(conn, market) if seen is None else seen
     after = dict(pairwise(scan_times(conn, market)))
-    dropped = dropped_item_ids(conn, market)
-    mails = outcomes(conn, market)
+    mails = [o for o in outcomes(conn, market) if read_before is None or o.first_seen < read_before]
     used: set[int] = set()
-    matched = sold = sold_mails = 0
-    gone = [x for x in listings(conn, market) if x.own and x.last_seen in after]
+    result = []
+    gone = [x for x in seen if x.own and x.last_seen in after]
     for listing in sorted(gone, key=lambda x: x.last_seen):
         match = next(
             (
@@ -499,11 +590,73 @@ def grader_calibration(
             ),
             None,
         )
-        if match is None:
-            continue
-        used.add(match)
-        sold_mails += mails[match].kind is MailKind.SOLD
-        if _gone_like_a_sale(listing, after[listing.last_seen], dropped, config):
+        if match is not None:
+            used.add(match)
+            result.append((listing, mails[match]))
+    return result
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """A rule for what sold, tried on the player's own Listings, whose mail says what
+    became of them (#167, #153): of the own Listings it calls sold that a mail matched,
+    how many sold, and how many Sold mails matched an own Listing that went missing at
+    all (the sales it could have caught)."""
+
+    matched: int
+    sold: int
+    sold_mails: int
+
+
+def _calibration(
+    matches: list[tuple[Listing, Outcome]], calls_sold: Callable[[Listing], bool]
+) -> Calibration:
+    """The `Calibration` of a rule that `calls_sold` the own Listings it thinks sold."""
+    matched = sold = sold_mails = 0
+    for listing, outcome in matches:
+        sold_mails += outcome.kind is MailKind.SOLD
+        if calls_sold(listing):
             matched += 1
-            sold += mails[match].kind is MailKind.SOLD
-    return GraderCalibration(matched, sold, sold_mails)
+            sold += outcome.kind is MailKind.SOLD
+    return Calibration(matched, sold, sold_mails)
+
+
+def grader_calibration(conn: sqlite3.Connection, market: Market, config: Config) -> Calibration:
+    """The Sale Record rule's `Calibration`, on the `own_outcomes` matches. It doesn't
+    move the grader's bounds."""
+    after = dict(pairwise(scan_times(conn, market)))
+    dropped = dropped_item_ids(conn, market)
+    return _calibration(
+        own_outcomes(conn, market),
+        lambda x: _gone_like_a_sale(x, after[x.last_seen], dropped, config),
+    )
+
+
+def sell_rate_calibration(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    fair_value_cache: FairValueCache | None = None,
+) -> Calibration:
+    """The Sell Rate rule's `Calibration` over all the Market's Observation Windows, on
+    the `own_outcomes` matches. Its Probable Sales are taken before Cancelled and Expired
+    Outcomes drop them, or every one left would have sold. `fair_value_cache` as in
+    `sell_rate_evidence`."""
+    cache = FairValueCache() if fair_value_cache is None else fair_value_cache
+    seen = cache.listings(conn, market)
+    windows = observation_windows(conn, market, config)
+    probable = Counter(
+        _own_key(d)
+        for w in _evidence_of_windows(conn, market, config, windows, seen, cache, None)
+        for d in w.own_probable_sales
+    )
+    after = dict(pairwise(scan_times(conn, market)))
+
+    def calls_sold(listing: Listing) -> bool:
+        key = _own_key_of(listing, after, config)
+        if probable[key] <= 0:
+            return False
+        probable[key] -= 1
+        return True
+
+    return _calibration(own_outcomes(conn, market, seen), calls_sold)

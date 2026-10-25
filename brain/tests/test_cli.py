@@ -2237,6 +2237,10 @@ def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
         "relaxed",
     ]
     assert "Grader checked on own Listings: no Listing it calls sold matched a mail." in text
+    assert (
+        "Sell Rate checked on own Listings: no Listing it calls Probable Sales matched a mail."
+        in text
+    )
     assert "Flips to Disenchant not simulated." in text
 
 

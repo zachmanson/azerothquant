@@ -74,7 +74,7 @@ from brain.history import (
 )
 from brain.instance_lock import instance_lock
 from brain.lots import happened_at, start_of
-from brain.observation import GraderCalibration
+from brain.observation import Calibration
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
@@ -604,7 +604,8 @@ def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float
         f"Backtested {m.scans} {scans} from {_money(start_gold)}, no buys in the last 7 days\n"
         f"{table}\n"
         + "".join(splits)
-        + _calibration_line(m.calibration)
+        + _calibration_line("Grader", "sold", m.grader_calibration)
+        + _calibration_line("Sell Rate", "Probable Sales", m.sell_rate_calibration)
         + "Flips to Disenchant not simulated.\n"
     )
 
@@ -615,13 +616,14 @@ def _bounds(bounds: tuple[Simulation, Simulation], market: bool) -> str:
     return f"{_money(low.profit(market))} / {_money(high.profit(market))}"
 
 
-def _calibration_line(c: GraderCalibration) -> str:
-    """How the grader's rule did on own Listings, whose mail says what became of them."""
+def _calibration_line(rule: str, calls: str, c: Calibration) -> str:
+    """How `rule` did on own Listings, whose mail says what became of them. `calls` is
+    what it calls the ones it thinks sold."""
     if not c.matched:
-        return "Grader checked on own Listings: no Listing it calls sold matched a mail.\n"
+        return f"{rule} checked on own Listings: no Listing it calls {calls} matched a mail.\n"
     caught = f"{c.sold / c.sold_mails:.0%}" if c.sold_mails else "none"
     return (
-        f"Grader checked on own Listings: of {c.matched} it calls sold that a mail matched, "
+        f"{rule} checked on own Listings: of {c.matched} it calls {calls} that a mail matched, "
         f"{c.sold / c.matched:.0%} really sold; it caught {caught} of the {c.sold_mails} "
         "Sold mails.\n"
     )

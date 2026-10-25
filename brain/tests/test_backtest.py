@@ -279,7 +279,8 @@ def test_the_brain_buys_with_its_simulated_gold_and_is_graded_by_the_sale_record
     assert [t.sold for t in low.trades] == pytest.approx([2 * 2 * 0.65])
     assert [t.sold for t in high.trades] == pytest.approx([2 * 2 * 1.2])
     # No own Listings, so nothing to check the grader on.
-    assert (result.calibration.matched, result.calibration.sold_mails) == (0, 0)
+    assert (result.grader_calibration.matched, result.grader_calibration.sold_mails) == (0, 0)
+    assert (result.sell_rate_calibration.matched, result.sell_rate_calibration.sold_mails) == (0, 0)
 
 
 def test_the_brains_risk_caps_are_on_its_simulated_stake_and_uncapped_has_none(db):

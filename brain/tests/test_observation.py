@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from brain.config import Config, Era, Install
+from brain.fair_value import FairValueCache
 from brain.history import Market, import_mailbox_reads, import_scans, open_history
+from brain.mailbox import MailKind
 from brain.observation import (
     ObservationWindow,
     SaleEvent,
@@ -12,7 +14,9 @@ from brain.observation import (
     disappearances,
     grader_calibration,
     observation_windows,
+    own_outcomes,
     sale_records,
+    sell_rate_calibration,
     sell_rate_evidence,
 )
 
@@ -714,3 +718,146 @@ def test_the_grader_is_checked_on_own_listings_against_the_mail_that_says_what_b
     calibration = grader_calibration(db, MARKET, CONFIG)
 
     assert (calibration.matched, calibration.sold, calibration.sold_mails) == (3, 2, 3)
+
+
+# --- own Cancelled/Expired Listings leave Sell Rate (#153) ---
+
+
+def expired(name, item, count):
+    return cancelled(name, item, count) | {"subject": f"Auction expired: {name}"}
+
+
+def read_mail(db, at, *mails):
+    read = {
+        "readAt": at,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "shownCount": len(mails),
+        "totalCount": len(mails),
+        "skippedMails": 0,
+        "mails": [{"index": i + 1, **m} for i, m in enumerate(mails)],
+    }
+    import_mailbox_reads(db, [read], Era.BETA, CONFIG)
+
+
+def own_linen_gone(db):
+    """An own Linen gone an hour later, next to another player's Linen that stays."""
+    run(
+        db,
+        scan(T0, row(unit=100), named_row("Linen Cloth", unit=100)),
+        scan(T0 + HOUR, row(unit=100)),
+    )
+
+
+@pytest.mark.parametrize(
+    "mails, sales",
+    [
+        ([cancelled("Linen Cloth", LINEN, 1)], 0),
+        ([expired("Linen Cloth", LINEN, 1)], 0),
+        ([sold("Linen Cloth", 1, 100)], 1),
+        ([], 1),
+    ],
+    ids=["cancelled", "expired", "sold", "no mail"],
+)
+def test_an_own_listing_whose_mail_says_cancelled_or_expired_is_no_probable_sale(db, mails, sales):
+    own_linen_gone(db)
+    read_mail(db, T0 + 2 * HOUR, *mails)
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert len(evidence.sale_events) == sales
+    assert evidence.reposts == []
+
+
+def test_a_cancelled_mail_read_after_sell_rate_was_worked_out_drops_the_sale_next_pass(db):
+    own_linen_gone(db)
+    cache = FairValueCache()
+    first = sell_rate_evidence(db, MARKET, CONFIG, T0, T0 + DAY, fair_value_cache=cache)
+
+    read_mail(db, T0 + 2 * HOUR, cancelled("Linen Cloth", LINEN, 1))
+    cache.start_pass()
+    second = sell_rate_evidence(db, MARKET, CONFIG, T0, T0 + DAY, fair_value_cache=cache)
+
+    assert (len(first.sale_events), len(second.sale_events)) == (1, 0)
+
+
+def test_sell_rate_as_of_a_time_uses_only_the_mail_read_by_then(db):
+    # A Backtest asks for Sell Rate as of past Scans: mail read later can't drop a sale yet.
+    own_linen_gone(db)
+    read_mail(db, T0 + 2 * HOUR, cancelled("Linen Cloth", LINEN, 1))
+
+    before = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + 2 * HOUR)
+    after = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + 2 * HOUR + 1)
+
+    assert (len(before.sale_events), len(after.sale_events)) == (1, 0)
+
+
+def test_an_own_cancelled_listing_paired_as_a_repost_stays_one(db):
+    # My Linen at 100 was cancelled and another player's at 90 went missing; one new Linen
+    # at 90 came up. Pairing is as it ever was: the new Linen is my Listing's Repost, so
+    # the other player's is still the sale. Only Probable Sales are dropped, so mine stays
+    # a Repost (and frees no new Listing for the other player's).
+    run(
+        db,
+        scan(T0, row(unit=120), row(unit=90, time_left=3), named_row("Linen Cloth", unit=100)),
+        scan(T0 + HOUR, row(unit=120), row(unit=90)),
+    )
+    read_mail(db, T0 + 2 * HOUR, cancelled("Linen Cloth", LINEN, 1))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.unit_buyout, e.units) for e in evidence.sale_events] == [(90, 1)]
+    assert [(d.own, d.unit_buyout) for d in evidence.reposts] == [(True, 100)]
+
+
+def test_each_own_listing_is_matched_to_its_outcome_once_oldest_first(db):
+    # Two own Linen of 1, gone at T0 + 1 h and T0 + 2 h, and one Cancelled mail for a
+    # Linen of 1 read after both: it's the older Listing's.
+    run(
+        db,
+        scan(
+            T0,
+            row(unit=100),
+            named_row("Linen Cloth", unit=100),
+            named_row("Linen Cloth", unit=100, time_left=3),
+        ),
+        scan(T0 + HOUR, row(unit=100), named_row("Linen Cloth", unit=100, time_left=3)),
+        scan(T0 + 2 * HOUR, row(unit=100)),
+    )
+    read_mail(db, T0 + 3 * HOUR, cancelled("Linen Cloth", LINEN, 1))
+
+    matched = own_outcomes(db, MARKET)
+
+    assert [(listing.last_seen, o.kind) for listing, o in matched] == [(T0, MailKind.CANCELLED)]
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+    assert [e.seen_at for e in evidence.sale_events] == [T0 + 2 * HOUR]
+
+
+def test_sell_rate_is_checked_on_own_listings_before_the_drop(db):
+    # Three own Listings gone an hour later, next to other players' that stay. The Sell
+    # Rate rule calls the Linen of 1 and the Silk Probable Sales; the Linen of 2 had under
+    # 30 min left. The mail: the Linen of 1 sold, the Silk was cancelled, the Linen of 2
+    # sold too, a sale the rule didn't catch.
+    run(
+        db,
+        scan(
+            T0,
+            row(unit=100),
+            row(item=SILK, unit=300),
+            named_row("Linen Cloth", unit=100),
+            named_row("Silk Cloth", item=SILK, unit=300),
+            named_row("Linen Cloth", quantity=2, unit=100, time_left=1),
+        ),
+        scan(T0 + HOUR, row(unit=100), row(item=SILK, unit=300)),
+    )
+    read_mail(
+        db,
+        T0 + 2 * HOUR,
+        sold("Linen Cloth", 1, 100),
+        cancelled("Silk Cloth", SILK, 1),
+        sold("Linen Cloth", 2, 200),
+    )
+
+    calibration = sell_rate_calibration(db, MARKET, CONFIG)
+
+    assert (calibration.matched, calibration.sold, calibration.sold_mails) == (2, 1, 2)
