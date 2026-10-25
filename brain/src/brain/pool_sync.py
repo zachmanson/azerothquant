@@ -122,20 +122,22 @@ def pull(
 
     The first pull reaches back pool_backfill_days from the newest Scan of each Era in the
     pool, not from now: Beta stops when Live opens, and a guildie installing then still gets
-    its last days (#147). `since` (Unix time) reaches back to then instead, going over the
-    whole index again. `catching_up` is called once, before the downloads, if a page has
-    CATCHING_UP_SCANS or more to import.
+    its last days (#147). A first pull saves its cursor only once the last page is done;
+    other pulls save it after every page. `since` (Unix time) reaches back to then instead,
+    going over the whole index again. `catching_up` is called once, before the downloads,
+    if a page has CATCHING_UP_SCANS or more to import.
     """
     report = SyncReport()
     cursor = pool_cursor(conn)
     start = cursor
     # Per Era, the oldest Scan to pull; an Era not in it has no limit.
     since_by_era: dict[Era, int] = {}
+    first_pull = cursor is None and since is None
     try:
         if since is not None:
             start = None
             since_by_era = {era: since for era in Era}
-        elif cursor is None:
+        elif first_pull:
             since_by_era = _backfill_since(pool, config.pool_backfill_days)
         for page in _pages(pool, start):
             wanted = [
@@ -165,8 +167,11 @@ def pull(
                     continue
                 report.add(import_pooled_scans(conn, [(entry.id, raw)], entry.era, config))
             report.add(roll_back_pooled(conn, page.rolled_back, config))
-            # A pull `since` a date starts over from the beginning; never move back.
-            set_pool_cursor(conn, max(page.cursor, cursor or 0))
+            # A first pull cut off partway saves nothing, so the retry is a first pull again
+            # and keeps its backfill bound (#193).
+            if not first_pull or not page.more:
+                # A pull `since` a date starts over from the beginning; never move back.
+                set_pool_cursor(conn, max(page.cursor, cursor or 0))
         return report
     except PoolError as e:
         report.warn(f"Couldn't pull from the Scan Pool; will try again: {e}")

@@ -8,7 +8,8 @@ from brain.pool import PoolBusy, PoolEntry, PoolError, PoolPage
 
 class FakePool:
     """The Worker's contract (pool/README.md) in memory. `fail` makes every call raise as a
-    network error would; `busy` Markets answer a push as rate limited."""
+    network error would, and `fail_fetching` only fetches of those IDs, so a pull can fail
+    partway; `busy` Markets answer a push as rate limited."""
 
     def __init__(self, page_size: int = 2):
         # Small pages by default, so paging gets exercised.
@@ -18,6 +19,7 @@ class FakePool:
         self.header_overrides: dict[str, dict] = {}
         self.events: list[tuple[str, str]] = []  # ("add" | "rollback", id), cursor = index + 1
         self.fail = False
+        self.fail_fetching: set[str] = set()
         self.busy: set[tuple[str, str]] = set()
         self.listed_since: list[int | None] = []
         self.fetched: list[str] = []
@@ -53,11 +55,15 @@ class FakePool:
         self.listed_since.append(cursor)
         start = cursor or 0
         page = self.events[start : start + self.page_size]
+        gone = {pool_id for kind, pool_id in self.events if kind == "rollback"}
         entries = []
         rolled_back = []
         for kind, pool_id in page:
             if kind == "rollback":
                 rolled_back.append(pool_id)
+                continue
+            # The Worker leaves a rolled-back Scan out of the entries for good.
+            if pool_id in gone:
                 continue
             era, raw, uploader = self.scans[pool_id]
             headers = {**raw, **self.header_overrides[pool_id]}
@@ -77,6 +83,8 @@ class FakePool:
     def fetch(self, pool_id: str) -> dict:
         self.calls.append("fetch")
         self._maybe_fail()
+        if pool_id in self.fail_fetching:
+            raise PoolError("connection reset")
         self.fetched.append(pool_id)
         return json.loads(json.dumps(self.scans[pool_id][1]))
 

@@ -9,7 +9,15 @@ import pytest
 from fake_pool import FakePool
 
 from brain.config import Config, Era, Install
-from brain.history import Market, import_scans, listings, open_history, scan_times
+from brain.history import (
+    Market,
+    import_scans,
+    listings,
+    open_history,
+    pool_cursor,
+    roll_back_pooled,
+    scan_times,
+)
 from brain.pool import strip_scan
 from brain.pool_sync import pull, push
 
@@ -192,6 +200,56 @@ def test_the_first_pull_backfills_14_days_back_from_each_era_s_newest_scan(db, c
     assert report.pulled == 3
     assert scan_times(db, MARKET) == [beta_end - 13 * DAY, beta_end]
     assert scan_times(db, replace(MARKET, era=Era.LIVE)) == [now - DAY]
+
+
+def test_a_first_pull_cut_off_partway_still_backfills_only_14_days_when_retried(db, config, pool):
+    # Two pages of two (#193). The old Beta Scan is on the page the cut-off pull never
+    # finished, and nothing in Beta is newer yet, so the import alone wouldn't leave it out.
+    newest = T0 + 40 * DAY
+    pool.upload(Era.LIVE, strip_scan(scan(newest - 2 * DAY)))
+    pool.upload(Era.LIVE, strip_scan(scan(newest - DAY)))
+    pool.upload(Era.BETA, strip_scan(scan(newest - 15 * DAY)))
+    last = pool.upload(Era.BETA, strip_scan(scan(newest)))
+    pool.fail_fetching.add(last)
+    cut_off = pull(db, pool, config)
+    pool.fail_fetching.clear()
+    cursor_after_cut_off = pool_cursor(db)
+
+    report = pull(db, pool, config)
+
+    assert cut_off.failed
+    assert cursor_after_cut_off is None
+    assert report.pulled == 1
+    assert scan_times(db, MARKET) == [newest]
+    assert scan_times(db, replace(MARKET, era=Era.LIVE)) == [newest - 2 * DAY, newest - DAY]
+
+
+def test_rolling_back_a_pooled_scan_a_second_time_does_nothing(db, config, pool):
+    # A retried first pull reads its pages again, roll-backs included (#193).
+    bad = pool.upload(Era.BETA, strip_scan(scan(T0)))
+    pool.upload(Era.BETA, strip_scan(scan(T0 + 20 * MINUTE)))
+    pull(db, pool, config)
+    pool.roll_back(bad)
+    pull(db, pool, config)
+
+    again = roll_back_pooled(db, [bad], config)
+
+    assert again.scans_rolled_back == 0 and not again.warnings
+    assert scan_times(db, MARKET) == [T0 + 20 * MINUTE]
+
+
+def test_a_pull_cut_off_partway_keeps_the_cursor_of_the_pages_it_finished(db, config, pool):
+    pool.upload(Era.BETA, strip_scan(scan(T0)))
+    pull(db, pool, config)
+    # Index entries 2 to 5 come on two pages ending at 3 and 5; the second one fails.
+    for i in range(1, 4):
+        pool.upload(Era.BETA, strip_scan(scan(T0 + i * MINUTE)))
+    pool.fail_fetching.add(pool.upload(Era.BETA, strip_scan(scan(T0 + 4 * MINUTE))))
+
+    report = pull(db, pool, config)
+
+    assert report.failed
+    assert pool_cursor(db) == 3
 
 
 def test_a_pull_since_a_date_goes_further_back(db, config, pool):
