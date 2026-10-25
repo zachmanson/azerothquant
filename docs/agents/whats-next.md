@@ -1,3 +1,9 @@
+2026-10-24 (later 165): #164 done (c320087). New pure `Placement.firstOpen(room, width, minWidth)`: with the AH up and no saved spot, the Recommendation Table narrows to the room right of the AH (down to MIN_WIDTH 1000), else keeps its size and opens below the AH. The pane can't collapse: it holds Post/Search, and the pane plus the columns that never hide need ~976. `savePosition` now saves the frame's TOPLEFT against UIParent (GetLeft/GetTop), not GetPoint. Not checked in game yet. The Beta Config.wtf has no uiScale, so the screen is ~1365 wide and there's only ~550 beside the AH: expect "below", clamped up over the AH's lower part.
+
+Next, in order: #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161. On Nov 4, when at the AH, check #164: first open with no saved spot (clear `recommendationFrame`/`recommendationFrameSize` in SavedVariables), then resize, close, reopen.
+
+- Gotchas: same as later 163.
+
 2026-10-24 (later 164): #91's new groups GRILLED, decisions in comment 6392535503, no code. Two new Predictions: "Protection potions" (Greater Fire/Shadow Protection only, plus reagents not already in another Prediction; Dreamfoil stays in potion mats) and "Slaying" (only items that trade on the AH; the Demonslaying enchant and its mats are out). Catalyst is raids unlock (Dec 9), lapse Dec 23, same as the other four. Nov 4 step added: Claude searches the first Live Scans for names with Demon/Undead/Slaying/Protection and gives the user a shortlist; the user confirms and reads any Item Keys the Scans don't have; then six Predictions go in `predictions.toml`.
 
 Next, in order: #164, #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161.
