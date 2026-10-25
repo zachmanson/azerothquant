@@ -1,3 +1,9 @@
+2026-10-24 (later 164): #91's new groups GRILLED, decisions in comment 6392535503, no code. Two new Predictions: "Protection potions" (Greater Fire/Shadow Protection only, plus reagents not already in another Prediction; Dreamfoil stays in potion mats) and "Slaying" (only items that trade on the AH; the Demonslaying enchant and its mats are out). Catalyst is raids unlock (Dec 9), lapse Dec 23, same as the other four. Nov 4 step added: Claude searches the first Live Scans for names with Demon/Undead/Slaying/Protection and gives the user a shortlist; the user confirms and reads any Item Keys the Scans don't have; then six Predictions go in `predictions.toml`.
+
+Next, in order: #164, #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161.
+
+- Gotchas: same as later 163.
+
 2026-10-24 (later 163): #157 closed as not planned, no code. Its premise was wrong: nothing writes the old `AzerothQuant_Data` folder; the write into `AddOns/AzerothQuant/Recommendations.lua` is ADR-0030's startup copy (TOC loads it, `DataAddon.atLoad` judges freshness and the Addon prunes by it). User's call: keep the write. On the dev checkout `git update-index --skip-worktree addon/AzerothQuant/Recommendations.lua` is now set, as development.md says, so the junction's writes no longer show in git.
 
 Next, in order: grill #91's new groups, then #164, #180, #97 (offline QoL, checked Nov 4). Then #193 before Nov 4. Rest same as later 161.
