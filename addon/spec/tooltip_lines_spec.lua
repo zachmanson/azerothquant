@@ -72,6 +72,14 @@ describe("TooltipLines.forLink", function()
     assert.are.same({ "AQ: Sell 4 @ 49c" }, linesFor(r, "item:1179::::::::20:1490::::::::"))
   end)
 
+  it("gives a Wait the price it waits to post at (#151)", function()
+    local r = recs({
+      holdings = { { itemKey = "2589", action = "Wait", quantity = 3, price = 999, profit = 2847 } },
+    })
+
+    assert.are.same({ "AQ: Wait 3, then post @ 9s 99c" }, linesFor(r, "item:2589"))
+  end)
+
   it("gives a Hold its Prediction instead of a price", function()
     local r = recs({
       holdings = { { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, prediction = "Phase 2" } },

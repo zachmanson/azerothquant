@@ -330,6 +330,20 @@ def test_units_the_brain_has_no_data_for_are_held_on_to_and_add_nothing(db):
     assert result[MARKET].graded[Policy.BRAIN] == 0
 
 
+def test_units_the_brain_waits_with_are_held_on_to_and_add_nothing(db):
+    # #151, ADR-0038: with no gold to Flip it, the Linen at 300 under the 1000s is still
+    # one a Flip to Sell would buy, so the Brain's 2 Wait: held on to, like doing nothing.
+    result = run(
+        db,
+        linen_selling_then_crashing(row(unit=300), unit=1000),
+        [character_read(item(count=2), vendor_prices={2589: 10})],
+        since=T0 + HOUR,
+        until=T0 + HOUR,
+    )
+
+    assert result[MARKET].graded[Policy.BRAIN] == 0
+
+
 def test_the_brains_crafts_pay_for_their_merchant_reagents(db):
     # 4 Linen and 2 Thread from a merchant at 10 each make 2 Bolts, which vendor for 500.
     result = run(

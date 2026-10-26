@@ -2,6 +2,8 @@
 
 Amended by ADR-0034 (#170): each option is also sized within two risk caps, its Unsold Loss and the gold tied up in posts, each a share of the Stake.
 
+Amended by ADR-0038 (#151): held units still price with nothing bought, but they Wait instead of posting under Listings a Flip to Sell would buy.
+
 The Shopping List used to be one basket: a greedy fill of every Flip by profit per gold until the pooled gold ran out (ADR-0010, ADR-0011). After playing with it, the player raised two problems (#86):
 
 1. They aren't always willing to spend all their gold on the Auction House.

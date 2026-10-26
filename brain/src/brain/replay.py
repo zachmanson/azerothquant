@@ -325,7 +325,7 @@ def _brain(m: MarketRecommendations, vendor: Mapping[int, int], flip_rows: int) 
             moves.posts.append(_Post(r.item_key, quantity, r.price))
         elif r.action is Action.VENDOR:
             moves.vendored += quantity * (r.price or 0)
-        elif r.action in (None, Action.HOLD, Action.DISENCHANT):
+        elif r.action in (None, Action.HOLD, Action.WAIT, Action.DISENCHANT):
             moves.kept[r.item_key] += quantity
         elif r.action is Action.CRAFT:
             moves.spent += r.merchant_gold

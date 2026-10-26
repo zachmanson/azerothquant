@@ -104,6 +104,13 @@ class Action(StrEnum):
     # A held unit into its expected mats, by a Character with the Enchanting skill (#76).
     DISENCHANT = "Disenchant"
     HOLD = "Hold"  # only ever under a Prediction (ADR-0006)
+    # Held units kept back while a Flip to Sell would buy the cheapest Listings, to post
+    # once they're gone (#151, ADR-0038).
+    WAIT = "Wait"
+
+
+# Holdings Actions priced as a post on the Auction House: a Wait posts later (ADR-0038).
+PRICED_AS_A_POST = (Action.SELL, Action.WAIT)
 
 
 @dataclass(frozen=True)
@@ -2039,6 +2046,7 @@ class _Valuer:
         self._by_item = _by_item(rates) if by_item is None else by_item
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
         self._held_rates: dict[str, tuple[SellRate | None, int]] = {}
+        self._wait_at: dict[str, float | None] = {}
         # The cheapest of the player's own Listings by Item Key. `supply` and `others`
         # don't change, so every Valuer `after` this one shares it (#141).
         self._own_cheapest: dict[str, int | None] = {} if own_cheapest is None else own_cheapest
@@ -2191,13 +2199,14 @@ class _Valuer:
             return 1.0
         return _sale_size(self.rates.get(item_key), self._config.sale_size_prior_events_flips)
 
-    def post_at(self, item_key: str) -> float | None:
-        """The price to post one held unit at once `flipped` is bought (`_post_at`), never
-        above the dearest Sale Event (#41), its own or a sibling suffix's (#58)."""
+    def post_at(self, item_key: str, bought: Supply = ()) -> float | None:
+        """The price to post one held unit at once `flipped` and `bought` are bought
+        (`_post_at`), never above the dearest Sale Event (#41), its own or a sibling
+        suffix's (#58)."""
         rates = [self.rates.get(item_key), *self._sibling_rates(item_key)]
         dearest = [r.max_sale_price for r in rates if r is not None]
         return self._post_at_or_under(
-            item_key, max((p for p in dearest if p is not None), default=None)
+            item_key, max((p for p in dearest if p is not None), default=None), bought
         )
 
     def held_rate(self, item_key: str) -> tuple[SellRate | None, int]:
@@ -2239,15 +2248,33 @@ class _Valuer:
         merchant caps it: the demand at the price does the rest (#107)."""
         return self._post_at_or_under(item_key, None)
 
-    def _post_at_or_under(self, item_key: str, cap: float | None) -> float | None:
+    def wait_at(self, item_key: str) -> float | None:
+        """The price held units of an Item Key Wait to post at (#151, ADR-0038): `post_at`
+        once its `clearing_run` is bought. A Flip to Sell would buy those Listings, so
+        posting under them is dumping. None without such a run, under a pricer (it has no
+        Sell Rate to judge a Flip by), or once this Valuer has bought some of the Item
+        Key: the run is gone then, and `post_at` is already the price after it."""
+        if self._pricer is not None or self.flipped.get(item_key) or not self.others.get(item_key):
+            return None
+        if item_key not in self._wait_at:
+            run = self.clearing_run(item_key)
+            self._wait_at[item_key] = (
+                None if run is None else self.post_at(item_key, bought=run.units)
+            )
+        return self._wait_at[item_key]
+
+    def _post_at_or_under(
+        self, item_key: str, cap: float | None, bought: Supply = ()
+    ) -> float | None:
+        flipped = [*self.flipped.get(item_key, []), *bought]
         if (price := self.priced(item_key)) is not None:
-            left = without(self.others.get(item_key, []), self.flipped.get(item_key, []))
+            left = without(self.others.get(item_key, []), flipped)
             return price(_cheapest(left))
         others = self.others.get(item_key, [])
         if item_key not in self._own_cheapest:
             self._own_cheapest[item_key] = cheapest_without(self.supply.get(item_key, []), others)
         return _undercut(
-            cheapest_without(others, self.flipped.get(item_key, [])),
+            cheapest_without(others, flipped),
             self._own_cheapest[item_key],
             self._config,
             _ceiling(cap, self.merchant.get(item_key)),
@@ -2258,6 +2285,8 @@ class _Valuer:
         rate, sibling_sales = self.held_rate(item_key)
         has_data = self.has_data(item_key)
         post_at = self.post_at(item_key) if has_data else None
+        wait_at = self.wait_at(item_key) if has_data else None
+        waiting = wait_at is not None and (post_at is None or wait_at > post_at)
         c = self._config
         room = (
             math.inf
@@ -2273,13 +2302,14 @@ class _Valuer:
             item_key,
             holding,
             has_data,
-            post_at,
+            wait_at if waiting else post_at,
             room,
             own.sale_events if own else None,
             sibling_sales if self._pricer is None else 0,  # a pricer ignores Sell Rate
             self.vendor.get(item_id_of(item_key)),
             self.sale_queue(item_key, flips=False),
             self.cut,
+            Action.WAIT if waiting else Action.SELL,
         )
 
     def has_data(self, item_key: str) -> bool:
@@ -2485,9 +2515,12 @@ def _holding_rows(
     vendor_price: int | None,
     queue: _Queue,
     cut: float,
+    selling_action: Action,
 ) -> list[Row]:
     """How held units split between Sell, posted at `post_at` like a Flip (#64), and
     Vendor. With no Listing to price against there's no `post_at`, and they're Vendored.
+    The units that would Sell are a `selling_action`: Wait when `post_at` is the price
+    once the Listings a Flip would buy are gone (ADR-0038).
     At most `room` units Sell: those that sell within the Sale Horizon.
     A held unit Sells only while it beats the Vendor Price less the deposits it's expected
     to lose waiting its turn in the `queue` (#78), so the tail of a slow seller is Vendored."""
@@ -2509,7 +2542,7 @@ def _holding_rows(
             rows.append(
                 Row(
                     item_key,
-                    Action.SELL,
+                    selling_action,
                     selling,
                     price=post_at,
                     profit=profit,
@@ -2933,8 +2966,9 @@ def _held_exits(plan: _Plan, sources: "_Sources") -> list[_Part]:
     after = _crafted(plan, now)
 
     def sells(holding: Holding) -> tuple[int, float, float | None]:
-        """The units that Sell, what they bring, and their post price."""
-        rows = [r for r in valuer.rows(out, holding) if r.action is Action.SELL]
+        """The units that Sell, or Wait to (ADR-0038), what they bring, and their post
+        price."""
+        rows = [r for r in valuer.rows(out, holding) if r.action in PRICED_AS_A_POST]
         return (
             sum(r.quantity for r in rows),
             sum(r.profit or 0.0 for r in rows),
@@ -3602,10 +3636,10 @@ def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Confi
     result = []
     for r in rows:
         roi = None
-        if r.item_key in covered and r.action in (Action.SELL, Action.VENDOR) and r.price:
+        if r.item_key in covered and r.action in PRICED_AS_A_POST + (Action.VENDOR,) and r.price:
             cost, units = covered[r.item_key]
             paid = cost / units
-            net = r.price * (1 - cut) if r.action is Action.SELL else r.price
+            net = r.price * (1 - cut) if r.action in PRICED_AS_A_POST else r.price
             roi = (net - paid) / paid if paid else None
         if roi is None:
             result.append(r)

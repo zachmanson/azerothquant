@@ -551,6 +551,7 @@ end
 -- What the side pane says to do with a row, in plain words (#160), and the Action it heads
 -- the pane with, by tab. A row that can be marked Bought adds the hint to mark it.
 local LATER = "they should sell for more later."
+local CHEAP_UP = "someone's selling these cheap. Check again after the next Scan."
 local BOUGHT_HINT = " Right-click the row once you've bought it."
 
 local function buyUpTo(r)
@@ -570,6 +571,9 @@ local WHAT_TO_DO = {
       return r.action, "Sell " .. r.quantity .. " to any merchant."
     elseif r.action == "Hold" then
       return r.action, "Keep them for now: " .. LATER
+    elseif r.action == "Wait" then
+      -- A Flip would buy the cheap Listings first, so these post once they're gone (#151).
+      return r.action, "Keep them for now: " .. CHEAP_UP
     elseif r.action == "Craft" and r.blocked then
       return r.action, "This can't be crafted yet: see the note."
     elseif r.action == "Craft" then

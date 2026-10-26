@@ -1370,6 +1370,17 @@ describe("the side pane's Action and what to do (#160)", function()
     )
   end)
 
+  it("says to keep a Holdings Wait for now, shown not folded, at the price it waits to post at (#151)", function()
+    local wait = { itemKey = "2589", action = "Wait", quantity = 3, price = 999, profit = 2847 }
+    local view = build(entry({ holdings = { wait } }))
+
+    assert.are.same(
+      { "Wait", "Keep them for now: someone's selling these cheap. Check again after the next Scan." },
+      first(view, 1)
+    )
+    assert.are.same({ "item:2589", "Wait", "3", "9s 99c", "28s 47c" }, { unpack(view.sections[1].rows[1].cells, 1, 5) })
+  end)
+
   it("says who crafts a Flip to Craft, and leaves the Bought hint off a row already marked", function()
     local view = build(entry({ shoppingList = { flipToCraft() } }), AS_OF, nil, nil, nil, { ["2996 Craft Kash-Patel"] = { cost = 1250, at = AS_OF } })
 

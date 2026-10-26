@@ -284,18 +284,19 @@ def test_held_units_are_never_sold_above_the_dearest_sale(db):
     assert sell.profit == pytest.approx(100 * 0.95)
 
 
-def test_held_units_are_valued_with_nothing_on_the_shopping_list_bought(db):
-    # #86: the two 700s are a Flip to Sell, posted at 999 under the 1000s once bought. But
-    # the Shopping List's options are alternatives, so held units undercut the 700s still
-    # there (#64), not what's left if the Flip is bought (ADR-0010, superseded).
+def test_held_units_wait_out_listings_a_flip_to_sell_would_buy(db):
+    # #86: the two 700s are a Flip to Sell, posted at 999 under the 1000s once bought. The
+    # Shopping List's options are alternatives, so held units aren't priced as if the Flip
+    # were bought (ADR-0017), but nor are they dumped at 699 under Listings a Flip would
+    # take: they Wait to post at 999 once the 700s are gone (#151, ADR-0038).
     result = run(
         db,
         selling_two_linen_an_hour(row(quantity=2, unit=700), unit=1000),
         [character_read(item(count=3), money=GOLD, vendor_prices={2589: 10})],
     )
 
-    [sell] = result[MARKET].holdings
-    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 3, 699)
+    [wait] = result[MARKET].holdings
+    assert (wait.action, wait.quantity, wait.price) == (Action.WAIT, 3, 999)
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at) == (2, 999)
 
@@ -527,6 +528,80 @@ def test_a_flip_to_sell_is_ranked_whole_so_one_the_gold_cant_finish_leaves_it_to
         999,
     )
     assert flip.profit == pytest.approx(999 * 0.95 - 500)
+
+
+def test_held_units_wait_rather_than_vendor_under_a_lowball_a_flip_would_buy(db):
+    # #151, ADR-0038: one Linen up at 300 under the 1000s. Posted at 299 they'd bring 284
+    # after the cut, under the 290 Vendor Price, so they'd all be Vendored. But a Flip to
+    # Sell would buy the 300 and post at 999, so they Wait to post there instead.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=300), unit=1000),
+        [character_read(item(count=5), vendor_prices={2589: 290})],
+    )
+
+    assert result[MARKET].holdings == [
+        Row(
+            LINEN_KEY,
+            Action.WAIT,
+            5,
+            price=999,
+            profit=pytest.approx(5 * 999 * 0.95),
+            margin=pytest.approx(999 * 0.95 - 290),
+            sale_events=1,
+        )
+    ]
+
+
+def test_only_the_units_that_would_sell_after_the_lowball_wait(db):
+    # #151: 6 sell within the horizon at 999. The other 4 are Vendored, as they'd be with
+    # no lowball up: that's the slow demand, not the 300.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=300), unit=1000),
+        [character_read(item(count=10), vendor_prices={2589: 290})],
+    )
+
+    assert [(r.action, r.quantity, r.price) for r in result[MARKET].holdings] == [
+        (Action.WAIT, 6, 999),
+        (Action.VENDOR, 4, 290),
+    ]
+
+
+def test_under_a_pricer_held_units_never_wait(db):
+    # #151, ADR-0038: a pricer has no Sell Rate to judge a Flip by, so the replay's Brain
+    # without own-Market Sell Rate posts under the 300 as its pricer says.
+    run(
+        db,
+        selling_two_linen_an_hour(row(unit=300), unit=1000),
+        [character_read(item(count=5), vendor_prices={2589: 10})],
+    )
+
+    m = recommend_market(
+        db,
+        CONFIG,
+        MARKET,
+        [],
+        T0 + HOUR,
+        pricer=lambda _, cheapest: None if cheapest is None else cheapest - 1,
+    )
+
+    [sell] = m.holdings
+    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 5, 299)
+
+
+def test_held_units_post_under_a_cheap_listing_no_flip_would_buy(db):
+    # #151: with too few Sale Events at 999 for a Flip to Sell, nothing says the 300 will
+    # go, so held units undercut it as before (ADR-0017).
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(unit=300), unit=1000),
+        [character_read(item(count=5), vendor_prices={2589: 10})],
+        config=replace(CONFIG, flip_min_sale_events=2),
+    )
+
+    [sell] = result[MARKET].holdings
+    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 5, 299)
 
 
 def test_everything_is_vendored_when_a_vendor_pays_more_than_a_sale_brings_in(db):
@@ -2183,8 +2258,8 @@ def test_a_market_without_observation_windows_rests_on_none(db):
 
 
 def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
-    # The raw 80 a day * 7 days = 560 units of room: all 100 held are Sold, and all 10
-    # cheap units are bought.
+    # The raw 80 a day * 7 days = 560 units of room: all 100 held would Sell, and all 10
+    # cheap units are bought. The held ones Wait for the Flip's 500s to go (ADR-0038).
     config = replace(
         DEFAULTS,
         sell_rate_prior_hours_holdings=0,
@@ -2200,8 +2275,8 @@ def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
         config=config,
     )
 
-    [sell] = result[MARKET].holdings
-    assert (sell.action, sell.quantity) == (Action.SELL, 100)
+    [wait] = result[MARKET].holdings
+    assert (wait.action, wait.quantity) == (Action.WAIT, 100)
     [flip] = result[MARKET].shopping_list
     assert (flip.action, flip.quantity) == (Action.SELL, 10)
 
@@ -2255,7 +2330,8 @@ def one_buyer_takes_a_20_stack(*latest_rows):
 def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db, other_db):
     # Holdings, 1 Sale Event: (20 + 1 * 2) / 2 = 11 units, at 48 events a day = 66 in 3 h.
     # Flips, 5: (20 + 5 * 2) / 6 = 5 units, 30 in 3 h. Held units take the room before
-    # Flips (#67), so the Flips are judged with none held.
+    # Flips (#67), so the Flips are judged with none held. The held ones that would Sell
+    # Wait for the Flip's 500s to go (ADR-0038).
     config = replace(CONFIG, sale_size_prior_events_holdings=1, sale_size_prior_events_flips=5)
     scans = one_buyer_takes_a_20_stack(row(quantity=30, unit=500), row(quantity=10, unit=700))
     holding = run(
@@ -2264,7 +2340,7 @@ def test_holdings_and_flips_shrink_the_sale_event_size_by_their_own_prior(db, ot
     flipping = run(other_db, scans, [character_read(money=GOLD)], config=config)
 
     sell, vendor = holding[MARKET].holdings
-    assert (sell.action, sell.quantity) == (Action.SELL, 66)
+    assert (sell.action, sell.quantity) == (Action.WAIT, 66)
     assert (vendor.action, vendor.quantity) == (Action.VENDOR, 34)
     [flip] = flipping[MARKET].shopping_list
     assert (flip.action, flip.quantity, flip.price) == (Action.SELL, 30, 500)
@@ -3987,9 +4063,9 @@ def test_units_held_when_a_prediction_is_written_are_costed_at_that_days_best_ex
 
 
 def test_a_best_exit_is_valued_with_nothing_on_that_scans_shopping_list_bought(db):
-    # #86: on the written day the two 700s were a Flip to Sell, but as held units are now,
-    # the 4 are posted under the 700s at 699, 664.05 after the cut, not under the 1000s.
-    # The later Scans at 500 must not count.
+    # #86: on the written day the two 700s were a Flip to Sell, which nothing assumes
+    # bought. As held units are now, the 4 Wait for the 700s to go (ADR-0038) and are
+    # valued at 999, 949.05 after the cut. The later Scans at 500 must not count.
     written = date.fromtimestamp(T0 + HOUR) + timedelta(days=1)
     later = T0 + 3 * DAY
     run(
@@ -4003,7 +4079,7 @@ def test_a_best_exit_is_valued_with_nothing_on_that_scans_shopping_list_bought(d
     )
 
     assert held_at_writing(db, CONFIG, MARKET, [prediction(LINEN_KEY, written=written)]) == [
-        Held("Linen spike", LINEN_KEY, units=4, cost=2656)  # 4 * 664.05
+        Held("Linen spike", LINEN_KEY, units=4, cost=3796)  # 4 * 949.05
     ]
 
 

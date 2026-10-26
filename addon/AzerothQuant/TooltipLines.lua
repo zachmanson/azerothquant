@@ -64,7 +64,8 @@ TooltipLines.itemKey = itemKey
 
 -- A Craft has no price of its own: it names its Character, and its reagents follow as
 -- lines of their own. One that can't be made says why. A Disenchant is the same, with its
--- expected mats (#76). A Hold's worth hangs on its Prediction (ADR-0006).
+-- expected mats (#76). A Hold's worth hangs on its Prediction (ADR-0006). A Wait names the
+-- price to post at once the cheap Listings are gone (#151, ADR-0038).
 local function holdingLine(r, nameOf)
   local head = "AQ: " .. r.action .. " " .. r.quantity
   if r.action == "Disenchant" then
@@ -74,6 +75,8 @@ local function holdingLine(r, nameOf)
       or (head .. " (" .. RecommendationTable.note(r, nameOf) .. ")")
   elseif r.action == "Hold" then
     return head .. " under " .. r.prediction
+  elseif r.action == "Wait" then
+    return head .. ", then post @ " .. Money.format(r.price)
   end
   return head .. " @ " .. Money.format(r.price)
 end

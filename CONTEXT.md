@@ -170,12 +170,16 @@ _Avoid_: replay (that's ADR-0015's per-Scan grade against Auctionator and TSM). 
 An item the Decision Engine evaluates for a Recommendation.
 
 **Action**:
-One way out of a Candidate Item the player holds: Vendor, Sell, Craft, Disenchant or Hold. Buying is never an Action (see Flip).
+One way out of a Candidate Item the player holds: Vendor, Sell, Craft, Disenchant, Hold or Wait. Buying is never an Action (see Flip).
 _Avoid_: strategy, play
 
 **Sell**:
-The Action of posting an item on the Auction House for other players to buy. Held units are posted just under the cheapest other player's Listing (matching an own Listing that's cheaper), never above the highest price among its and its Siblings' Sale Events or its Merchant Cost, with nothing on the Shopping List assumed bought, since its options are alternatives (ADR-0017). A Flip to Sell is posted the same way once its own run is bought, except that no Sale Event caps it: its Sell Rate counts only the Sale Events at or above its price instead (see Flip). With no Listing left there is no Sell price, and held units go to Vendor. Best Exit Value values Sell the same way, at a past Scan too. A held unit Sells only while its price after the cut, less the Deposits it's expected to lose waiting its turn, beats the Vendor Price, so a slow seller's tail goes to Vendor.
+The Action of posting an item on the Auction House for other players to buy. Held units are posted just under the cheapest other player's Listing (matching an own Listing that's cheaper), never above the highest price among its and its Siblings' Sale Events or its Merchant Cost, with nothing on the Shopping List assumed bought, since its options are alternatives (ADR-0017). A Flip to Sell is posted the same way once its own run is bought, except that no Sale Event caps it: its Sell Rate counts only the Sale Events at or above its price instead (see Flip). With no Listing left there is no Sell price, and held units go to Vendor. Best Exit Value values Sell the same way, at a past Scan too. A held unit Sells only while its price after the cut, less the Deposits it's expected to lose waiting its turn, beats the Vendor Price, so a slow seller's tail goes to Vendor. When a Flip to Sell would buy the cheapest Listings, held units don't post under them: they Wait (ADR-0038).
 _Avoid_: post, list, flip (a Flip is a buy)
+
+**Wait**:
+Keeping held units for now because a Flip to Sell would buy the Item Key's cheapest Listings: posting under them would dump the units, and Vendoring them because of them can't be undone. The units that would Sell at the price once those Listings are gone Wait, valued at that Sell; the rest go to Vendor as they would anyway. Not a Hold, which is only ever under a Prediction. With no such Flip, or once cheap stock has been up long enough that the old sales stop counting, there's nothing to wait out and held units Sell under the cheapest Listing as usual (ADR-0038).
+_Avoid_: hold (that's under a Prediction), skip
 
 **Craft**:
 The Action of turning held reagents into a Known Recipe's output. A craft is worth doing when the output Holding's exit value with the crafted units added gains more than the consumed reagents' exit value loses. Missing merchant reagents are bought at their Merchant Cost, reagents Held under a Prediction are never used, and output is counted at the recipe's minimum quantity. The reagents are pooled across a realm and faction, and the Recommendation names the Character that knows the recipe. Enchants that make no item are not Crafts. Buying reagents on the Auction House to craft is a Flip, not this Action. A short reagent can be crafted first with another Known Recipe, a Sub-craft, so a Craft can be a chain (ADR-0014).

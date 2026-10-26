@@ -1102,10 +1102,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert "Classic Beta PvP Alliance (beta)" in text
     # The one Observation Window every Sell Rate here rests on.
     assert "Sell Rate observed for 1.0 h in the last 14 days" in text
-    # Held units are valued with nothing on the Shopping List bought (#86), so they're
-    # posted at 699 under the Flip's two 700s, for 664.05 each after the cut, 654.05 more
-    # than a vendor pays.
-    assert ["2589", "Sell", "3", "6s 99c", "19s 92c", "6s 54c", "1"] in lines
+    # Held units are valued with nothing on the Shopping List bought (#86), but a Flip to
+    # Sell would buy the two 700s, so they Wait to post at 999 once those go (ADR-0038):
+    # 949.05 each after the cut, 939.05 more than a vendor pays.
+    assert ["2589", "Wait", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
     assert "Shopping List, options each sized on its own within 12g 34s 56c\n" in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one deposit first (#78): 6c a unit (60% of the 10c Vendor Price), but a
@@ -1164,8 +1164,9 @@ def test_replay_prints_each_markets_policies_with_the_brains_lead_over_each(tmp_
 
 
 def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_path):
-    # 2 of the 3 held were bought for 5s each; posted at 9s 99c they net 9s 49.05c after
-    # the cut, +89.8%, a good time to sell.
+    # 2 of the 3 held were bought for 5s each. They Wait for the Flip's two 700s to go
+    # (ADR-0038), to post at 9s 99c for 9s 49.05c after the cut, +89.8%: no hint to sell
+    # now, since they wait.
     won = {
         "index": 1,
         "sender": "Alliance Auction House",
@@ -1193,8 +1194,7 @@ def test_recommend_prints_the_roi_of_held_units_bought_on_the_auction_house(tmp_
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert ["Item", "Action", "Qty", "Price", "Profit", "Margin", "Sales", "ROI", "Note"] in lines
-    # Posted at 699 with nothing bought (#86): 664.05 after the cut on 500 paid.
-    assert ["2589", "Sell", "3", "6s 99c", "19s 92c", "6s 54c", "1", "+32.8% * on 2 of 3"] in lines
+    assert ["2589", "Wait", "3", "9s 99c", "28s 47c", "9s 39c", "1", "+89.8% on 2 of 3"] in lines
 
 
 def _bolts_and_linen(tmp_path, money=0):

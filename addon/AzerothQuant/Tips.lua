@@ -23,7 +23,8 @@ Tips.TABS = {
 Tips.COLUMNS = {
   ["Item"] = "The item. Hover a row for the details on the right.",
   ["Action"] = "What to do with it: Buy it or Sell it on the Auction House, Vendor it (sell to a merchant), "
-    .. "Craft something with it, Disenchant it, or Hold it (keep it for later).",
+    .. "Craft something with it, Disenchant it, Hold it (keep it for later), or Wait (someone's selling "
+    .. "it cheap: check again after the next Scan).",
   ["Qty"] = "How many to buy. On Holdings: how many to sell, vendor, craft or keep.",
   ["Price"] = "What one sells for, on the Auction House or to a merchant.",
   ["Max price"] = "The most to pay for one. Skip any listing above this.",
