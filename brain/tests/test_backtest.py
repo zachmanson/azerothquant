@@ -3,10 +3,20 @@ from pathlib import Path
 
 import pytest
 
-from brain.backtest import Buy, Terms, backtest, simulate
+from brain.backtest import Buy, Terms, backtest, options_taken, simulate
 from brain.config import Config, Era, Install
+from brain.disenchant import Group
 from brain.history import Market, import_character_reads, import_scans, open_history
 from brain.observation import SaleRecord
+from brain.recommend import (
+    Action,
+    DisenchantFlip,
+    ListingBuy,
+    MarketRecommendations,
+    MatYield,
+    ReagentBuy,
+    Row,
+)
 
 T0 = 1_790_000_000
 HOUR = 3600
@@ -389,3 +399,70 @@ def test_the_max_drawdown_is_the_deepest_fall_from_a_peak_of_gold_and_unsold_uni
     )
 
     assert result.max_drawdown == pytest.approx(416 / 1000)
+
+
+# --- The options a player would take ---
+
+
+GREENS = Group(2, "armor", 16, 20, ())
+DUST_KEY = "10940"
+
+
+def flip_to_disenchant(profit=500):
+    """A Flip to Disenchant of 2 Green Chests (9999) and another green (9998)."""
+    flip = DisenchantFlip(
+        GREENS, (ListingBuy("9999", 100), ListingBuy("9998", 150), ListingBuy("9999", 300))
+    )
+    return Row(
+        "",
+        Action.DISENCHANT,
+        3,
+        price=300,
+        profit=profit,
+        cost=550,
+        character="Bob",
+        mats=(MatYield(DUST_KEY, 5.625),),
+        listings=3,
+        disenchant=flip,
+    )
+
+
+def test_a_taken_flip_to_disenchant_blocks_later_options_on_its_items_or_mats():
+    dust_craft = Row(DUST_KEY, Action.CRAFT, 1, profit=300, cost=50, buys=(ReagentBuy("2", 1, 50),))
+    other_green = Row("9998", Action.SELL, 1, price=160, profit=200, cost=160)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=10)
+    m = MarketRecommendations(
+        MARKET, T0, 10000, shopping_list=[flip_to_disenchant(), dust_craft, other_green, linen]
+    )
+
+    # A Flip to Disenchant isn't one of the Flips to Sell and Vendor the row cap counts.
+    shopping, _ = options_taken(m, flip_rows=2)
+
+    assert shopping == [flip_to_disenchant(), linen]
+
+
+def test_options_are_taken_while_the_room_lasts_as_well_as_the_gold():
+    # #170, ADR-0034: 1g of gold but 50s of room, so after the 40s Ore only the 10s Linen
+    # fits, not the 30s Bolt.
+    ore = Row("2770", Action.SELL, 4, price=10, profit=300, cost=4000)
+    bolt = Row("2996", Action.SELL, 3, price=10, profit=200, cost=3000)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=1000)
+    m = MarketRecommendations(MARKET, T0, 10000, room=5000, shopping_list=[ore, bolt, linen])
+
+    shopping, _ = options_taken(m, flip_rows=50)
+
+    assert shopping == [ore, linen]
+
+
+def test_a_risky_row_is_never_taken_nor_counted_in_the_rows_kept():
+    # #194, ADR-0037: the Backtest takes only the rows the risk caps leave. The
+    # Risky Ore is the most profit, but it's skipped and takes none of the 2 places, so both
+    # the Bolt and the Linen are taken.
+    ore = Row("2770", Action.SELL, 4, price=10, profit=300, cost=4000, risky=True)
+    bolt = Row("2996", Action.SELL, 3, price=10, profit=200, cost=3000)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=1000)
+    m = MarketRecommendations(MARKET, T0, 10000, shopping_list=[ore, bolt, linen])
+
+    shopping, _ = options_taken(m, flip_rows=2)
+
+    assert shopping == [bolt, linen]

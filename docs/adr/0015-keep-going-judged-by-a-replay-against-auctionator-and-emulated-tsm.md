@@ -1,5 +1,7 @@
 # Keep going, judged by a replay against Auctionator and emulated TSM
 
+**Superseded by ADR-0039** (#184): the replay is retired, and the Live checkpoint runs on the Backtest against an Auctionator policy. Realized profit is `brain profit`.
+
 Should azerothquant keep going when TradeSkillMaster (TSM) exists? It exists for gold and for the craft of building it, but it has to earn its keep: if a simpler tool earns as much, the Brain stops growing.
 
 **What TSM offers on Forever (researched 2026-09-28, mostly from search snippets, since the key sites blocked fetching).** Nothing yet. Forever is in Beta (Sept 17 to Oct 21, 2026), and Live launches Nov 4. There is no official TSM statement, no Forever flavor of TSM on CurseForge and no Forever AuctionDB data (DBMarket, DBRegion*, SaleRate). A third-party site, unconfirmed, reports that Blizzard's auction API has no Forever data, which TSM would need to build any. Auctionator (a Forever-flagged file) and community Auctioneer forks already run on Forever, and Booty Bay Broker crowdsources Forever Scans. So the opponent today is Auctionator, and the question "would a TSM price string do as well" is answered by emulating one.
@@ -58,3 +60,4 @@ Realized profit from Lots and Sold mail is reported alongside as the confirmatio
 ## Amendments
 
 - Amended by #167 (ADR-0032): the replay no longer judges buy-side changes. The walk-forward Backtest graded on Sale Records does (`brain backtest`). The Brain vs. Auctionator and TSM checkpoints above still use the replay.
+- Superseded by ADR-0039 (#184): `brain replay` is deleted.

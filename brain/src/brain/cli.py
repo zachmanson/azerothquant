@@ -4,7 +4,7 @@
     brain watch      import each SavedVariables file whenever the client rewrites it
     brain rebuild    recreate the history database from the Archive (ADR-0005)
     brain recommend  print what to do with Holdings, and the Shopping List
-    brain replay     grade the Brain against Auctionator and emulated TSM on past Scans
+    brain profit     realized profit from own sales over a range
     brain backtest   trade the past Scans from a start gold and grade it by the sales after
     brain flips      grade the Flips to Sell and to Craft made: did they sell as named
     brain disenchants  check the Disenchant tables against the player's Disenchant Results
@@ -78,6 +78,7 @@ from brain.observation import Calibration
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
+from brain.realized import Realized, realized
 from brain.recommend import (
     Action,
     BuyUnder,
@@ -96,7 +97,6 @@ from brain.recommend import (
     split_purchases,
 )
 from brain.recommendations import addon_folder, write_recommendations
-from brain.replay import MarketReplay, Policy, replay
 from brain.savedvariables import SavedVariablesError
 from brain.timings import Timings, timed
 from brain.watch import Watcher
@@ -493,12 +493,12 @@ def _rebuild(config: Config) -> int:
     return 0
 
 
-def _replay(config: Config, since: date | None, until: date | None) -> int:
+def _profit(config: Config, since: date | None, until: date | None) -> int:
     if not config.history_path.exists():
         log.error("No history at %s yet; run `brain import` first", config.history_path)
         return 1
     try:
-        text = run_replay(config, since, until)
+        text = run_profit(config, since, until)
     except sqlite3.Error as e:
         log.error("Couldn't read the history: %s", e)
         return 1
@@ -509,18 +509,20 @@ def _replay(config: Config, since: date | None, until: date | None) -> int:
     return 0
 
 
-def run_replay(config: Config, since: date | None, until: date | None) -> str:
-    """The replay (#80, ADR-0015) over the Scans from the start of `since` to the end of
-    `until` (all of them without), per Market, as text."""
+def run_profit(config: Config, since: date | None, until: date | None) -> str:
+    """Realized profit (ADR-0039) from the start of `since` to the end of `until` (all of
+    it without), per Market, as text."""
     predictions = load_predictions(config.predictions_path)
     start = 0 if since is None else start_of(since)
     end = 2**62 if until is None else start_of(until + timedelta(days=1)) - 1
     with closing(open_history(config.history_path)) as conn:
-        markets = replay(conn, config, predictions, start, end)
+        markets = {
+            market: realized(conn, config, market, predictions, start, end)
+            for market in character_markets(conn)
+        }
     if not markets:
-        return "No Character has a Market with a Scan yet.\n"
-    hours = config.sale_horizon_seconds / 3600
-    return "\n".join(_render_replay(m, hours) for m in markets)
+        return "No Character has a Market yet.\n"
+    return "\n".join(_render_profit(market, r) for market, r in markets.items())
 
 
 def _backtest(
@@ -644,28 +646,11 @@ def _graded_title(market: Market) -> str:
     return title
 
 
-def _render_replay(m: MarketReplay, horizon_hours: float) -> str:
-    market = _graded_title(m.market)
-    scans = "Scan" if m.scans == 1 else "Scans"
-    table = _table(
-        ["Policy", "Value added", "Brain over it"],
-        [
-            [
-                policy.value,
-                _money(m.graded[policy]),
-                "" if policy is Policy.BRAIN else _percent(m.over(policy)),
-            ]
-            for policy in Policy
-            if policy in m.graded
-        ],
-    )
+def _render_profit(market: Market, r: Realized) -> str:
     return (
-        f"{market}\n"
-        f"Replayed {m.scans} {scans}, each graded over the {horizon_hours:.1f} h Sale Horizon"
-        " after it\n"
-        f"{table}\n"
-        f"Realized profit over the range: {_money(m.realized_profit)}\n"
-        f"{_for_use_line(m.for_use)}"
+        f"{_graded_title(market)}\n"
+        f"Realized profit over the range: {_money(r.profit)}\n"
+        f"{_for_use_line(r.for_use)}"
     )
 
 
@@ -1566,11 +1551,9 @@ def main(argv: list[str] | None = None) -> int:
         help="print the Beta/Live Fair Value ratio of each Prediction's Item Keys early in "
         "Live, even with beta_sell_rate_weight at 0",
     )
-    replaying = commands.add_parser(
-        "replay", help="grade the Brain against Auctionator and emulated TSM on past Scans"
-    )
-    replaying.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
-    replaying.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
+    profit = commands.add_parser("profit", help="realized profit from own sales over a range")
+    profit.add_argument("--since", type=date.fromisoformat, help="first day, YYYY-MM-DD")
+    profit.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
     backtesting = commands.add_parser(
         "backtest", help="trade the past Scans from a start gold and grade it by the sales after"
     )
@@ -1676,8 +1659,8 @@ def _run_command(args: argparse.Namespace, config_path: Path) -> int:
         return _recommend(config, args.chain, args.why_not, args.beta_ratios)
     if args.command == "bench":
         return _bench(config, args.out)
-    if args.command == "replay":
-        return _replay(config, args.since, args.until)
+    if args.command == "profit":
+        return _profit(config, args.since, args.until)
     if args.command == "backtest":
         return _backtest(
             config, args.since, args.until, args.policy, round(args.start_gold * 10000)

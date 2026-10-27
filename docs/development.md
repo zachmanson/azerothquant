@@ -46,7 +46,7 @@ cd brain
 ..\.venv\Scripts\brain watch    # keep running; import whenever the game rewrites the file
 ..\.venv\Scripts\brain rebuild  # recreate history.sqlite from the Archive (stop watch first)
 ..\.venv\Scripts\brain recommend  # print Vendor, Sell or Hold for Holdings, and the Shopping List
-..\.venv\Scripts\brain replay --since 2026-09-20  # grade the Brain against Auctionator and emulated TSM (ADR-0015)
+..\.venv\Scripts\brain profit --since 2026-09-20  # realized profit from your own sales (ADR-0039)
 ..\.venv\Scripts\brain disenchants  # check the Disenchant tables against your Disenchant Results (ADR-0018)
 ..\.venv\Scripts\brain flips  # grade the Flips to Sell you made against what the Brain named (ADR-0023)
 ..\.venv\Scripts\brain bench  # time two Decision Engine passes on a copy of the history, by stage (#116's budget)

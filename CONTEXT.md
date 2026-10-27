@@ -104,7 +104,7 @@ One stack the player bought on the Auction House, with its price, read from a Ma
 _Avoid_: buy, win
 
 **For Use**:
-A Purchase the Brain didn't name, so it starts no Lot (ADR-0025): not under a Prediction, and the Market's last Scan before it had no Flip to Sell or Flip to Vendor row of its Item Key, no Flip to Craft buying it as an Auction House reagent, no Flip to Disenchant buying it (named up to its dearest Listing of the Item Key, never the whole group), and no Buy Under of it or its Disenchant source group, at or over its unit price. Like loot, it's out of realized profit, Flip Grades and Paid, and a later sale closes nothing of it. What each Scan named is worked out once and frozen in `grades.toml`. `brain flips` and the replay count them. A flip made with no row behind it counts as For Use too.
+A Purchase the Brain didn't name, so it starts no Lot (ADR-0025): not under a Prediction, and the Market's last Scan before it had no Flip to Sell or Flip to Vendor row of its Item Key, no Flip to Craft buying it as an Auction House reagent, no Flip to Disenchant buying it (named up to its dearest Listing of the Item Key, never the whole group), and no Buy Under of it or its Disenchant source group, at or over its unit price. Like loot, it's out of realized profit, Flip Grades and Paid, and a later sale closes nothing of it. What each Scan named is worked out once and frozen in `grades.toml`. `brain flips` and `brain profit` count them. A flip made with no row behind it counts as For Use too.
 _Avoid_: consumable, personal buy
 
 **Observation Window**:
@@ -142,7 +142,7 @@ _Avoid_: posting fee, AH fee, cut
 ## Crafting
 
 **Known Recipe**:
-A recipe the player already has, read from the profession window, with its output item, output quantity, reagents, cooldown and whether its output binds on pickup. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes. At a past moment (a replay, a Grade's Best Exit Value), the Known Recipes and Enchanting skill are the ones the Character Reads up to that moment show, not today's.
+A recipe the player already has, read from the profession window, with its output item, output quantity, reagents, cooldown and whether its output binds on pickup. The output quantity is a range for recipes that make a variable amount. Enchanting counts as a profession, even though most of its outputs are enchants rather than items; Beast Training does not. Only the Character's own profession windows count: a linked, guild or NPC crafting window shows someone else's recipes. At a past moment (a Backtest's Scan, a Grade's Best Exit Value), the Known Recipes and Enchanting skill are the ones the Character Reads up to that moment show, not today's.
 
 **Learnable Recipe**:
 A recipe the player doesn't have yet but could get, and which costs something to acquire.
@@ -164,7 +164,7 @@ _Avoid_: craft log, craft event
 
 **Backtest**:
 A policy trading a Market's past Scans in time order on its own simulated gold (40g by default), graded by the Sale Records after each buy: a post sells to a later one at or above its price, our cheapest units first; a lot unsold after a week is relisted once under the cheapest ask, then vendored. It reports gold made at the vendor mark and the market mark. It's the yardstick for buy-side changes (ADR-0032); `brain backtest` runs it, with the Brain under a config as each policy (`brain`, `relaxed`).
-_Avoid_: replay (that's ADR-0015's per-Scan grade against Auctionator and TSM). What it buys aren't Lots: those come from the player's real Purchases
+_Avoid_: replay (ADR-0015's per-Scan grade against Auctionator and TSM, retired by ADR-0039). What it buys aren't Lots: those come from the player's real Purchases
 
 **Candidate Item**:
 An item the Decision Engine evaluates for a Recommendation.

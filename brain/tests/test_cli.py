@@ -21,9 +21,9 @@ from brain.cli import (
     run_disenchants,
     run_flips,
     run_import,
+    run_profit,
     run_rebuild,
     run_recommend,
-    run_replay,
     savedvariables_files,
     watch_fair_value_cache,
     watch_step,
@@ -1140,26 +1140,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     ] in lines
 
 
-def test_replay_prints_each_markets_policies_with_the_brains_lead_over_each(tmp_path):
-    # A 1 h Sale Horizon, so the first of the two Scans an hour apart can be graded.
-    config = dataclasses.replace(_three_linen_held(tmp_path), sale_horizon_seconds=3600)
+def test_profit_prints_each_markets_realized_profit_over_the_range(tmp_path):
+    text = run_profit(_three_linen_held(tmp_path), since=None, until=None)
 
-    text = run_replay(config, since=None, until=None)
-
-    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert "Classic Beta PvP Alliance (beta): provisional, Beta never decides" in text
-    assert "Replayed 1 Scan, each graded over the 1.0 h Sale Horizon after it" in text
-    assert ["Policy", "Value added", "Brain over it"] in lines
-    policies = [line[0] for line in lines if line and line[0].startswith(("Brain", "Auc", "TSM"))]
-    assert policies == [
-        "Brain",
-        "Auctionator",
-        "TSM",
-        "Brain without Sub-crafts",
-        "Brain without Flips to Craft",
-        "Brain without Deposits",
-        "Brain without own-Market Sell Rate",
-    ]
     assert "Realized profit over the range: 0c" in text
 
 
@@ -1670,11 +1654,11 @@ def test_recommend_shows_the_record_of_graded_flips_to_craft_apart(tmp_path):
     assert "Graded Flips: 2 graded" in text
 
 
-def test_replay_counts_the_purchases_in_its_range_the_brain_didnt_name(tmp_path):
+def test_profit_counts_the_purchases_in_its_range_the_brain_didnt_name(tmp_path):
     config = _two_linen_flips(tmp_path)
     _bought_for_use(config)
 
-    text = run_replay(config, since=None, until=None)
+    text = run_profit(config, since=None, until=None)
 
     assert "1 Purchase (40s 00c) not named by the Brain, counted as For Use" in text
 

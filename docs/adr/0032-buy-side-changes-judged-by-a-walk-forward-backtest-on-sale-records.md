@@ -27,3 +27,7 @@ Units still posted at the end are marked two ways: the **vendor mark** (Vendor P
 - **Leave out the 1.2x cap.** The review's "loose" grader. A 3x Disappearance is more likely a cancel than a sale.
 
 The ADR-0015 checkpoints (Brain vs. Auctionator and TSM on Live) still use the replay. ADR-0019 (Buy Unders) is left for #173.
+
+## Amendments
+
+- ADR-0039 (#184): the replay is retired, so the Live checkpoint runs on the Backtest too, against an Auctionator policy.
