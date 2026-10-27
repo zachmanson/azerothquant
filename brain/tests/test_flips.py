@@ -26,7 +26,7 @@ LINEN = "item:2589::::::::20:1490"
 LINEN_KEY = "2589"
 LINEN_LINK = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
 
-# As in test_replay: a 3 hour Sale Horizon, and no priors, so hourly Scans make a Sell
+# A 3 hour Sale Horizon, and no priors, so hourly Scans make a Sell
 # Rate taken at its word.
 CONFIG = replace(
     Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),)),
@@ -104,7 +104,7 @@ def won(at, count, unit, read_after=12 * HOUR):
 
 def linen_market(*scans_after):
     """2 Linen at 1000 sell each hour from T0, and at T0 + 1 h there are 5 more at 200:
-    the Brain names a Flip to Sell of those 5, posted at 999 (as in test_replay)."""
+    the Brain names a Flip to Sell of those 5, posted at 999."""
     return [
         scan(T0, row(quantity=20, unit=1000)),
         scan(T0 + HOUR, row(quantity=18, unit=1000), row(quantity=5, unit=200)),

@@ -568,28 +568,6 @@ def test_only_the_units_that_would_sell_after_the_lowball_wait(db):
     ]
 
 
-def test_under_a_pricer_held_units_never_wait(db):
-    # #151, ADR-0038: a pricer has no Sell Rate to judge a Flip by, so the replay's Brain
-    # without own-Market Sell Rate posts under the 300 as its pricer says.
-    run(
-        db,
-        selling_two_linen_an_hour(row(unit=300), unit=1000),
-        [character_read(item(count=5), vendor_prices={2589: 10})],
-    )
-
-    m = recommend_market(
-        db,
-        CONFIG,
-        MARKET,
-        [],
-        T0 + HOUR,
-        pricer=lambda _, cheapest: None if cheapest is None else cheapest - 1,
-    )
-
-    [sell] = m.holdings
-    assert (sell.action, sell.quantity, sell.price) == (Action.SELL, 5, 299)
-
-
 def test_held_units_post_under_a_cheap_listing_no_flip_would_buy(db):
     # #151: with too few Sale Events at 999 for a Flip to Sell, nothing says the 300 will
     # go, so held units undercut it as before (ADR-0017).
@@ -2122,12 +2100,6 @@ def test_an_invoice_above_the_minimum_deposit_sets_the_rate(db):
     above = linen_sold_for_deposits((56, 1107))
 
     assert deposit_per_unit(db, 10, 56, mailbox_reads=[above]) == pytest.approx(1107 / 56)
-
-
-def test_no_deposit_is_charged_with_deposits_switched_off(db):
-    off = replace(CONFIG, deposits=False)
-
-    assert deposit_per_unit(db, 10, 1, config=off) == 0
 
 
 def test_an_item_key_with_no_vendor_price_or_sold_invoice_pays_the_minimum_deposit(db):

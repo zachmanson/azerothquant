@@ -81,7 +81,7 @@ def _daily_fair_values(
 ) -> dict[str, list[float]]:
     """Per Item Key, its Fair Value on each of the last LISTED_DAYS before `now` it was
     listed on: the mean over that day's Scans. Days are 24 h back from `now`, not calendar
-    days, as in the replay."""
+    days."""
     by_day: dict[str, dict[int, list[float]]] = {}
     for at in scan_times(conn, market):
         day = (now - at) // DAY

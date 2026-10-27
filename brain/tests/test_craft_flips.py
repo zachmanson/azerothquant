@@ -70,7 +70,7 @@ def row(item=LINEN, quantity=1, unit=100):
 
 def bolt_market(*scans_after):
     """2 Linen at 100 and a Bolt at 1000 sell each hour from T0: at T0 + 1 h the Brain
-    names a Flip to Craft of 3 Bolts, buying 6 Linen at up to 100 (as in test_replay)."""
+    names a Flip to Craft of 3 Bolts, buying 6 Linen at up to 100."""
     return [
         scan(T0 + n * HOUR, row(quantity=20 - 2 * n), row(BOLT, quantity=6 - n, unit=1000))
         for n in range(3)

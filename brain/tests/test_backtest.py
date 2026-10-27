@@ -205,12 +205,12 @@ def test_gold_a_buy_brings_back_at_once_is_its_proceeds():
     assert result.gold == 10_000 + 30
 
 
-# --- the Brain backtested on a history (as in test_replay) ---
+# --- the Brain backtested on a history ---
 
 REALM = "Classic Beta PvP"
 MARKET = Market(realm=REALM, faction="Alliance", era=Era.BETA)
 LINEN_ITEM = "item:2589::::::::20:1490"
-# No priors, so hourly Scans make a Sell Rate taken at its word (as in test_replay).
+# No priors, so hourly Scans make a Sell Rate taken at its word.
 CONFIG = replace(
     Config(installs=(Install(path=Path("C:/WoW/_classic_beta_"), era=Era.BETA),)),
     sale_horizon_seconds=3 * HOUR,
@@ -401,8 +401,7 @@ def test_the_max_drawdown_is_the_deepest_fall_from_a_peak_of_gold_and_unsold_uni
     assert result.max_drawdown == pytest.approx(416 / 1000)
 
 
-# --- The options a player would take ---
-
+# --- the options a player would take ---
 
 GREENS = Group(2, "armor", 16, 20, ())
 DUST_KEY = "10940"

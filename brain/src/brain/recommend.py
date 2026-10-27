@@ -87,13 +87,6 @@ from brain.predictions import Prediction
 from brain.scan import item_id_of
 from brain.sell_rate import SellRate, non_stacking, observation_window_hours, sell_rates
 
-# A replay's stand-in for the own-Market Sell Rate (#84, ADR-0015): (Item Key, the cheapest
-# other player's unit price left once the buys are made, None if none) -> the price to
-# post at, or None without one. Only the replay builds one: a baseline is never a Brain
-# price. Given one, it prices every Sell and Flip, there's no room limit on what sells
-# within the Sale Horizon, and no deposits are expected lost waiting to sell.
-Pricer = Callable[[str, int | None], float | None]
-
 
 class Action(StrEnum):
     VENDOR = "Vendor"
@@ -170,7 +163,7 @@ class SubCraft:
 @dataclass(frozen=True)
 class CraftOutput:
     """What a Flip to Craft makes: `units` of its output, `selling` of them to post at
-    `post_at` and the rest to Vendor. The replay grades it by that (#80)."""
+    `post_at` and the rest to Vendor. The Backtest trades it by that (#167)."""
 
     units: int
     selling: int
@@ -343,10 +336,8 @@ class Row:
     # A Craft's Craft Chain (#77): its exits, the last over the craft and its sources. Not
     # compared, so rows are checked on it apart.
     chain: tuple[ChainNode, ...] = field(default=(), compare=False)
-    # A Craft Action's gold spent at merchants, and a Flip to Craft's output, for the
-    # replay (#80). Plumbing, not part of the Recommendation: not written to
-    # Recommendations.lua, nor compared.
-    merchant_gold: float = field(default=0.0, compare=False)
+    # A Flip to Craft's output, for the Backtest (#167). Plumbing, not part of the
+    # Recommendation: not written to Recommendations.lua, nor compared.
     made: CraftOutput | None = field(default=None, compare=False)
     recipe_id: int | None = field(default=None, compare=False)  # a Craft's, for #114
     # A Sell or Vendor row's Paid (#50): per unit, what the Item Key's held units its open
@@ -623,7 +614,7 @@ class MarketRecommendations:
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
     # How many Scans the Market has, own and Pooled, for the Young Market flag (#147).
-    # Only `recommend` fills it: a replay or Backtest has no use for it.
+    # Only `recommend` fills it: a Backtest has no use for it.
     scan_count: int = 0
     holdings: list[Row] = field(default_factory=list)
     # Options, each sized as if it were the only buy, most profit first (#86).
@@ -699,7 +690,6 @@ def recommend_market(
     as_of: int | None = None,
     buy_under: bool = True,
     fair_value_cache: FairValueCache | None = None,
-    pricer: Pricer | None = None,
     why_not: bool = False,
     paid: bool = True,
     loot_alert: bool = True,
@@ -707,15 +697,12 @@ def recommend_market(
     tied_up: float | None = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
-    Known Recipes and Enchanting skills are the latest, or as of `as_of` (a replay, #80,
-    #103). Without `buy_under`, the Buy
-    Unders are left out: a replay doesn't grade them (#88). `fair_value_cache` as in
-    `recommend`. A `pricer` replaces the Sell Rate (a replay's ablation, #84), but not in
-    the Prediction buys, the Buy Unders or the Shopping List's Per day and Per click.
-    `why_not` as in `recommend`. Without `paid`, the Holdings rows get no Paid or ROI:
-    working out a past Scan, whose Lots may rest on what it named (#55), or a replay.
+    Known Recipes and Enchanting skills are the latest, or as of `as_of` (a past Scan,
+    #103). Without `buy_under`, the Buy Unders are left out (#88). `fair_value_cache` as in
+    `recommend`. `why_not` as in `recommend`. Without `paid`, the Holdings rows get no Paid or ROI:
+    working out a past Scan, whose Lots may rest on what it named (#55).
     Without `loot_alert`, the Loot Alert has no items: only the latest Scan's is shown
-    (#54), and valuing every Item Key in a Scan adds up over a replay. A `gold` replaces
+    (#54), and valuing every Item Key in a Scan adds up over a Backtest. A `gold` replaces
     the Characters' gold and the Budget: a Backtest's simulated gold (#167). A `tied_up`
     replaces the own Listings up at cost in the Stake (ADR-0034): a Backtest's unsold
     units, since the Scans show the real player's posts."""
@@ -744,7 +731,6 @@ def recommend_market(
         seen,
         fair_value_cache=fair_value_cache,
         skills_as_of=as_of,
-        pricer=pricer,
     )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
@@ -803,23 +789,18 @@ def recommend_market(
             merchant.get(plan.output),
             _unbound(held.get(plan.output, Holding())),
             valuer.effort(plan.output),
-            valuer.sale_queue(plan.output, flips=True),
+            valuer.queue(plan.output, flips=True),
             cut,
             config,
-            valuer.priced(plan.output),
         )
 
-    crafts = (
-        [
-            _flips_to_craft(
-                plans, crafting, for_sale, merchant, valuer, outlet, set(under), spend, config, plan
-            )
-            for plan in plans
-            if item_id_of(plan.output) not in dropped
-        ]
-        if config.flips_to_craft
-        else []
-    )
+    crafts = [
+        _flips_to_craft(
+            plans, crafting, for_sale, merchant, valuer, outlet, set(under), spend, config, plan
+        )
+        for plan in plans
+        if item_id_of(plan.output) not in dropped
+    ]
     disenchants = _flips_to_disenchant(valuer, plans, set(under), dropped, spend, config, risk)
     shopping = _options(
         buys,
@@ -1654,8 +1635,8 @@ def rework(
     predictions: Sequence[Prediction],
     scan_at: int,
 ) -> Reworked:
-    """What the Scan requested at `scan_at` showed, worked out again the way the replay
-    does (#80): its Flip to Sell rows by Item Key (#60), what it named to buy (#55), and
+    """What the Scan requested at `scan_at` showed, worked out again as of that Scan:
+    its Flip to Sell rows by Item Key (#60), what it named to buy (#55), and
     its Flip to Craft rows (#114). Worked out once for all three, and frozen in grades.toml
     when there is one, where the caller reads them from later."""
     m = recommend_market(
@@ -1799,14 +1780,13 @@ def _valuer(
     seen: Sequence[Listing] | None = None,
     fair_value_cache: FairValueCache | None = None,
     skills_as_of: int | None = None,
-    pricer: Pricer | None = None,
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
     `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
-    the latest, or as of `skills_as_of` (#103). `pricer` as in `recommend_market`."""
+    the latest, or as of `skills_as_of` (#103)."""
     # With a cache, its Listings: what it keeps below is worked out from them (#143).
     cache = fair_value_cache
     if cache is not None:
@@ -1852,7 +1832,6 @@ def _valuer(
             item_info(conn, market.era),
             enchanting_skills(conn, market, skills_as_of),
         ),
-        pricer=pricer,
         listed=_scan_only(
             cache,
             conn,
@@ -2014,9 +1993,8 @@ class _Disenchanting:
 class _Valuer:
     """A Market's Sell/Vendor split of held units, as of one Scan. `supply` is every unit
     on sale, `others` other players' Listings, and `flipped` the ones the Flips buy.
-    `non_stacking` are the Item Keys that don't stack (#73). A `pricer` replaces the Sell
-    Rate in the Holdings rows, the Flips and the Flip to Craft outputs (#84). Held units
-    also count their sibling suffixes' Sale Events (`held_rate`, #58); nothing else does."""
+    `non_stacking` are the Item Keys that don't stack (#73). Held units also count their
+    sibling suffixes' Sale Events (`held_rate`, #58); nothing else does."""
 
     def __init__(
         self,
@@ -2032,7 +2010,6 @@ class _Valuer:
         config: Config,
         held: Mapping[str, int] = MappingProxyType({}),
         disenchanting: _Disenchanting | None = None,
-        pricer: Pricer | None = None,
         by_item: Mapping[int, tuple[str, ...]] | None = None,
         listed: Mapping[str, tuple[tuple[int, int], ...]] = MappingProxyType({}),
         own_cheapest: dict[str, int | None] | None = None,
@@ -2042,7 +2019,7 @@ class _Valuer:
         self.rates, self.vendor, self.merchant = rates, vendor, merchant
         self.cut, self.non_stacking, self.deposits = cut, non_stacking, deposits
         self._config, self.held = config, held
-        self.disenchanting, self._pricer = disenchanting, pricer
+        self.disenchanting = disenchanting
         self._by_item = _by_item(rates) if by_item is None else by_item
         self._worth: dict[tuple[str, Holding], float] = {}  # Sub-crafts ask it a lot (#33)
         self._held_rates: dict[str, tuple[SellRate | None, int]] = {}
@@ -2072,7 +2049,6 @@ class _Valuer:
             self._config,
             self.held if held is None else held,
             self.disenchanting,
-            self._pricer,
             self._by_item,
             self.listed,
             self._own_cheapest,
@@ -2090,11 +2066,8 @@ class _Valuer:
         """What posting one unit of an Item Key costs (#78), posted `stack` units a post
         (held units too, #192): each post pays its units at the rate on the latest Sold
         invoice, else the config share of the Vendor Price, or nothing without one, but
-        never under the minimum deposit. Nothing when Deposits are switched off (a
-        replay's ablation, #80)."""
+        never under the minimum deposit."""
         c = self._config
-        if not c.deposits:
-            return 0.0
         rate = self.deposits.get(item_key)
         if rate is None:
             rate = c.ah_deposit_share * self.vendor.get(item_id_of(item_key), 0)
@@ -2114,26 +2087,6 @@ class _Valuer:
         per_day = _units_per_day(rate, *priors)
         return _Queue(per_day / 24, self.deposit(item_key), c.post_duration_hours)
 
-    def sale_queue(self, item_key: str, flips: bool) -> _Queue:
-        """The queue a Sell or Flip waits in: `queue`, or with a pricer one that loses no
-        deposits (#84)."""
-        if self._pricer is None:
-            return self.queue(item_key, flips)
-        return _Queue(0.0, 0.0, self._config.post_duration_hours)
-
-    def priced(self, item_key: str) -> Callable[[int | None], float | None] | None:
-        """The pricer's price for an Item Key from the cheapest other player's unit price
-        left, never above what a merchant charges (#63); None without a pricer."""
-        if self._pricer is None:
-            return None
-        pricer, merchant = self._pricer, self.merchant.get(item_key)
-
-        def price(cheapest: int | None) -> float | None:
-            post_at = pricer(item_key, cheapest)
-            return None if post_at is None else _ceiling(post_at, merchant)
-
-        return price
-
     def effort(self, item_key: str) -> int:
         """What a Flip is charged for each unit of an Item Key it buys, and again for each
         it posts: nothing unless it doesn't stack (#73)."""
@@ -2150,7 +2103,7 @@ class _Valuer:
             buy
             for item_key in sorted(self.others)
             if item_key not in under
-            for buy in self._flips_of(item_key, unbound.get(item_key, 0), self.priced(item_key))
+            for buy in self._flips_of(item_key, unbound.get(item_key, 0))
         ]
         return self.after({}, unbound), buys
 
@@ -2158,8 +2111,9 @@ class _Valuer:
         """The shortest run of an Item Key's cheapest offers that a Flip to Sell would
         clear the margin on if room were no limit, posted as `_flips` posts it, behind
         the held units, with the minimum of Sale Events at that price (#108). A wall only
-        clears once all of it is bought. A pricer lifts `_flips`' room limit, so this one
-        posts as `_flips` does without one."""
+        clears once all of it is bought. It passes `_flips` the same undercut as its
+        `post_by`, which lifts the room limit and the minimum of Sale Events, so the
+        minimum is checked here."""
         own = _cheapest(without(self.supply[item_key], self.others[item_key]))
         merchant, config = self.merchant.get(item_key), self._config
 
@@ -2172,9 +2126,12 @@ class _Valuer:
         return next((run for run in runs if run.sale_events >= least), None)
 
     def _flips_of(
-        self, item_key: str, held: int, pricer: Callable[[int | None], float | None] | None
+        self,
+        item_key: str,
+        held: int,
+        post_by: Callable[[int | None], float | None] | None = None,
     ) -> list[_VendorBuy | _FlipToSell]:
-        """`_flips` of an Item Key in this Scan, behind `held` units, posted by `pricer`."""
+        """`_flips` of an Item Key in this Scan, behind `held` units, posted by `post_by`."""
         return _flips(
             item_key,
             self.others[item_key],
@@ -2183,12 +2140,12 @@ class _Valuer:
             self.vendor.get(item_id_of(item_key)),
             self.merchant.get(item_key),
             held,
-            self.sale_queue(item_key, flips=True),
+            self.queue(item_key, flips=True),
             self.effort(item_key),
             self.stack(item_key),
             self.cut,
             self._config,
-            pricer,
+            post_by,
             self.cheap(item_key),
         )
 
@@ -2251,10 +2208,10 @@ class _Valuer:
     def wait_at(self, item_key: str) -> float | None:
         """The price held units of an Item Key Wait to post at (#151, ADR-0038): `post_at`
         once its `clearing_run` is bought. A Flip to Sell would buy those Listings, so
-        posting under them is dumping. None without such a run, under a pricer (it has no
-        Sell Rate to judge a Flip by), or once this Valuer has bought some of the Item
-        Key: the run is gone then, and `post_at` is already the price after it."""
-        if self._pricer is not None or self.flipped.get(item_key) or not self.others.get(item_key):
+        posting under them is dumping. None without such a run, or once this Valuer has
+        bought some of the Item Key: the run is gone then, and `post_at` is already the
+        price after it."""
+        if self.flipped.get(item_key) or not self.others.get(item_key):
             return None
         if item_key not in self._wait_at:
             run = self.clearing_run(item_key)
@@ -2267,9 +2224,6 @@ class _Valuer:
         self, item_key: str, cap: float | None, bought: Supply = ()
     ) -> float | None:
         flipped = [*self.flipped.get(item_key, []), *bought]
-        if (price := self.priced(item_key)) is not None:
-            left = without(self.others.get(item_key, []), flipped)
-            return price(_cheapest(left))
         others = self.others.get(item_key, [])
         if item_key not in self._own_cheapest:
             self._own_cheapest[item_key] = cheapest_without(self.supply.get(item_key, []), others)
@@ -2288,15 +2242,11 @@ class _Valuer:
         wait_at = self.wait_at(item_key) if has_data else None
         waiting = wait_at is not None and (post_at is None or wait_at > post_at)
         c = self._config
-        room = (
-            math.inf
-            if self._pricer is not None
-            else sellable_units(
-                rate,
-                c.sell_rate_prior_hours_holdings,
-                c.sale_size_prior_events_holdings,
-                c.sale_horizon_seconds,
-            )
+        room = sellable_units(
+            rate,
+            c.sell_rate_prior_hours_holdings,
+            c.sale_size_prior_events_holdings,
+            c.sale_horizon_seconds,
         )
         return _holding_rows(
             item_key,
@@ -2305,18 +2255,15 @@ class _Valuer:
             wait_at if waiting else post_at,
             room,
             own.sale_events if own else None,
-            sibling_sales if self._pricer is None else 0,  # a pricer ignores Sell Rate
+            sibling_sales,
             self.vendor.get(item_id_of(item_key)),
-            self.sale_queue(item_key, flips=False),
+            self.queue(item_key, flips=False),
             self.cut,
             Action.WAIT if waiting else Action.SELL,
         )
 
     def has_data(self, item_key: str) -> bool:
-        """Whether there's a Fair Value and a Sell Rate with sales to value it by, or with
-        a pricer, whether it has a price (#84)."""
-        if self._pricer is not None:
-            return self.post_at(item_key) is not None
+        """Whether there's a Fair Value and a Sell Rate with sales to value it by."""
         rate, _ = self.held_rate(item_key)
         value = fair_value(self.supply.get(item_key, []), self._config)
         return value is not None and rate is not None and bool(rate.sale_events)
@@ -2743,7 +2690,6 @@ class _Plan:
             ),
             via=via,
             chain=self.chain(),
-            merchant_gold=self.gold,
             recipe_id=self.recipe.recipe_id,
         )
 
@@ -3308,21 +3254,15 @@ def _outlet(
     queue: _Queue,
     cut: float,
     config: Config,
-    pricer: Callable[[int | None], float | None] | None = None,
 ) -> _Outlet:
     """A Flip to Craft output's Sell room, judged as strictly as a Flip's: what sells within
     Days to Sell (#109) under the Flip priors, less the `held` units,
     counting only the Sale Events at or above its post price (#107), and its units wait in
     the `queue` at that rate. It resells like them, posted under the cheapest other Listing,
     as if the Flip to Craft were the only buy (#86), and never above what a merchant charges
-    (#63). `others` is other players' asks. A `pricer` (`_Valuer.priced`) sets the post
-    price instead, with no room limit (#84)."""
-    if pricer is None:
-        post_at = _post_at(supply, others, [], config, merchant_cost)
-        room = _flip_room(_demand_at(rate, post_at), config, config.days_to_sell_or_horizon_seconds)
-    else:
-        post_at = pricer(min((unit for unit, _ in others), default=None))
-        room = 0 if post_at is None else math.inf
+    (#63). `others` is other players' asks."""
+    post_at = _post_at(supply, others, [], config, merchant_cost)
+    room = _flip_room(_demand_at(rate, post_at), config, config.days_to_sell_or_horizon_seconds)
     demand = _demand_at(rate, post_at)
     if room:
         room = max(0, room - held)
@@ -3669,7 +3609,7 @@ def _flips(
     stack: float,
     cut: float,
     config: Config,
-    pricer: Callable[[int | None], float | None] | None = None,
+    post_by: Callable[[int | None], float | None] | None = None,
     cheap: _Cheap | None = None,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
@@ -3691,9 +3631,10 @@ def _flips(
     and the deposits it's expected to lose waiting its turn in the `queue` after the `held`
     units (#78), at the Sell Rate at its post price.
 
-    A `pricer` (`_Valuer.priced`) sets the post price instead, with no room limit and no
-    minimum of Sale Events (#84). With the `cheap` Listings, a run counts the demand at its
-    post price only since the ones it buys showed up (#132).
+    `post_by`, from the cheapest other offer left, sets the post price instead, with no
+    room limit and no minimum of Sale Events (`_Valuer.clearing_run`, ADR-0038). With the
+    `cheap` Listings, a run counts the demand at its post price only since the ones it
+    buys showed up (#132).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -3705,7 +3646,7 @@ def _flips(
     after = _cheapest_from(offers)
     bought = 0
     for i, (unit, quantity) in enumerate(offers):
-        if pricer is None:
+        if post_by is None:
             take, post_at = _sell_take(
                 quantity,
                 bought,
@@ -3716,7 +3657,7 @@ def _flips(
                 ),
             )
         else:
-            take, post_at = quantity, pricer(after[i + 1])
+            take, post_at = quantity, post_by(after[i + 1])
         if not take or post_at is None:
             break
         prefix = [*prefix, (unit, take)]
@@ -3730,7 +3671,7 @@ def _flips(
         if _resells(resale, unit, vendor_price, effort, lost, config):
             profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
             profit -= at_price.lost_by(held, bought)
-            # With a pricer and no Sell Rate at the price, there's nothing to wait by.
+            # With no Sell Rate at the price, there's nothing to wait by.
             per_hour = at_price.units_per_hour
             days = (held + bought) / (per_hour * 24) if per_hour else math.inf
             events = demand.sale_events if demand else 0
@@ -4214,7 +4155,7 @@ def _options(
     crafted = [row for recipe in crafts if recipe for row in _capped_option([], recipe, gold, caps)]
     crafted.sort(key=lambda r: -r.profit)
     disenchanted = sorted(disenchants, key=lambda r: -r.profit)
-    # One list again, most profit first: Replay takes the options in that order.
+    # One list again, most profit first: the Backtest takes the options in that order.
     return sorted(
         [r for r, rank in zip(flips, ranks, strict=True) if rank <= flip_rows]
         + crafted[:craft_rows]

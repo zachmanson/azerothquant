@@ -262,10 +262,6 @@ class Config:
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS
     # What each sibling suffix's Sale Event counts for in a held unit's Sell Rate (#58).
     suffix_pool_weight: float = DEFAULT_SUFFIX_POOL_WEIGHT
-    # Features the replay switches off one at a time to see what each is worth (#80,
-    # ADR-0015). Always on outside it: not read from config.toml.
-    flips_to_craft: bool = True
-    deposits: bool = True
     # The cheap-stock cutoff (ADR-0028, ADR-0029): off only in the Backtest's relaxed
     # policy (#167). Not read from config.toml.
     cheap_stock_cutoff: bool = True

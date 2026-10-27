@@ -6,9 +6,9 @@ Amends ADR-0017 (#151). Holdings are still valued with nothing on the Shopping L
 
 So `worth`, Best Exit Value, a Holdings Craft's or Disenchant's marginal and the Hold caps count waiting units at what they'll bring once the cheap Listings go, not at the lowball.
 
-**Where it doesn't apply.** Under a pricer (the replay's Brain without own-Market Sell Rate, ADR-0015) there's no Sell Rate to judge a Flip by, so nothing Waits. A Valuer that has already bought some of the Item Key (the #108 Checks value a way out with the run bought) has no run left to wait out. Auctionator and the emulated TSM never price through Holdings rows, so they're unchanged.
+**Where it doesn't apply.** A Valuer that has already bought some of the Item Key (the #108 Checks value a way out with the run bought) has no run left to wait out.
 
-**Output.** `Action.WAIT` ("Wait") on a Holdings row, with `price` and `profit` like a Sell. The Addon says "Keep them for now: someone's selling these cheap. Check again after the next Scan." and the tooltip `AQ: Wait 3, then post @ 9s 99c`. It's not folded away and has no Post button. ROI is shown on it (after the cut, as for a Sell), but never the hint to sell now. The replay counts Wait units as kept, like a Hold.
+**Output.** `Action.WAIT` ("Wait") on a Holdings row, with `price` and `profit` like a Sell. The Addon says "Keep them for now: someone's selling these cheap. Check again after the next Scan." and the tooltip `AQ: Wait 3, then post @ 9s 99c`. It's not folded away and has no Post button. ROI is shown on it (after the cut, as for a Sell), but never the hint to sell now.
 
 ## Why
 
@@ -32,3 +32,7 @@ The clearing run is the "Sale Events at or above the post" reference the triage 
 - Best Exit Value and the Flip Grades from here on value lowballed held units higher. Grades frozen before this keep their numbers.
 - Replay and Backtest numbers before and after aren't comparable on Markets with held units under a flippable Listing.
 - One Flip to Sell per Item Key now costs a `clearing_run` for every held Item Key with other players' Listings, once per pass (cached per Valuer). Watch `brain bench`.
+
+## Amendments
+
+- ADR-0039 (#184): the replay and its pricer are gone, so the exceptions for them (no Wait under a pricer, Wait units kept by the replay) went too.

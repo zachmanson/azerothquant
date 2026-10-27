@@ -15,6 +15,9 @@ from brain.recommend import auction_cut, lot_craft_results, split_purchases
 
 @dataclass(frozen=True)
 class Realized:
+    """One Market's realized profit over a range."""
+
+    # The Sold Outcomes after the cut, less the cost of the Lot units they closed.
     profit: float
     # The Purchases in the range the Brain didn't name, which start no Lot (#55).
     for_use: tuple[Purchase, ...] = ()
