@@ -14,6 +14,11 @@ from brain.fair_value import FairValueCache
 from brain.history import Listing, Market, listings
 from brain.observation import observation_windows_between, sell_rate_evidence, window_hours
 
+# The Recent Price (#200, ADR-0041) is over this many days of Sale Events, with at least
+# this many of them.
+RECENT_PRICE_DAYS = 7
+RECENT_PRICE_MIN_SALE_EVENTS = 3
+
 
 @dataclass(frozen=True)
 class SellRate:
@@ -59,6 +64,28 @@ class SellRate:
                 sale_prices=kept,
             )
         return self._cuts[under]
+
+    def recent_price(self, since: int) -> int | None:
+        """The Recent Price (#200, ADR-0041): the median unit buyout, each unit counted,
+        the lower of the middle two, of the Sale Events seen from `since`. None with fewer
+        than RECENT_PRICE_MIN_SALE_EVENTS of them."""
+        recent = sorted((price, n) for price, n, at in self.sale_prices if at >= since)
+        if len(recent) < RECENT_PRICE_MIN_SALE_EVENTS:
+            return None
+        middle = (sum(n for _, n in recent) + 1) // 2
+        counted = 0
+        for price, n in recent:
+            counted += n
+            if counted >= middle:
+                return price
+        return None  # unreachable: `counted` reaches every unit
+
+    def units_sold_at_or_above(self, price: float) -> float:
+        """The units seen sold at or above `price`, each Sale Event counted at most the
+        typical sale size, so one big buyer isn't demand to buy for (#198, ADR-0041)."""
+        return sum(
+            min(n, self.typical_sale_size) for unit, n, _ in self.sale_prices if unit >= price
+        )
 
     @cached_property
     def _ascending_prices(self) -> list[int]:

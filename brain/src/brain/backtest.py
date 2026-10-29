@@ -57,6 +57,7 @@ POLICIES: dict[str, Callable[[Config], Config]] = {
         flip_min_margin_copper=0,
         row_min_profit_share=0.0,
         row_min_profit_copper=0,
+        row_min_profit_per_click=0,
     ),
     # No risk caps (#170, ADR-0034): what they change is measured against it. The Minimum
     # Profit (#197) stays: it isn't a risk cap.

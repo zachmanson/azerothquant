@@ -72,6 +72,9 @@ DEFAULT_FLIP_MIN_MARGIN_COPPER = 100
 # its Minimum Profit (#197).
 DEFAULT_ROW_MIN_PROFIT_SHARE = 0.005
 DEFAULT_ROW_MIN_PROFIT_COPPER = 1000
+# ...and this much copper for each of its clicks, the Listings it buys and the stacks it
+# posts (#200), so a long run of many Listings must make more than a short one.
+DEFAULT_ROW_MIN_PROFIT_PER_CLICK = 500
 # The Sell Rate Prior: thin Sell Rate evidence is discounted as if this many more hours of
 # Observation Window had been watched with no sales (#25). Lenient for Holdings, where too
 # low a rate vendors what would have sold; strict for Flips, where too high a rate buys
@@ -145,6 +148,9 @@ DEFAULT_FLIP_TIED_UP_SHARE = 0.60
 # A Flip to Sell the Unsold Loss cap drops comes back as a Risky row if its run is no more
 # than this many units (#194, ADR-0037): the few-unit dear flips the cap hid made the money.
 DEFAULT_RISKY_MAX_UNITS = 5
+# A longer Risky row may lose at most this share of the Stake if none of it sells (#200,
+# ADR-0041).
+DEFAULT_RISKY_MAX_LOSS_SHARE = 0.5
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -203,12 +209,17 @@ class Config:
     # and this much copper.
     row_min_profit_share: float = DEFAULT_ROW_MIN_PROFIT_SHARE
     row_min_profit_copper: int = DEFAULT_ROW_MIN_PROFIT_COPPER
+    # ...and at least this much copper for each of its clicks (#200).
+    row_min_profit_per_click: int = DEFAULT_ROW_MIN_PROFIT_PER_CLICK
     # A Shopping List option's risk caps (ADR-0034): its Unsold Loss at most this share of
     # the Stake, and its cost at most this share of the Stake less the own Listings up.
     flip_unsold_loss_share: float = DEFAULT_FLIP_UNSOLD_LOSS_SHARE
     flip_tied_up_share: float = DEFAULT_FLIP_TIED_UP_SHARE
     # The most units a Risky row may have (#194, ADR-0037).
     risky_max_units: int = DEFAULT_RISKY_MAX_UNITS
+    # The most a Risky row of more than `risky_max_units` may lose unsold, as a share of
+    # the Stake (#200, ADR-0041).
+    risky_max_loss_share: float = DEFAULT_RISKY_MAX_LOSS_SHARE
     # Hours of no sales added to the Observation Windows before Sell Rate becomes a
     # quantity, for Holdings and for Flips.
     sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
@@ -273,6 +284,10 @@ class Config:
     # The cheap-stock cutoff (ADR-0028, ADR-0029): off only in the Backtest's relaxed
     # policy (#167). Not read from config.toml.
     cheap_stock_cutoff: bool = True
+    # Whether every Flip to Sell posted at or under its Recent Price skips that cutoff
+    # (#200). It lost the Backtest by 138g, so off, only a long Risky row does (ADR-0041).
+    # Not read from config.toml.
+    recent_price_skips_cutoff: bool = False
     # The risk caps (ADR-0034): off only in the Backtest's uncapped policy (#170). Not read
     # from config.toml.
     risk_caps: bool = True
@@ -457,6 +472,11 @@ def load_config(path: Path) -> Config:
         raw.get("row_min_profit_copper", DEFAULT_ROW_MIN_PROFIT_COPPER),
         "row_min_profit_copper",
     )
+    min_profit_per_click = _parse_copper(
+        path,
+        raw.get("row_min_profit_per_click", DEFAULT_ROW_MIN_PROFIT_PER_CLICK),
+        "row_min_profit_per_click",
+    )
     prior_holdings, prior_flips = (
         _parse_number(path, raw.get(key, default), key, lambda x: x >= 0, "of hours of at least 0")
         for key, default in (
@@ -579,6 +599,13 @@ def load_config(path: Path) -> Config:
     risky_units = _parse_whole(
         path, raw.get("risky_max_units", DEFAULT_RISKY_MAX_UNITS), "risky_max_units", 0
     )
+    risky_loss_share = _parse_number(
+        path,
+        raw.get("risky_max_loss_share", DEFAULT_RISKY_MAX_LOSS_SHARE),
+        "risky_max_loss_share",
+        lambda x: 0 <= x <= 1,
+        "from 0 to 1",
+    )
     pool_weight = _parse_number(
         path,
         raw.get("suffix_pool_weight", DEFAULT_SUFFIX_POOL_WEIGHT),
@@ -632,9 +659,11 @@ def load_config(path: Path) -> Config:
         flip_min_margin_copper=margin_copper,
         row_min_profit_share=min_profit_share,
         row_min_profit_copper=min_profit_copper,
+        row_min_profit_per_click=min_profit_per_click,
         flip_unsold_loss_share=unsold_loss_share,
         flip_tied_up_share=tied_up_share,
         risky_max_units=risky_units,
+        risky_max_loss_share=risky_loss_share,
         sell_rate_prior_hours_holdings=prior_holdings,
         sell_rate_prior_hours_flips=prior_flips,
         sale_size_prior_events_holdings=size_prior_holdings,

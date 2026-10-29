@@ -68,12 +68,14 @@
 # flip_min_margin_share = 0.2
 # flip_min_margin_copper = 100
 
-# Optional: a Shopping List row's Minimum Profit (#197). A row that makes less than the
-# larger of row_min_profit_share of the Stake and row_min_profit_copper isn't worth the
-# clicks and is left off. Default to 0.005 (0.5%) and 1000 (10 silver). Must come before
-# the first [[installs]].
+# Optional: a Shopping List row's Minimum Profit (#197, #200). A row that makes less than
+# the largest of row_min_profit_share of the Stake, row_min_profit_copper, and
+# row_min_profit_per_click for each Listing it buys and stack it posts isn't worth the
+# clicks and is left off. Default to 0.005 (0.5%), 1000 (10 silver) and 500 (5 silver).
+# Must come before the first [[installs]].
 # row_min_profit_share = 0.005
 # row_min_profit_copper = 1000
+# row_min_profit_per_click = 500
 
 # Optional: the Shopping List's risk caps (ADR-0034), as shares of the Stake (your gold
 # plus your own Listings up, at what they cost). An option is sized so that if none of it
@@ -85,9 +87,12 @@
 
 # Optional: a Flip to Sell the Unsold Loss cap above drops still shows, as a Risky row at
 # full size, if it buys no more than risky_max_units units. Its details say what you'd lose
-# if none of it sold; the risk is yours to take. 0 turns Risky rows off. Default to 5.
-# Must come before the first [[installs]].
+# if none of it sold; the risk is yours to take. A longer one shows too if it's posted at
+# or under the price it's sold at lately, buys no more than it's been seen to sell, and
+# loses at most risky_max_loss_share of the Stake if none of it sold. Default to 5 and
+# 0.5. Must come before the first [[installs]].
 # risky_max_units = 5
+# risky_max_loss_share = 0.5
 
 # Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
 # evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours

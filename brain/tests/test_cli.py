@@ -89,6 +89,7 @@ def config_for(tmp_path: Path, *installs: Install) -> Config:
         risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
         row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
         row_min_profit_copper=0,
+        row_min_profit_per_click=0,
     )
 
 
@@ -1097,9 +1098,12 @@ def test_bench_times_two_passes_on_a_copy_of_the_history(tmp_path, monkeypatch, 
 
 def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # A 48 h posting, so exactly one queued unit waits past it (below), and a 1s Minimum
-    # Profit, which the Flip makes (#197).
+    # Profit and 50c a click, which the Flip makes (#197, #200).
     config = dataclasses.replace(
-        _three_linen_held(tmp_path), post_duration_hours=48, row_min_profit_copper=100
+        _three_linen_held(tmp_path),
+        post_duration_hours=48,
+        row_min_profit_copper=100,
+        row_min_profit_per_click=50,
     )
     text = run_recommend(config)
 
@@ -1113,7 +1117,7 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     assert ["2589", "Wait", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
     assert (
         "Shopping List, options each sized on its own within 12g 34s 56c, "
-        "each making at least 1s 00c\n"
+        "each making at least 1s 00c and 50c a click\n"
     ) in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one deposit first (#78): 6c a unit (60% of the 10c Vendor Price), but a
@@ -1903,9 +1907,17 @@ def test_recommend_why_not_names_a_flip_under_the_minimum_profit(tmp_path):
     assert lines[1] == ["2589: Minimum Profit"]
     assert lines[-3:] == [
         ["Budget", "pass", "cheapest run 14s 00c, spend 12g 34s 56c"],
-        ["Minimum Profit", "fail", "best row makes 3s 48c, needs 5s 00c"],
+        ["Minimum Profit", "fail", "best row makes 3s 48c, needs 5s 00c (floor)"],
         ["Row cap", "-"],
     ]
+
+
+def test_recommend_why_not_says_when_the_clicks_set_the_minimum_profit(tmp_path):
+    # #200: the same Flip takes 1 Listing and 1 post, so at 2s a click it needs 4s.
+    config = dataclasses.replace(_three_linen_held(tmp_path), row_min_profit_per_click=200)
+    text = run_recommend(config, why_not="2589")
+
+    assert "best row makes 3s 48c, needs 4s 00c (2 clicks x 2s 00c)" in text
 
 
 @pytest.mark.parametrize(

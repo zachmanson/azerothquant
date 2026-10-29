@@ -171,6 +171,48 @@ def test_the_sell_rate_at_a_price_counts_only_the_sale_events_at_or_above_it():
     assert rate.at_or_above(151).sale_events == 0
 
 
+def recent_rate(*sale_prices, typical_sale_size=1.0):
+    units = sum(n for _, n, _ in sale_prices)
+    return SellRate(
+        units_per_day=units,
+        sale_events=len(sale_prices),
+        window_hours=24,
+        reposts=0,
+        coincidences=0,
+        sale_units=units,
+        typical_sale_size=typical_sale_size,
+        sale_prices=sale_prices,
+    )
+
+
+def test_the_recent_price_is_the_median_unit_price_each_unit_counted_since_a_time():
+    # #200: since T0, 1 unit at 100, 5 at 120 and 1 at 300: the 4th of 7 units is at 120.
+    # The 50 units at 10 before T0 don't count.
+    rate = recent_rate((10, 50, T0 - 1), (100, 1, T0), (300, 1, T0 + 1), (120, 5, T0 + 2))
+
+    assert rate.recent_price(since=T0) == 120
+
+
+def test_the_recent_price_of_an_even_count_of_units_is_the_lower_middle_one():
+    rate = recent_rate((100, 2, T0), (200, 1, T0), (300, 1, T0))
+
+    assert rate.recent_price(since=T0) == 100
+
+
+def test_there_is_no_recent_price_with_fewer_than_3_sale_events_since():
+    rate = recent_rate((100, 1, T0 - 1), (100, 5, T0), (120, 5, T0 + 1))
+
+    assert rate.recent_price(since=T0) is None
+    assert rate.recent_price(since=T0 - 1) == 100
+
+
+def test_the_units_seen_sold_at_a_price_count_each_sale_event_at_most_its_typical_size():
+    # #198's clip, for big Risky rows (#200): at 100 or more, 3 + 3 (of 40) + 1 units.
+    rate = recent_rate((99, 9, T0), (100, 3, T0), (150, 40, T0), (200, 1, T0), typical_sale_size=3)
+
+    assert rate.units_sold_at_or_above(100) == 7
+
+
 def test_the_sell_rate_at_a_price_keeps_its_sale_events_in_the_order_they_were_seen():
     # #155: the cut is worked out from the prices sorted, but the Sale Events it keeps
     # stay in their own order, at any price between two of them, and on every call.

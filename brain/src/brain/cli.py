@@ -902,6 +902,8 @@ def _render_market(
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     budget = "" if m.budget is None else f" (Budget {_money(m.budget)} of {_money(m.gold)})"
     least_profit = f", each making at least {_money(m.min_profit)}" if m.min_profit else ""
+    if m.min_profit and m.min_profit_per_click:
+        least_profit += f" and {_money(m.min_profit_per_click)} a click"
     return (
         f"{market}, as of the Scan at {as_of}\n"
         f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n"
@@ -1199,7 +1201,10 @@ def _numbers(w: WhyNot, check: Check) -> str:
         case Check.BUDGET:
             return f"cheapest run {_money(w.cost)}, spend {_money(w.spend)}"
         case Check.MIN_PROFIT:
-            return f"best row makes {_money(w.profit)}, needs {_money(w.min_profit)}"
+            by = w.min_profit_by
+            if by == "clicks":
+                by = f"{w.clicks} clicks x {_money(w.min_profit / w.clicks)}"
+            return f"best row makes {_money(w.profit)}, needs {_money(w.min_profit)} ({by})"
         case Check.ROW_CAP:
             return f"best place {w.rank}, top {w.rows} kept"
 

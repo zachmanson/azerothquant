@@ -222,6 +222,7 @@ CONFIG = replace(
     risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
     row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
     row_min_profit_copper=0,
+    row_min_profit_per_click=0,
 )
 
 

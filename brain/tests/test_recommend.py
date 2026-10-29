@@ -84,6 +84,7 @@ CONFIG = replace(
     # Likewise no Minimum Profit (#197), but in the tests of it (MIN_PROFIT).
     row_min_profit_share=0.0,
     row_min_profit_copper=0,
+    row_min_profit_per_click=0,
     # The 1 h Observation Window cap these tests were written to: their Scans hours apart
     # are gaps no Sell Rate is read from (ADR-0035 raised the default to 12 h).
     observation_window_max_seconds=HOUR,
@@ -94,7 +95,13 @@ NO_MARGIN = replace(CONFIG, flip_min_margin_share=0.0, flip_min_margin_copper=0)
 # The user's Flip margin (#191): 10% of the unit, over a 1 silver floor.
 TEN_PERCENT_MARGIN = replace(CONFIG, flip_min_margin_share=0.1, flip_min_margin_copper=100)
 # Pinned, so the worked examples don't move when the default is tuned.
-CAPPED = replace(CONFIG, risk_caps=True, flip_unsold_loss_share=0.05, flip_tied_up_share=0.6)
+CAPPED = replace(
+    CONFIG,
+    risk_caps=True,
+    flip_unsold_loss_share=0.05,
+    flip_tied_up_share=0.6,
+    risky_max_loss_share=0.25,
+)
 
 
 def scan(at, *rows, vendor_prices=None, faction="Alliance"):
@@ -360,6 +367,25 @@ def test_the_minimum_profit_grows_with_the_stake(db):
     assert (large.min_profit, large.shopping_list) == (100000, [])
 
 
+def test_the_minimum_profit_grows_with_the_clicks(db):
+    # #200: the 5 above take 2 Listings and 3 posts and make 8g 24s 95c, so a floor of
+    # 1g 64s 99c a click keeps them and 1g 65s a click (8g 25s) leaves them off.
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD, vendor_prices={2589: 10})],
+    )
+
+    def shopping_list(per_click):
+        [m] = recommend(db, replace(CONFIG, row_min_profit_per_click=per_click), [])
+        return [(r.quantity, r.listings, r.posts) for r in m.shopping_list]
+
+    assert shopping_list(16499) == [(5, 2, 3)]
+    assert shopping_list(16500) == []
+
+
 def test_a_flip_to_vendor_risky_row_or_flip_to_craft_under_the_minimum_profit_is_left_off():
     # Each kind of row has the one Minimum Profit: a 1 copper floor over its Profit leaves
     # it off, its Profit to the copper keeps it.
@@ -566,6 +592,75 @@ def test_without_the_risk_caps_there_are_no_risky_rows(db):
 
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.risky) == (5, False)
+
+
+# --- Big Risky rows (#200, ADR-0041) ---
+
+
+def big_run(
+    db, sale_events=4, money=50 * GOLD // 100, held=0, sold_cheap=0, risky_units=5, cheap=None
+):
+    """A Listing of 8 Linen at 1g, posted at 2g 99s 99c under a 3g wall that sold 2 an
+    hour as `sale_events` Sale Events, the Recent Price 3g (1 an Event at 3g counts up
+    to 2 units, the typical sale size). `sold_cheap` more units sold at 20s first, in
+    one Sale Event an hour. Unsold, the 8 lose 7g 92s plus their deposits, over 5% of a
+    50g Stake but under 25% of it. A Sale Horizon of 12 h leaves room for all 8. `cheap`
+    Listings replace the 8."""
+    early = [
+        scan(
+            T0 - (3 - n) * HOUR,
+            row(quantity=20, unit=30000),
+            row(quantity=sold_cheap - n * sold_cheap // 3, unit=2000),
+        )
+        for n in range(3)
+        if sold_cheap
+    ]
+    latest = selling_two_linen_an_hour(
+        *(cheap or [row(quantity=8, unit=10000)]), unit=30000, sale_events=sale_events
+    )
+    bags = [item(count=held)] if held else []
+    result = run(
+        db,
+        early + latest,
+        [character_read(*bags, money=money, vendor_prices={2589: 10})],
+        config=replace(CAPPED, sale_horizon_seconds=12 * HOUR, risky_max_units=risky_units),
+    )
+    return [(r.quantity, r.post_at, r.risky) for r in result[MARKET].shopping_list]
+
+
+def test_a_long_run_the_loss_cap_drops_comes_back_risky_under_its_recent_price(db):
+    assert big_run(db) == [(8, 29999, True)]
+
+
+def test_a_long_risky_row_is_the_best_long_run_within_the_loss_limit(db):
+    # 6 at 1g and 2 at 1g 50s. All 8 would lose 8g 99s unsold, over 25% of a 30g Stake;
+    # the 6, posted at 1g 49s 99c under the 2, lose 5g 94s and stay Risky.
+    cheap = [row(quantity=6, unit=10000), row(quantity=2, unit=15000)]
+
+    assert big_run(db, money=30 * GOLD // 100, cheap=cheap) == [(6, 14999, True)]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        # 3 Sale Events: 6 units seen sold at 2g 99s 99c or more, under the 8.
+        dict(sale_events=3),
+        # 1 held takes one of the 8 seen sold first.
+        dict(held=1),
+        # 30g: 25% of it is 7g 50s, under the 8's Unsold Loss.
+        dict(money=30 * GOLD // 100),
+        # 30 units sold at 20s make the Recent Price 20s.
+        dict(sold_cheap=30),
+    ],
+)
+def test_a_long_risky_run_must_pass_the_recent_price_the_units_seen_sold_and_the_loss(db, case):
+    # Each comes back with risky_max_units at 8, so only the long run's checks drop it.
+    assert big_run(db, **case) == []
+    db2 = open_history(":memory:")
+    try:
+        assert big_run(db2, risky_units=8, **case) == [(8, 29999, True)]
+    finally:
+        db2.close()
 
 
 def test_a_flip_to_sell_costs_no_more_than_the_room_the_own_listings_leave(db):
@@ -1586,6 +1681,79 @@ def crashed(hours_since, sold_since=()):
 FLIPS_NEED_3 = replace(CONFIG, flip_min_sale_events=3)
 
 
+# --- The cutoff skipped under the Recent Price (#200, ADR-0041) ---
+# With every Flip to Sell skipping it (`recent_price_skips_cutoff`), which lost the
+# Backtest, so it's off by default and only a long Risky row skips it.
+
+
+def test_a_flip_to_sell_posted_under_its_recent_price_skips_the_cheap_stock_cutoff(db):
+    # As below, but all 10 Sale Events of the last 7 days were at 1000: posted at 999, the
+    # run is a dump under a steady price, not a crash, so they all count.
+    config = replace(FLIPS_NEED_3, recent_price_skips_cutoff=True)
+
+    result = run(db, crashed(hours_since=24), [character_read(money=GOLD)], config=config)
+
+    [flip] = result[MARKET].shopping_list
+    assert (flip.action, flip.post_at, flip.sale_events) == (Action.SELL, 999, 10)
+
+
+def test_a_flip_to_sell_posted_above_its_recent_price_keeps_the_cheap_stock_cutoff(db):
+    # 30 units sold at 500 before the 1000s' 20, so the Recent Price is 500: a post at 999
+    # is above it, and nothing has sold at 999 since the 100 went up.
+    sold_at_500 = [
+        scan(T0 - (5 - n) * HOUR, row(quantity=40, unit=1000), row(quantity=30 - 6 * n, unit=500))
+        for n in range(5)
+    ]
+    config = replace(FLIPS_NEED_3, recent_price_skips_cutoff=True)
+
+    result = run(
+        db, sold_at_500 + crashed(hours_since=24), [character_read(money=GOLD)], config=config
+    )
+
+    assert result[MARKET].shopping_list == []
+
+
+def test_a_flip_to_sell_with_no_recent_price_keeps_the_cheap_stock_cutoff(db):
+    # The 10 Sale Events at 1000 were 8 days before the 100 went up: within the 14 days
+    # Sell Rate counts, but none in the 7 the Recent Price does.
+    week_later = [
+        replace_at(s, s["requestedAt"] + 8 * DAY) if s["requestedAt"] >= CHEAP_AT else s
+        for s in crashed(hours_since=24)
+    ]
+    config = replace(FLIPS_NEED_3, recent_price_skips_cutoff=True)
+
+    result = run(db, week_later, [character_read(money=GOLD)], config=config)
+
+    assert result[MARKET].shopping_list == []
+
+
+def replace_at(s, at):
+    return s | {"requestedAt": at}
+
+
+def test_only_a_long_risky_row_skips_the_cheap_stock_cutoff_by_default(db):
+    # ADR-0041's fallback: as above, but 8 cheap at 1s, and every Flip skipping the cutoff
+    # lost the Backtest. Kept, it leaves no room at 9s 99c; skipped, 20 units sold over the
+    # 34 h watched make room for 28 in 2 days. Unsold, the 8 lose 8s: over 5% of a 1g
+    # Stake, under 25% of it.
+    scans = crashed(hours_since=24)
+    scans[-1]["listings"][1] = row(quantity=8, unit=100)
+    config = replace(CAPPED, flip_min_sale_events=3, sale_horizon_seconds=2 * DAY)
+
+    def shopping_list(money, config=config):
+        conn = open_history(":memory:")
+        try:
+            result = run(conn, scans, [character_read(money=money)], config=config)
+            return [(r.quantity, r.post_at, r.risky) for r in result[MARKET].shopping_list]
+        finally:
+            conn.close()
+
+    assert shopping_list(10000) == [(8, 999, True)]
+    # Not a normal row however big the Stake: only a Risky one skips the cutoff.
+    assert shopping_list(GOLD) == [(8, 999, True)]
+    assert shopping_list(GOLD, replace(config, risk_caps=False)) == []
+
+
 def test_a_flip_to_sell_no_longer_counts_sales_from_before_its_cheap_run_showed_up(db):
     # 10 Sale Events in the 10 h before the 100 showed up expect 24 in the 24 h since, and
     # none came: nobody pays 999 with the 100 up. So nothing is bought to post at 999.
@@ -2325,6 +2493,7 @@ def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
         ah_deposit_min_copper=0,
         row_min_profit_share=0.0,
         row_min_profit_copper=0,
+        row_min_profit_per_click=0,
     )
     result = run(
         db,
@@ -2349,6 +2518,7 @@ def test_holdings_are_discounted_less_than_flips(db, other_db):
         ah_deposit_min_copper=0,
         row_min_profit_share=0.0,
         row_min_profit_copper=0,
+        row_min_profit_per_click=0,
     )
     scans = one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700))
     holding = run(
@@ -2388,6 +2558,7 @@ def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
         flip_min_sale_events=1,
         row_min_profit_share=0.0,
         row_min_profit_copper=0,
+        row_min_profit_per_click=0,
     )
     result = run(
         db,

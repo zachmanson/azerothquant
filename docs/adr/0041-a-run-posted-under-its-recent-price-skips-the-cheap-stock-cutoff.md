@@ -1,10 +1,11 @@
-# A run posted under its Recent Price skips the cheap-stock cutoff; big Risky rows must pass it
+# Only a long Risky row posted under its Recent Price skips the cheap-stock cutoff
 
-Amends ADR-0028, ADR-0029, ADR-0033 (the cheap-stock cutoff) and ADR-0037 (Risky rows). Decided in the #200 grill, 2026-10-29. To be judged by the Backtest when built; this ADR records the decision and its fallback.
+Amends ADR-0028, ADR-0029, ADR-0033 (the cheap-stock cutoff) and ADR-0037 (Risky rows). Decided in the #200 grill, 2026-10-29; built the same day, when the Backtest sent it to its fallback (below).
 
-- **Recent Price** (CONTEXT.md): an Item Key's median unit price over its Sale Events in the last 7 days, each unit counted, with at least 3 Sale Events or there's none.
-- A Flip to Sell posted at or under its Recent Price skips the cheap-stock cutoff, for every row: a dump under a steady price isn't a crash. A row posted above it keeps the cutoff and isn't otherwise dropped.
-- A Flip to Sell the Unsold Loss cap drops comes back as a Risky row at any size, not only up to `risky_max_units` (5). Above 5 units it must also post at or under its Recent Price, buy no more (held units included) than the units seen sold at or above its post price with each Sale Event counted at most the typical sale size (#198's clip), and lose no more than 25% of the Stake if none of it sells. Risky rows of 5 units or fewer keep ADR-0037's rules. Risky rows still stay out of the Backtest.
+- **Recent Price** (CONTEXT.md): an Item Key's median unit price over its Sale Events in the last 7 days, each unit counted (the lower middle one), with at least 3 Sale Events or there's none.
+- Grilled: a Flip to Sell posted at or under its Recent Price skips the cheap-stock cutoff, for every row: a dump under a steady price isn't a crash. **Built: only a long Risky row does.** Every Flip skipping it lost the Backtest by 138g (below), so it's `recent_price_skips_cutoff`, off by default, kept for a later A/B.
+- A Flip to Sell the Unsold Loss cap drops, or the cutoff leaves without a run, comes back as a Risky row at any size, not only up to `risky_max_units` (5). Above 5 units it's sized with the cutoff skipped under its Recent Price, and must post at or under its Recent Price, buy no more (held units included) than the units seen sold at or above its post price with each Sale Event counted at most the typical sale size (#198's clip), and lose no more than half the Stake if none of it sells (`risky_max_loss_share`; 25% in the grill, raised when built, below). Risky rows of 5 units or fewer keep ADR-0037's rules. Risky rows still stay out of the Backtest.
+- Minimum Profit (CONTEXT.md) grows with the clicks: at least 5s (`row_min_profit_per_click`) for each Listing a row buys and stack it posts.
 
 ## Why
 
@@ -19,15 +20,29 @@ The Cured Medium Hide (row of 241 at 14s 49c on 2026-10-12, 501 bought, 34 sold)
 
 Profit per unit (about 6s each) and ROI (73% vs ~87%) can't tell them apart. The Recent Price can, and the clip keeps a run within the demand seen.
 
+## Built: the Backtest (87-Scan Beta copy, `brain` policy, from 40g)
+
+| | P&L vendor mark | P&L market mark | Buys | Max drawdown |
+|---|---|---|---|---|
+| main (ADR-0040's bar) | 131g 35s | 156g 60s | 92 | 8% |
+| every Flip skips the cutoff under its Recent Price, + 5s a click | -7g 10s | 7g 01s | 80 | 25% |
+| only long Risky rows skip it, + 5s a click (built) | 136g 04s | 161g 03s | 89 | 7% |
+
+The skip for every row lost, as ADR-0036 and ADR-0040 lost by loosening Flip to Sell: most of the extra runs it let through were posted under a steady price and still didn't sell. The per-click floor alone beats main by 4g 70s. Risky rows stay out of the Backtest, so the built version scores as the per-click floor alone.
+
+At Steel Bar's buy Scan the Stake was 41g 20s and its 216 lose 17g 84s unsold (43%): 25% of the Stake hid it, so the user raised the limit to half (2026-10-29). As built, Steel Bar is a Risky row of 216 up to 8s 50c posted at 15s 49c (13g 36s profit), and there's no Cured Medium Hide row at its Scan (its Recent Price is under the post).
+
+Shopping List rows per Scan, over the 66 Scans the Backtest values at its own simulated Stake (from 40g): normal rows 1.96 a Scan on main, 1.85 after (the per-click floor). Risky rows 1.18 a Scan on main, 2.60 after (first 50 Scans; the final run was stopped for low memory there, its normal rows and gold matching the run above call for call).
+
 ## Considered options
 
-- **Only big Risky rows skip the cutoff**: the Backtest wouldn't move, but a Steel Bar-like run would show as Risky at a small Stake and vanish again as a normal row at a Stake big enough for the cap to fit it. This is the fallback if the Backtest loses.
+- **Every Flip to Sell skips the cutoff under its Recent Price**: the grilled choice; lost the Backtest by 138g.
 - **Leave the cutoff alone**: no Steel Bar-like run ever shows.
 - **Drop normal rows posted above their Recent Price**: a second change to the Backtest at once; a follow-up if Flip Grades show those rows losing.
 - **A wall check** (cheap units left just above the post): harder to define and overlaps the cutoff.
 
 ## Consequences
 
-- Must pass: the Backtest no worse than `brain` (131.4g vendor / 156.6g market from 40g, ADR-0040's table), else the cutoff skip is kept to big Risky rows. ADR-0036 and ADR-0040 both lost by loosening Flip to Sell on the demand model's word, so this may lose too.
-- Must pass: Steel Bar as a big Risky row at the 2026-10-11 12:03 Scan; no Cured Medium Hide row at 2026-10-12 18:29.
-- Reported: Shopping List rows per Beta Scan before vs after.
+- A Steel Bar-like run shows as Risky whatever the Stake, never as a normal row: the cutoff still holds for those.
+- Long Risky rows are common on Beta (several a Scan at a ~40g Stake, 18 to 29 units); they're named, flagged risky and not backtested, so their Flip Grades are what will say whether they pay.
+- `_flips` runs twice for an Item Key with a Recent Price and cheap stock, once with the skip, for the long runs.
