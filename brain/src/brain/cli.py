@@ -901,12 +901,14 @@ def _render_market(
         )
     market = f"{m.market.realm} {m.market.faction} ({m.market.era.value})"
     budget = "" if m.budget is None else f" (Budget {_money(m.budget)} of {_money(m.gold)})"
+    least_profit = f", each making at least {_money(m.min_profit)}" if m.min_profit else ""
     return (
         f"{market}, as of the Scan at {as_of}\n"
         f"Sell Rate observed for {m.window_hours:.1f} h in the last {range_days} days\n"
         f"Sold Outcomes not linked to an Item Key by name: {m.unlinked_sales}\n\n"
         f"Holdings\n{holdings}\n"
-        f"Shopping List, options each sized on its own within {_money(m.spend)}{budget}\n"
+        f"Shopping List, options each sized on its own within {_money(m.spend)}"
+        f"{budget}{least_profit}\n"
         f"{shopping}\n"
         f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
         f"{prediction_buys}\n"
@@ -1160,6 +1162,8 @@ def _shortfall(w: WhyNot) -> float:
             return 0.0
         case Check.BUDGET:
             return (w.cost - w.spend) / w.cost
+        case Check.MIN_PROFIT:
+            return (w.min_profit - w.profit) / w.min_profit
         case Check.ROW_CAP:
             return (w.rank - w.rows) / w.rank
 
@@ -1194,6 +1198,8 @@ def _numbers(w: WhyNot, check: Check) -> str:
             return "the latest Scan dropped rows of it" if w.failed is check else ""
         case Check.BUDGET:
             return f"cheapest run {_money(w.cost)}, spend {_money(w.spend)}"
+        case Check.MIN_PROFIT:
+            return f"best row makes {_money(w.profit)}, needs {_money(w.min_profit)}"
         case Check.ROW_CAP:
             return f"best place {w.rank}, top {w.rows} kept"
 

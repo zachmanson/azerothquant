@@ -46,7 +46,7 @@ START_GOLD = 400_000  # 40g
 POLICIES: dict[str, Callable[[Config], Config]] = {
     "brain": lambda c: c,
     # Every buy-side gate loosened: no cheap-stock cutoff, one Sale Event is enough, the
-    # Holdings' Sell Rate priors for Flips too, and no margin needed.
+    # Holdings' Sell Rate priors for Flips too, and no margin or Minimum Profit needed.
     "relaxed": lambda c: replace(
         c,
         cheap_stock_cutoff=False,
@@ -55,8 +55,11 @@ POLICIES: dict[str, Callable[[Config], Config]] = {
         sale_size_prior_events_flips=c.sale_size_prior_events_holdings,
         flip_min_margin_share=0.0,
         flip_min_margin_copper=0,
+        row_min_profit_share=0.0,
+        row_min_profit_copper=0,
     ),
-    # No risk caps (#170, ADR-0034): what they change is measured against it.
+    # No risk caps (#170, ADR-0034): what they change is measured against it. The Minimum
+    # Profit (#197) stays: it isn't a risk cap.
     "uncapped": lambda c: replace(c, risk_caps=False),
 }
 

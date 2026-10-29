@@ -48,6 +48,8 @@ CONFIG = replace(
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
     risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
+    row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
+    row_min_profit_copper=0,
 )
 
 

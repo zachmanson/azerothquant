@@ -179,6 +179,7 @@ class Check(StrEnum):
     MARGIN = "Flip margin"
     DROPPED = "Dropped rows"  # the Scan dropped rows of the item (#156)
     BUDGET = "Budget"
+    MIN_PROFIT = "Minimum Profit"  # a share of the Stake, or the floor (#197)
     ROW_CAP = "Row cap"
 
 
@@ -228,6 +229,9 @@ class WhyNot:
     # places kept. None unless a row was built.
     rank: int | None
     rows: int
+    # Its best row's Profit, against the Minimum Profit (#197). None unless a row was built.
+    profit: float | None = None
+    min_profit: float = 0.0
     name: str | None = None  # only if the player has listed, bought or sold it
     # The Scan the stretch of cheaper Listings began in, when `sale_events` counts only the
     # ones since (#132, #135, ADR-0029). None if they all count.
@@ -610,6 +614,8 @@ class MarketRecommendations:
     stake: float = 0.0
     room: float | None = None
     loss_cap: float | None = None
+    # The least Profit a Shopping List row must make to be shown (#197).
+    min_profit: float = 0.0
     # Observation Window hours in the Sell Rate range: how much watching every Sell Rate
     # in the Market rests on, shown instead of a per-row "thin" flag (#25).
     window_hours: float = 0.0
@@ -752,10 +758,11 @@ def recommend_market(
     # Without `paid`, a past Scan's Lots may rest on what it named (#55), so the own
     # Listings up are at Best Exit Value.
     paid_lots = market_lots(conn, config, market, predictions, seen) if paid else []
-    if tied_up is None and config.risk_caps:
+    if tied_up is None:
         tied_up = _at_cost(_own_units(supply, for_sale), paid_lots, valuer)
-    tied_up = tied_up or 0.0
+    stake = gold + tied_up
     risk = _risk_caps(gold, tied_up, config)
+    min_profit = _min_profit(stake, config)
     ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
     beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
     hold_buys = [
@@ -811,6 +818,7 @@ def recommend_market(
         config.craft_list_rows,
         config.disenchant_list_rows,
         risk,
+        min_profit,
     )
     crafted = crafting.counts
     disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
@@ -846,7 +854,8 @@ def recommend_market(
         now,
         gold,
         budget=budget,
-        stake=gold + tied_up,
+        stake=stake,
+        min_profit=min_profit,
         room=None if risk == NO_CAPS else risk.room,
         loss_cap=None if risk == NO_CAPS else risk.loss,
         window_hours=observation_window_hours(conn, market, config, now),
@@ -861,7 +870,7 @@ def recommend_market(
         buy_under=_buy_unders(conn, config, market, now, valuer, plans, fair_value_cache)
         if buy_under
         else [],
-        why_not=_why_not(valuer, cleared, dropped, spend, set(under), names, config)
+        why_not=_why_not(valuer, cleared, dropped, spend, min_profit, set(under), names, config)
         if why_not
         else [],
         beta_ratios=ratios,
@@ -910,6 +919,12 @@ def _risk_caps(gold: float, tied_up: float, config: Config) -> _RiskCaps:
         room=max(0.0, config.flip_tied_up_share * stake - tied_up),
         risky_units=config.risky_max_units,
     )
+
+
+def _min_profit(stake: float, config: Config) -> float:
+    """A Shopping List row's Minimum Profit (#197): a share of the `stake`, never under
+    the floor."""
+    return max(config.row_min_profit_share * stake, config.row_min_profit_copper)
 
 
 def _loot_alert(
@@ -964,18 +979,23 @@ def _why_not(
     cleared: list[_VendorBuy | _FlipToSell],
     dropped: frozenset[int],
     spend: int,
+    min_profit: float,
     under: set[str],
     names: Mapping[str, str],
     config: Config,
 ) -> list[WhyNot]:
     """`recommend`'s `why_not` from the Valuer the Flips were sized on, the buys that
     `cleared` the Flip margin, the itemIDs the Scan `dropped` rows of, whose buys aren't
-    options (#156), and what each option may `spend`, for the Item Keys not `under` a
-    Prediction, with the item `names` known (#108)."""
+    options (#156), what each option may `spend` and the `min_profit` it must make (#197),
+    for the Item Keys not `under` a Prediction, with the item `names` known (#108)."""
     buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
     flips = _flip_options(buys, spend)
+    profit: dict[str, float] = {}
+    for row in flips:
+        profit[row.item_key] = max(row.profit, profit.get(row.item_key, row.profit))
+    worth = [row for row in flips if row.profit >= min_profit]
     rank: dict[str, int] = {}
-    for row, place in zip(flips, _best_ranks(flips), strict=True):
+    for row, place in zip(worth, _best_ranks(worth), strict=True):
         rank[row.item_key] = min(place, rank.get(row.item_key, place))
     cost: dict[str, int] = {}
     for buy in cleared:
@@ -1012,6 +1032,8 @@ def _why_not(
         # An Item Key with a Flip to Vendor gets past the checks a Flip to Sell alone makes.
         if item_key in rank:
             failed = Check.ROW_CAP if rank[item_key] > rows else None
+        elif item_key in profit:
+            failed = Check.MIN_PROFIT
         elif item_key in cost:
             failed = Check.DROPPED if item_id_of(item_key) in dropped else Check.BUDGET
         elif _vendors_at_a_profit(out, cheapest[0], valuer.effort(item_key)):
@@ -1038,6 +1060,8 @@ def _why_not(
                 spend=spend,
                 rank=rank.get(item_key),
                 rows=rows,
+                profit=profit.get(item_key),
+                min_profit=min_profit,
                 name=names.get(item_key),
                 cheap_since=stretch.since,
                 cheap_breaks=stretch.breaks,
@@ -4137,24 +4161,33 @@ def _options(
     craft_rows: int,
     disenchant_rows: int,
     caps: _RiskCaps = NO_CAPS,
+    min_profit: float = 0.0,
 ) -> list[Row]:
     """The Shopping List (#86): each Item Key's Flip to Sell and Flip to Vendor, and each
     recipe's Flips to Craft, sized as if it were the only buy within `gold`, most
-    profitable first. The Flips to Sell and to Vendor are cut to those in the top
-    `flip_rows` by any of Profit, Per click, Per day (Flips to Sell only) or ROI (#98),
-    and the Flips to Craft,
-    apart, to the top `craft_rows` by Profit (#87), and the Flips to Disenchant likewise
-    to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011).
+    profitable first, each making at least `min_profit` (#197): one that doesn't takes no
+    place. The Flips to Sell and to Vendor are cut to those in the top `flip_rows` by any
+    of Profit, Per click, Per day (Flips to Sell only) or ROI (#98), and the Flips to
+    Craft, apart, to the top `craft_rows` by Profit (#87), and the Flips to Disenchant
+    likewise to `disenchant_rows` (#89). A Flip to Sell is priced on the run it buys (ADR-0011).
     Risky rows (#194) are ranked against all the Flips, but take no place from the rest,
     which are cut as if there were none: the Backtest takes only those (ADR-0037)."""
-    flips = _flip_options(buys, gold, caps)
+    flips = [r for r in _flip_options(buys, gold, caps) if r.profit >= min_profit]
     ranks = _best_ranks(flips)
     normal = [i for i, r in enumerate(flips) if not r.risky]
     for i, rank in zip(normal, _best_ranks([flips[i] for i in normal]), strict=True):
         ranks[i] = rank
-    crafted = [row for recipe in crafts if recipe for row in _capped_option([], recipe, gold, caps)]
+    crafted = [
+        row
+        for recipe in crafts
+        if recipe
+        for row in _capped_option([], recipe, gold, caps)
+        if row.profit >= min_profit
+    ]
     crafted.sort(key=lambda r: -r.profit)
-    disenchanted = sorted(disenchants, key=lambda r: -r.profit)
+    disenchanted = sorted(
+        (r for r in disenchants if r.profit >= min_profit), key=lambda r: -r.profit
+    )
     # One list again, most profit first: the Backtest takes the options in that order.
     return sorted(
         [r for r, rank in zip(flips, ranks, strict=True) if rank <= flip_rows]

@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -221,6 +222,8 @@ RECOMMEND_CONFIG = replace(
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
     risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
+    row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
+    row_min_profit_copper=0,
 )
 
 
@@ -780,6 +783,18 @@ def test_flips_to_disenchant_are_cut_to_the_most_profitable(db):
     [kept] = recommend(db, config)[0].shopping_list
 
     assert kept == both[0]
+
+
+def test_a_flip_to_disenchant_under_the_minimum_profit_is_left_off(db):
+    # #197: as above, a Minimum Profit just over the armor's Profit leaves only the weapon.
+    scans = flip_scans(*CHEAP_GREENS, (WEAPON_ITEM, 300))
+    for s in scans:
+        s["itemInfo"][9996] = info(18, class_id=WEAPON, equip_loc="INVTYPE_WEAPON")
+
+    weapon, armor = flips_to_disenchant(db, scans, [enchanter(vendor_prices=FLIP_PRICES)])
+    config = replace(RECOMMEND_CONFIG, row_min_profit_copper=math.floor(armor.profit) + 1)
+
+    assert recommend(db, config)[0].shopping_list == [weapon]
 
 
 def test_a_way_out_asked_again_in_a_pass_is_the_one_worked_out_afresh(db, monkeypatch):

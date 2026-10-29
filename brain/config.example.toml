@@ -68,6 +68,13 @@
 # flip_min_margin_share = 0.2
 # flip_min_margin_copper = 100
 
+# Optional: a Shopping List row's Minimum Profit (#197). A row that makes less than the
+# larger of row_min_profit_share of the Stake and row_min_profit_copper isn't worth the
+# clicks and is left off. Default to 0.005 (0.5%) and 1000 (10 silver). Must come before
+# the first [[installs]].
+# row_min_profit_share = 0.005
+# row_min_profit_copper = 1000
+
 # Optional: the Shopping List's risk caps (ADR-0034), as shares of the Stake (your gold
 # plus your own Listings up, at what they cost). An option is sized so that if none of it
 # sold it would lose at most flip_unsold_loss_share of the Stake, and so it costs no more

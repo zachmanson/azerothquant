@@ -220,6 +220,8 @@ CONFIG = replace(
     sale_size_prior_events_flips=0,
     flip_min_sale_events=1,
     risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
+    row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
+    row_min_profit_copper=0,
 )
 
 
@@ -333,6 +335,47 @@ def test_the_brains_risk_caps_are_on_its_simulated_stake_and_uncapped_has_none(d
     assert (brain.units, brain.price) == (2, 399)
     [uncapped] = result.runs["uncapped"].trades
     assert (uncapped.units, uncapped.price) == (5, 999)
+
+
+def test_the_minimum_profit_holds_but_in_the_relaxed_policy(db):
+    # #197: the 5 Linen above, posted at 9s 99c, make 31s 45c. A 40s Minimum Profit leaves
+    # them off for the Brain and uncapped alike; relaxed loosens every buy-side gate and
+    # takes them.
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(
+            T0 + HOUR,
+            history_row(quantity=18, unit=1000),
+            history_row(quantity=2, unit=200),
+            history_row(quantity=3, unit=400),
+        ),
+        history_scan(T0 + 2 * HOUR, history_row(quantity=16, unit=1000)),
+    ]
+    read = {
+        "readAt": T0,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "vendorPrices": {"2589": 10},
+    }
+    config = replace(CONFIG, row_min_profit_copper=4000)
+    import_scans(db, scans, Era.BETA, config)
+    import_character_reads(db, [read], Era.BETA, config)
+
+    [result] = backtest(
+        db,
+        config,
+        [],
+        policies=("brain", "uncapped", "relaxed"),
+        start_gold=10_000,
+        no_buys_in_last_seconds=0,
+    )
+
+    assert result.runs["brain"].trades == []
+    assert result.runs["uncapped"].trades == []
+    assert [t.units for t in result.runs["relaxed"].trades] == [5]
 
 
 def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():

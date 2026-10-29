@@ -81,6 +81,9 @@ CONFIG = replace(
     # The risk caps (ADR-0034) are off but in the tests of them (CAPPED), so the rest size
     # by the gold alone, as they were written to.
     risk_caps=False,
+    # Likewise no Minimum Profit (#197), but in the tests of it (MIN_PROFIT).
+    row_min_profit_share=0.0,
+    row_min_profit_copper=0,
     # The 1 h Observation Window cap these tests were written to: their Scans hours apart
     # are gaps no Sell Rate is read from (ADR-0035 raised the default to 12 h).
     observation_window_max_seconds=HOUR,
@@ -315,6 +318,137 @@ def test_a_flip_the_gold_cant_buy_whole_buys_the_best_run_that_fits(db):
     [flip] = result[MARKET].shopping_list
     assert (flip.quantity, flip.post_at) == (3, 14999)
     assert flip.profit == pytest.approx(3 * (14999 * 0.95 - 10000))
+
+
+# --- Minimum Profit (#197) ---
+
+
+def test_a_flip_to_sell_making_less_than_the_minimum_profit_floor_is_left_off(db):
+    # The run above makes 1g 27s 47c. A 1g 50s floor leaves it off; a 1g floor keeps it.
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=30000, vendor_prices={2589: 10})],
+    )
+
+    def shopping_list(floor):
+        [m] = recommend(db, replace(CONFIG, row_min_profit_copper=floor), [])
+        return [(r.item_key, r.quantity) for r in m.shopping_list]
+
+    assert shopping_list(15000) == []
+    assert shopping_list(10000) == [(LINEN_KEY, 3)]
+
+
+def test_the_minimum_profit_grows_with_the_stake(db):
+    # All 5 posted at 2g 99s 99c make 8g 24s 95c. At 1% of a 100g Stake the Minimum
+    # Profit is 1g and the Flip is kept; with 900g more up at cost it's 10g, and it's off.
+    run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        [character_read(item(), money=GOLD, vendor_prices={2589: 10})],
+    )
+    config = replace(CONFIG, row_min_profit_share=0.01)
+
+    small = recommend_market(db, config, MARKET, [], T0 + HOUR, gold=GOLD, tied_up=0)
+    large = recommend_market(db, config, MARKET, [], T0 + HOUR, gold=GOLD, tied_up=9 * GOLD)
+
+    assert (small.min_profit, [r.quantity for r in small.shopping_list]) == (10000, [5])
+    assert (large.min_profit, large.shopping_list) == (100000, [])
+
+
+def test_a_flip_to_vendor_risky_row_or_flip_to_craft_under_the_minimum_profit_is_left_off():
+    # Each kind of row has the one Minimum Profit: a 1 copper floor over its Profit leaves
+    # it off, its Profit to the copper keeps it.
+    def shopping_list(scans, read, config, profit):
+        db = open_history(":memory:")
+        try:
+            run(db, scans, [read], config=config)
+            over = replace(config, row_min_profit_copper=profit + 1)
+            at = replace(config, row_min_profit_copper=profit)
+            return [len(recommend(db, c, [])[0].shopping_list) for c in (over, at)]
+        finally:
+            db.close()
+
+    # 2 Ore at 5c that vendor for 10c make 10c.
+    vendor = shopping_list(
+        [scan(T0, row(ORE, quantity=2, unit=5))],
+        character_read(money=GOLD, vendor_prices={2770: 10}),
+        NO_MARGIN,
+        10,
+    )
+    # The Risky Linen above makes 8g 24s 95c.
+    risky = shopping_list(
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), row(quantity=2, unit=15000), unit=30000
+        ),
+        character_read(item(), money=GOLD // 2, vendor_prices={2589: 10}),
+        CAPPED,
+        82495,
+    )
+    # The 6 Bolts below make 45s 00c.
+    craft = shopping_list(
+        linen_and_bolts_selling(),
+        character_read(item(), money=GOLD, recipes=[recipe()]),
+        CONFIG,
+        4500,
+    )
+
+    assert (vendor, risky, craft) == ([0, 1], [0, 1], [0, 1])
+
+
+def test_the_minimum_profits_stake_counts_own_listings_up_without_the_risk_caps(db):
+    # #197: 2 own Linen up are in the Stake whether or not the risk caps are on.
+    result = run(
+        db,
+        selling_two_linen_an_hour(row(quantity=2, unit=30000, own=True), unit=30000),
+        [character_read(money=GOLD, vendor_prices={2589: 10})],
+        config=replace(CONFIG, row_min_profit_share=0.01),
+    )
+
+    m = result[MARKET]
+    assert m.stake > GOLD
+    assert m.min_profit == pytest.approx(0.01 * m.stake)
+
+
+def test_a_row_under_the_minimum_profit_takes_no_place_from_the_rows_kept(db):
+    # With one row kept, Linen's 5 lead on Profit, Per click and Per day, and 1 Ore at 10c
+    # posted at 4s 99c leads on ROI. A 10s Minimum Profit leaves the Ore off, so 1 Wool at
+    # 10s posted at 2g 99s 99c leads on ROI and is kept in its place.
+    wool = "item:2592::::::::20:1490"
+    run(
+        db,
+        [
+            scan(
+                T0,
+                row(quantity=20, unit=30000),
+                row(ORE, quantity=20, unit=500),
+                row(wool, quantity=20, unit=30000),
+            ),
+            scan(
+                T0 + HOUR,
+                row(quantity=18, unit=30000),
+                row(quantity=3, unit=10000),
+                row(quantity=2, unit=15000),
+                row(ORE, quantity=18, unit=500),
+                row(ORE, quantity=1, unit=10),
+                row(wool, quantity=18, unit=30000),
+                row(wool, quantity=1, unit=1000),
+            ),
+        ],
+        [character_read(item(), money=GOLD, vendor_prices={2589: 10})],
+    )
+
+    def kept(floor):
+        config = replace(CONFIG, shopping_list_rows=1, row_min_profit_copper=floor)
+        [m] = recommend(db, config, [])
+        return {r.item_key for r in m.shopping_list}
+
+    assert kept(0) == {LINEN_KEY, ORE_KEY}
+    assert kept(1000) == {LINEN_KEY, "2592"}
 
 
 # --- Risk caps (#170, ADR-0034) ---
@@ -2183,9 +2317,14 @@ def one_sale_in_18_minutes(*latest_rows):
 def test_a_flip_buys_only_what_the_discounted_sell_rate_says_will_sell(db):
     # As if 24 more hours had been watched with no sales: 1 / 24.3 h * 24 * 7 days = 6.9,
     # not the raw 80 a day * 7 = 560. No minimum deposit, which the slow units would
-    # lose day after day (#192).
+    # lose day after day (#192), and no Minimum Profit (#197).
     config = replace(
-        DEFAULTS, sell_rate_prior_hours_flips=24, flip_min_sale_events=1, ah_deposit_min_copper=0
+        DEFAULTS,
+        sell_rate_prior_hours_flips=24,
+        flip_min_sale_events=1,
+        ah_deposit_min_copper=0,
+        row_min_profit_share=0.0,
+        row_min_profit_copper=0,
     )
     result = run(
         db,
@@ -2202,8 +2341,15 @@ def test_holdings_are_discounted_less_than_flips(db, other_db):
     # The default Sell Rate Prior for Holdings, 3 h: 1 / 3.3 h * 24 * 7 days = 50.9 of the 100
     # held are Sold. Flips get the default 24: 1 / 24.3 h * 24 * 7 = 6.9, so 6 bought. Held
     # units take the room before Flips (#67), so the Flips are judged with none held. No
-    # minimum deposit, which the slow units would lose day after day (#192).
-    config = replace(DEFAULTS, flip_min_sale_events=1, ah_deposit_min_copper=0)
+    # minimum deposit, which the slow units would lose day after day (#192), and no
+    # Minimum Profit (#197).
+    config = replace(
+        DEFAULTS,
+        flip_min_sale_events=1,
+        ah_deposit_min_copper=0,
+        row_min_profit_share=0.0,
+        row_min_profit_copper=0,
+    )
     scans = one_sale_in_18_minutes(row(quantity=6, unit=500), row(quantity=4, unit=700))
     holding = run(
         db, scans, [character_read(item(count=100), vendor_prices={2589: 10})], config=config
@@ -2231,7 +2377,8 @@ def test_a_market_without_observation_windows_rests_on_none(db):
 
 def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
     # The raw 80 a day * 7 days = 560 units of room: all 100 held would Sell, and all 10
-    # cheap units are bought. The held ones Wait for the Flip's 500s to go (ADR-0038).
+    # cheap units are bought. The held ones Wait for the Flip's 500s to go (ADR-0038). No
+    # Minimum Profit (#197).
     config = replace(
         DEFAULTS,
         sell_rate_prior_hours_holdings=0,
@@ -2239,6 +2386,8 @@ def test_without_a_sell_rate_prior_the_raw_rate_is_taken_at_its_word(db):
         sale_size_prior_events_holdings=0,
         sale_size_prior_events_flips=0,
         flip_min_sale_events=1,
+        row_min_profit_share=0.0,
+        row_min_profit_copper=0,
     )
     result = run(
         db,

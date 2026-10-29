@@ -87,6 +87,8 @@ def config_for(tmp_path: Path, *installs: Install) -> Config:
         history_path=tmp_path / "history.sqlite",
         archive_dir=tmp_path / "archive",
         risk_caps=False,  # sized by the gold alone, as written (ADR-0034)
+        row_min_profit_share=0.0,  # no Minimum Profit (#197), as written
+        row_min_profit_copper=0,
     )
 
 
@@ -1094,8 +1096,11 @@ def test_bench_times_two_passes_on_a_copy_of_the_history(tmp_path, monkeypatch, 
 
 
 def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
-    # A 48 h posting, so exactly one queued unit waits past it (below).
-    config = dataclasses.replace(_three_linen_held(tmp_path), post_duration_hours=48)
+    # A 48 h posting, so exactly one queued unit waits past it (below), and a 1s Minimum
+    # Profit, which the Flip makes (#197).
+    config = dataclasses.replace(
+        _three_linen_held(tmp_path), post_duration_hours=48, row_min_profit_copper=100
+    )
     text = run_recommend(config)
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
@@ -1106,7 +1111,10 @@ def test_recommend_prints_holdings_and_the_shopping_list_as_tables(tmp_path):
     # Sell would buy the two 700s, so they Wait to post at 999 once those go (ADR-0038):
     # 949.05 each after the cut, 939.05 more than a vendor pays.
     assert ["2589", "Wait", "3", "9s 99c", "28s 47c", "9s 39c", "1"] in lines
-    assert "Shopping List, options each sized on its own within 12g 34s 56c\n" in text
+    assert (
+        "Shopping List, options each sized on its own within 12g 34s 56c, "
+        "each making at least 1s 00c\n"
+    ) in text
     # Under the Flip priors the second one, fifth in the queue, waits past a 48 h posting
     # and loses one deposit first (#78): 6c a unit (60% of the 10c Vendor Price), but a
     # post of 2 pays the 1s minimum, so 50c a unit (#192).
@@ -1795,6 +1803,7 @@ def test_recommend_why_not_an_item_key_shows_every_check(tmp_path):
         ["Flip margin", "fail", "ask 2s 80c, clears at 2s 79c: 1c (0.4%)"],
         ["Dropped rows", "-"],
         ["Budget", "-"],
+        ["Minimum Profit", "-"],
         ["Row cap", "-"],
     ]
 
@@ -1883,6 +1892,20 @@ def test_recommend_why_not_an_item_key_on_the_shopping_list_shows_its_row(tmp_pa
     text = run_recommend(_three_linen_held(tmp_path), why_not="2589")
 
     assert "2589: made the list\n  Sell 2 up to 7s 00c: " in text
+
+
+def test_recommend_why_not_names_a_flip_under_the_minimum_profit(tmp_path):
+    # #197: the Linen Flip above makes 3s 48c, under a 5s Minimum Profit.
+    config = dataclasses.replace(_three_linen_held(tmp_path), row_min_profit_copper=500)
+    text = run_recommend(config, why_not="2589")
+
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert lines[1] == ["2589: Minimum Profit"]
+    assert lines[-3:] == [
+        ["Budget", "pass", "cheapest run 14s 00c, spend 12g 34s 56c"],
+        ["Minimum Profit", "fail", "best row makes 3s 48c, needs 5s 00c"],
+        ["Row cap", "-"],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2036,6 +2059,7 @@ def test_recommend_why_not_leaves_the_checks_after_the_first_failed_one_unreache
         ["Flip margin", "-"],
         ["Dropped rows", "-"],
         ["Budget", "-"],
+        ["Minimum Profit", "-"],
         ["Row cap", "-"],
     ]
 

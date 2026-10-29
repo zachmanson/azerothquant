@@ -68,6 +68,10 @@ DEFAULT_SALE_HORIZON_DAYS = 7
 # A Flip to Sell must clear both this share of its buy price and this much copper per unit.
 DEFAULT_FLIP_MIN_MARGIN_SHARE = 0.2
 DEFAULT_FLIP_MIN_MARGIN_COPPER = 100
+# A Shopping List row must make at least this share of the Stake, and this much copper:
+# its Minimum Profit (#197).
+DEFAULT_ROW_MIN_PROFIT_SHARE = 0.005
+DEFAULT_ROW_MIN_PROFIT_COPPER = 1000
 # The Sell Rate Prior: thin Sell Rate evidence is discounted as if this many more hours of
 # Observation Window had been watched with no sales (#25). Lenient for Holdings, where too
 # low a rate vendors what would have sold; strict for Flips, where too high a rate buys
@@ -195,6 +199,10 @@ class Config:
     flip_min_margin_share: float = DEFAULT_FLIP_MIN_MARGIN_SHARE
     # ...and at least this many copper per unit.
     flip_min_margin_copper: int = DEFAULT_FLIP_MIN_MARGIN_COPPER
+    # A Shopping List row's Minimum Profit (#197): the larger of this share of the Stake
+    # and this much copper.
+    row_min_profit_share: float = DEFAULT_ROW_MIN_PROFIT_SHARE
+    row_min_profit_copper: int = DEFAULT_ROW_MIN_PROFIT_COPPER
     # A Shopping List option's risk caps (ADR-0034): its Unsold Loss at most this share of
     # the Stake, and its cost at most this share of the Stake less the own Listings up.
     flip_unsold_loss_share: float = DEFAULT_FLIP_UNSOLD_LOSS_SHARE
@@ -437,6 +445,18 @@ def load_config(path: Path) -> Config:
         raw.get("flip_min_margin_copper", DEFAULT_FLIP_MIN_MARGIN_COPPER),
         "flip_min_margin_copper",
     )
+    min_profit_share = _parse_number(
+        path,
+        raw.get("row_min_profit_share", DEFAULT_ROW_MIN_PROFIT_SHARE),
+        "row_min_profit_share",
+        lambda x: x >= 0,
+        "of at least 0",
+    )
+    min_profit_copper = _parse_copper(
+        path,
+        raw.get("row_min_profit_copper", DEFAULT_ROW_MIN_PROFIT_COPPER),
+        "row_min_profit_copper",
+    )
     prior_holdings, prior_flips = (
         _parse_number(path, raw.get(key, default), key, lambda x: x >= 0, "of hours of at least 0")
         for key, default in (
@@ -610,6 +630,8 @@ def load_config(path: Path) -> Config:
         sale_horizon_seconds=round(horizon_days * 24 * 3600),
         flip_min_margin_share=margin_share,
         flip_min_margin_copper=margin_copper,
+        row_min_profit_share=min_profit_share,
+        row_min_profit_copper=min_profit_copper,
         flip_unsold_loss_share=unsold_loss_share,
         flip_tied_up_share=tied_up_share,
         risky_max_units=risky_units,

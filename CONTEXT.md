@@ -269,6 +269,10 @@ _Avoid_: buy list, snipes, basket
 A Flip to Sell on the Shopping List that the Unsold Loss cap would drop, shown anyway at full size because its run is short: no more than `risky_max_units` (5) units, sized within the gold, the Budget and the room, and clearing every other check. The Addon tags it Risky and says what it loses if none of it sells: the player takes the risk. It's named, so a buy from it starts a Lot, and its Flip Grades are flagged risky. The Backtest never takes one (ADR-0037).
 _Avoid_: uncapped row, override
 
+**Minimum Profit**:
+The least Profit a Shopping List row must make to be shown: the larger of a floor (10s) and a share of the Stake (0.5%). A row under it isn't worth the clicks and is left off, Risky rows and every kind of Flip alike, whatever its Per click, Per day or ROI. Prediction buys and Buy Unders don't have one. Not the Flip margin, which each unit must clear (#197).
+_Avoid_: row minimum, worth-it profit
+
 **Per click**:
 A Flip to Sell's or Flip to Vendor's Profit for each click it takes: each Listing it buys (in Era every Listing is its own buyout) and each stack it posts, at the Item Key's usual Sale Event size. A Flip to Vendor posts nothing.
 _Avoid_: profit per action, effort
