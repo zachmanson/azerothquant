@@ -1,3 +1,7 @@
+2026-10-28 (later 175): #197 done and closed (99fbb95), grilled then built. **Minimum Profit** (CONTEXT.md): a Shopping List row under max(`row_min_profit_copper` 10s, `row_min_profit_share` 0.5% x Stake) is dropped in `_options` before the row cap, so it frees its place; every kind of Flip and Risky rows, not Prediction buys or Buy Unders; Profit only. Backtest `relaxed` zeroes it, `uncapped` keeps it. `brain recommend` header: "each making at least X"; `--why-not` has a Minimum Profit Check between Budget and Row cap. The Stake now counts own Listings up even with `risk_caps` off (review catch). Real Beta: 97g Stake, 48s 50c minimum, Shopping List 4 rows -> 1 (76s). Most rows are small because the 3% Unsold Loss cap sizes them small, which is #195's job. Review note, not filed: `_why_not` sizes rows without the risk caps (pre-existing, Row cap had it too), so a row the caps shrink under the minimum shows "made the list" in why-not.
+
+Next, in order: #195, then the rest of later 174's list from step 3 (#152 + #150, #173, Predictions rows, Nov 4). Gotchas: same as later 173. Test configs that turn the minimum off need both `row_min_profit_share=0.0` and `row_min_profit_copper=0`.
+
 2026-10-28 (later 174): Release planning, no code. User: launch is next week and this reset is the budget for it (aim to use 60-70%). Goal for Nov 4: the Brain working as intended with good recommendations, then must-dos, then QoL. #196 is the Dec 2 checkpoint, not release work, so it moves after launch.
 
 Next, in order (user's call):
