@@ -794,8 +794,8 @@ describe("RecommendationTable.build", function()
 
     local buys = view.sections[5]
     assert.are.equal("Prediction buys", buys.title)
-    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss" }, buys.columns)
-    assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s" }, buys.rows[1].cells)
+    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost" }, buys.columns)
+    assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s", "24%", "5g" }, buys.rows[1].cells)
   end)
 
   it("shows the Buy Unders after the Prediction buys, with the way out, units and Scans that saw one (#88)", function()
@@ -950,8 +950,8 @@ describe("the Beta Prior column (#90)", function()
     assert.are.equal(GREY .. "2s 50c|r", shopping.rows[1].cells[11])
     assert.are.equal("Beta", crafts.columns[8])
     assert.are.equal(GREY .. "9s*|r", crafts.rows[1].cells[8])
-    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Beta" }, predictions.columns)
-    assert.are.equal(GREY .. "2s 50c|r", predictions.rows[1].cells[6])
+    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost", "Beta" }, predictions.columns)
+    assert.are.equal(GREY .. "2s 50c|r", predictions.rows[1].cells[8])
     assert.are.equal("Beta", buyUnder.columns[6])
     assert.are.equal(GREY .. "9s*|r", buyUnder.rows[1].cells[6])
   end)
@@ -1065,6 +1065,16 @@ describe("rows marked Bought (#97)", function()
 
     assert.is_true(view.sections[2].rows[1].bought)
     assert.is_nil(view.sections[2].more)
+  end)
+
+  it("never folds Prediction buys, even over the gold left", function()
+    local buys = {
+      { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, cost = 50000, prediction = "Phase 2", maxLoss = 12000 },
+    }
+    local view = marked(entry({ shoppingList = { sell() }, predictionBuys = buys }), { ["9749 Sell "] = 3000 }, 4000, 100000)
+
+    assert.are.equal(1, #view.sections[5].rows)
+    assert.is_nil(view.sections[5].more)
   end)
 
   it("folds on the Budget, and says so, while the marks spent nothing", function()
@@ -1265,6 +1275,32 @@ describe("sorting the Recommendation Table", function()
     local buys = view.sections[5]
     assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
     assert.are.same({ column = 5, descending = false }, buys.sort)
+  end)
+
+  it("re-sorts Prediction buys by Loss %, the share of their Cost they'd lose", function()
+    local function buy(itemKey, maxLoss, cost)
+      return { itemKey = itemKey, action = "Hold", quantity = 1, price = cost, cost = cost, prediction = "Phase 2", maxLoss = maxLoss }
+    end
+    -- 50%, 5%, 20%: the smallest Max Loss isn't the smallest share.
+    local view = build(entry({ predictionBuys = { buy("1", 500, 1000), buy("2", 5000, 100000), buy("3", 40, 200) } }))
+    local buys = view.sections[5]
+
+    RecommendationTable.sort(buys, { column = 6, descending = false })
+    assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
+  end)
+
+  it("leaves a Prediction buy's Loss % blank, and last, without a Cost", function()
+    local view = build(entry({
+      predictionBuys = {
+        { itemKey = "1", action = "Hold", quantity = 1, price = 100, prediction = "Phase 2", maxLoss = 40 },
+        { itemKey = "2", action = "Hold", quantity = 1, price = 100, cost = 100, prediction = "Phase 2", maxLoss = 10 },
+      },
+    }))
+    local buys = view.sections[5]
+
+    RecommendationTable.sort(buys, { column = 6, descending = false })
+    assert.are.same({ "item:2", "item:1" }, itemStrings(buys))
+    assert.are.equal("", buys.rows[2].cells[6])
   end)
 
   it("re-sorts by a money column's value, not its text, keeping rows with no value last", function()

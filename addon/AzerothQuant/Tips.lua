@@ -38,6 +38,7 @@ Tips.COLUMNS = {
   ["Listings"] = "How many listings to buy.",
   ["Prediction"] = "Why its price is expected to go up.",
   ["Max Loss"] = "The most you could lose if the guess is wrong.",
+  ["Loss %"] = "Max Loss as a share of what you spend. 5% means you'd lose 5g of every 100g if the guess is wrong.",
   ["Buy Under"] = "The most to pay for one. Anything at or under this is a good buy.",
   ["Units"] = "How many to buy at this price.",
   ["Seen"] = "How many recent Scans saw one at or under this price, and over how many days.",

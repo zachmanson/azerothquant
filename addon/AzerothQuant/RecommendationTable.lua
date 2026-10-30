@@ -235,6 +235,11 @@ local function percent(share)
   return string.format("%+d%%", wholePercent(share))
 end
 
+-- A share as an unsigned whole percent, blank when there's none.
+local function sharePercent(share)
+  return share and string.format("%d%%", wholePercent(share)) or ""
+end
+
 -- A Sell or Vendor's ROI on what its units cost (#50), blank when none of them were
 -- bought on the Auction House.
 local function roiCell(r)
@@ -415,10 +420,9 @@ local function flipCells(r, name)
   end
   local perClick, perDay, roi = measures(r)
   local day = perDay == math.huge and "now" or money(perDay)
-  local share = roi and string.format("%d%%", wholePercent(roi)) or ""
   table.insert(cells, 7, money(perClick))
   table.insert(cells, 8, day)
-  table.insert(cells, 9, share)
+  table.insert(cells, 9, sharePercent(roi))
   return cells
 end
 
@@ -441,12 +445,21 @@ local function disenchantKeys(r, name, cells)
   return { name:lower(), cells[2]:lower(), r.listings, r.profit, r.cost }
 end
 
+-- A Prediction buy's Loss %: the share of its Cost it'd lose if the Prediction is wrong.
+-- Never a profit: a Prediction prices no upside (ADR-0006). nil without a Cost.
+local function lossShare(r)
+  return r.maxLoss and r.cost and r.cost > 0 and r.maxLoss / r.cost or nil
+end
+
 local function predictionBuyCells(r, name)
-  return { name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss) }
+  return {
+    name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss),
+    sharePercent(lossShare(r)), money(r.cost),
+  }
 end
 
 local function predictionBuyKeys(r, name, cells)
-  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss }
+  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss, lossShare(r), r.cost }
 end
 
 -- How a Buy Under gets out (#88): Vendor, Sell, e.g. "Craft Bolt of Linen Cloth
@@ -949,7 +962,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
       ),
       section(
         "Prediction buys",
-        { "Item", "Prediction", "Qty", "Max price", "Max Loss" },
+        { "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost" },
         entry.predictionBuys,
         predictionBuyCells,
         predictionBuyKeys,

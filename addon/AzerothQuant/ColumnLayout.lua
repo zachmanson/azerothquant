@@ -27,6 +27,7 @@ local WIDTHS = {
   ["Cost"] = 95,
   ["Beta"] = 95,
   ["Max Loss"] = 95,
+  ["Loss %"] = 60,
   ["Prediction"] = 150,
   ["Listings"] = 70,
   ["Buy Under"] = 95,
@@ -50,7 +51,7 @@ end
 local MIN_ITEM_WIDTH = 150
 
 -- What makes way first when the table is narrow. Every value is still in the side pane.
-local HIDE_ORDER = { "Beta", "Cost", "ROI", "Per click", "Per day" }
+local HIDE_ORDER = { "Beta", "Cost", "ROI", "Loss %", "Per click", "Per day" }
 
 -- The section's columns that fit in width, in order, as { column (its place in
 -- section.columns), width }. Columns in HIDE_ORDER go, one at a time, until the Item (the
