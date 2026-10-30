@@ -7,7 +7,7 @@ rem
 rem Any watcher from an earlier run is stopped first: a long-running one keeps
 rem writing Recommendations with the Brain code it started with.
 
-set BATTLENET=Z:\Battle.net\Battle.net Launcher.exe
+set BATTLENET=C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe
 
 taskkill /FI "WINDOWTITLE eq brain watch*" >nul 2>&1
 start "brain watch" /D "%~dp0..\brain" "%~dp0..\.venv\Scripts\brain.exe" watch

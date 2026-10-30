@@ -192,7 +192,7 @@ finish() {
 TOTAL_STAGES=9
 
 REPO=$(git rev-parse --show-toplevel)
-BETA_DEFAULT='Z:\Battle.net\World of Warcraft\_classic_beta_'
+BETA_DEFAULT='C:\Program Files (x86)\World of Warcraft\_classic_beta_'
 CONFIG="$REPO/brain/config.toml"
 DB="$REPO/brain/history.sqlite"
 PY="$REPO/.venv/Scripts/python.exe"
