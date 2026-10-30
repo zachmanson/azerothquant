@@ -33,3 +33,23 @@ It shows only when at least `buy_under_min_sightings` distinct Scans in the last
 - **A Disenchant source group has its own Buy Under**, by the same formula, less the effort of buying one unit (armor and weapons don't stack) and the margin. It's shown only when some Character's Enchanting skill meets the group's highest item level. Its evidence is distinct Scans that saw another player's Listing of any item in the group that can be Disenchanted, at or under it. This is the Buy Under that catches a green nobody has listed before.
 - **Units:** no limit when every mat's way out has none, else the fewest Disenchants any limited mat has room for (its units over its expected qty per Disenchant).
 - **The Addon matches an item by the higher of its own Buy Under and its group's.** A group entry in `buyUnder` carries its bounds (quality, class, item levels), so the Addon checks an item against it with `C_Item.GetItemInfo` and only needs `disenchantExcluded` from the data file. The spec's `disenchantBands` was dropped as a second copy nothing needed.
+
+## Amendment: no Sell way (#173, 2026-10-29)
+
+The "isn't graded by the replay" reasoning above no longer holds: the Backtest (ADR-0032) grades Buy Unders as standing orders. At each Scan, the `buyunder` policy takes the previous Scan's Sell and Vendor ways, buys other players' Listings at or under them up to their units and its gold, and posts what a Sell way bought 1c under the cheapest Listing left, never over the price it was valued at (that already has the Merchant Cost ceiling and the demand behind it). A Listing a Scan caught stands in for the ones it missed.
+
+The outside review (`docs/research/decision-review-2026-10-08/REVIEW.md` §5) found 45 of 78 fully sold lots lost money and blamed adverse selection: a Listing turns up under a standing price mostly as the market falls. So the Sell way got a **price-moved test**: buy only while the cheapest Listing left once it's bought is at or above the price the Buy Under was valued at (`post_at`, exported as `postAt`). That's the Flip's "has the price moved" question asked live, since the cheap-stock cutoff can't ask it: a Buy Under buys nothing at its Scan, so no stock is ever under its post price.
+
+Backtest, 87-Scan Beta copy, 40g start, Sell-way lots at the vendor mark:
+
+| Policy | Sell way P&L | Sell buys |
+|---|---|---|
+| `buyunder_unchecked` | -50.4g on 136.9g spent | 128 |
+| `buyunder` (price-moved test) | -50.0g on 70.7g spent | 55 |
+| `buyunder` + post at or under the Recent Price (ADR-0041) | -53.4g on 75.9g spent | 57 |
+
+The test halves the buying but not the loss: the crash comes after the buy, not before it (one bought at 5g against an 8.48g market with nothing cheaper up, relisted at 2.2g a week later). The Recent Price check barely bit: these items sold high all week before they fell. The must-pass (reported, not a veto) failed: Troll's Bane Leggings, the player's real winner, wasn't bought in any run.
+
+**Decision: a Buy Under has no Sell way.** An Item Key falls back to its next best way (Vendor, Craft, Disenchant). On the latest Beta Scan that's 154 Buy Unders down to 19 (13 Disenchant, 3 Vendor, 3 Craft). A Craft way's output may still Sell, and a Disenchant way's mats likewise: neither is simulated, so neither is judged here. A cheap Listing a Scan sees is still a Flip to Sell's, with the cutoff and the risk caps.
+
+The Sell way stays in the code behind `buy_under_sell_way` (off, not in config.toml), with `post_at` and the price-moved test (`take_under`), so the `buyunder` and `buyunder_unchecked` policies can grade it again, on Live for one. Bringing it back needs its Sell-way P&L at or over 0 there.

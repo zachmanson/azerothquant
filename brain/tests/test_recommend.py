@@ -48,6 +48,7 @@ from brain.recommend import (
     recommend,
     recommend_market,
     sellable_units,
+    take_under,
 )
 from brain.sell_rate import SellRate
 
@@ -92,6 +93,8 @@ CONFIG = replace(
 # No Flip margin, for the worked examples of Flips to Vendor worth a few copper, which
 # the margin drops since #191.
 NO_MARGIN = replace(CONFIG, flip_min_margin_share=0.0, flip_min_margin_copper=0)
+# Buy Unders with the Sell way the Brain leaves off (#173), as the Backtest grades them.
+SELL_WAY = replace(CONFIG, buy_under_sell_way=True)
 # The user's Flip margin (#191): 10% of the unit, over a 1 silver floor.
 TEN_PERCENT_MARGIN = replace(CONFIG, flip_min_margin_share=0.1, flip_min_margin_copper=100)
 # Pinned, so the worked examples don't move when the default is tuned.
@@ -2023,6 +2026,7 @@ def test_days_to_sell_caps_a_buy_unders_sell_units(db):
         db,
         linen_sold_under_1000(),
         [character_read(item(count=5), days_to_sell=1 / 24)],
+        config=SELL_WAY,
     )
 
     assert [(b.way, b.units) for b in result[MARKET].buy_under] == [(Action.SELL, 2)]
@@ -5092,9 +5096,9 @@ def linen_sold_under_1000(unit=1000):
     ("merchant_costs", "min_sale_events", "expected"),
     [
         # 999 after the 5% cut is 949.05: B = 949.05 / 1.2. The 5 held units sell first.
-        (None, 1, [(790, Action.SELL, 16)]),
+        (None, 1, [(790, Action.SELL, 16, 999)]),
         # Never posted above what a merchant charges: 800 after the cut is 760.
-        ({2589: 800}, 1, [(633, Action.SELL, 16)]),
+        ({2589: 800}, 1, [(633, Action.SELL, 16, 800)]),
         # No Sell way without the minimum of Sale Events for a Flip, and no Vendor Price.
         (None, 2, []),
     ],
@@ -5106,10 +5110,12 @@ def test_the_sell_way_buys_under_the_price_a_flip_would_post_at(
         db,
         linen_sold_under_1000(),
         [character_read(item(count=5), merchant_costs=merchant_costs)],
-        config=replace(CONFIG, flip_min_sale_events=min_sale_events),
+        config=replace(SELL_WAY, flip_min_sale_events=min_sale_events),
     )
 
-    assert [(b.price, b.way, b.units) for b in result[MARKET].buy_under] == expected
+    # A Sell way carries the price it was valued at (#173): the price-moved test checks
+    # that nothing else is listed under it.
+    assert [(b.price, b.way, b.units, b.post_at) for b in result[MARKET].buy_under] == expected
 
 
 def test_the_sell_way_counts_only_the_sale_events_at_or_above_its_post_price(db):
@@ -5188,6 +5194,76 @@ def test_a_craft_way_to_a_sell_is_good_for_the_outputs_room_in_reagent_units(db)
     [linen] = [b for b in result[MARKET].buy_under if b.item_key == LINEN_KEY]
     # 999 after the cut is 949.05 per Bolt, 474.525 per Linen, less the 1 silver floor.
     assert (linen.price, linen.way, linen.units) == (374, Action.CRAFT, 10)
+
+
+@pytest.mark.parametrize(
+    ("vendor_prices", "expected"),
+    [({}, []), ({2589: 1000}, [(LINEN_KEY, Action.VENDOR, 833)])],
+)
+def test_a_buy_under_has_no_sell_way_and_falls_back_to_the_next_best(db, vendor_prices, expected):
+    # #173: as standing orders, Sell ways lost the Backtest: a Listing turns up under a
+    # standing price mostly as the market falls, and the resale price falls after it. So
+    # the Linen above (a 790 Sell way) has only its Vendor way, if any: 1000 / 1.2.
+    result = run(
+        db,
+        linen_sold_under_1000(),
+        [character_read(item(count=5), vendor_prices=vendor_prices)],
+        config=replace(CONFIG, flip_min_sale_events=1, buy_under_sell_way=False),
+    )
+
+    assert [(b.item_key, b.way, b.price) for b in result[MARKET].buy_under] == expected
+
+
+# The price-moved test (#173): a Listing turning up under a standing Buy Under often
+# means the market fell, so the resale price it was valued at is gone too.
+SELLING = BuyUnder(LINEN_KEY, 790, Action.SELL, units=4, seen=1, window_days=7, post_at=999)
+
+
+@pytest.mark.parametrize(
+    ("offers", "taken"),
+    [
+        # Nothing else under 999 once the 700s are taken: posted 1c under the rest, but
+        # never over what it was valued at.
+        ([(700, 2), (1000, 5)], (2, 1400, 999)),
+        ([(700, 2), (1200, 5)], (2, 1400, 999)),
+        # Another seller 1c under the old cheapest still leaves room at 998.
+        ([(700, 2), (999, 5)], (2, 1400, 998)),
+        # Only the units it's good for are taken, cheapest first, and none over 790.
+        ([(600, 1), (700, 5), (1000, 5)], None),
+        ([(600, 1), (700, 3), (1000, 5)], (4, 2700, 999)),
+        # Nothing left at all: posted at what it was valued at.
+        ([(700, 2)], (2, 1400, 999)),
+        # Nothing at or under the Buy Under.
+        ([(791, 2), (1000, 5)], None),
+    ],
+)
+def test_a_listing_under_a_sell_way_buy_under_is_taken_only_while_the_rest_stay_up(offers, taken):
+    out = take_under(SELLING, offers, CONFIG)
+
+    assert (None if out is None else (out.units, out.cost, out.post_at)) == taken
+
+
+def test_the_price_moved_test_fails_when_the_rest_fell_under_the_post_price():
+    # The 950s are over the Buy Under, so not taken, but under 999: the market moved.
+    assert take_under(SELLING, [(700, 2), (950, 5)], CONFIG) is None
+    # Unchecked, it buys anyway and posts 1c under what's left.
+    out = take_under(SELLING, [(700, 2), (950, 5)], CONFIG, checked=False)
+    assert (out.units, out.cost, out.post_at) == (2, 1400, 949)
+
+
+def test_the_gold_left_limits_what_a_buy_under_takes_and_the_rest_stays_up():
+    # 1000 gold buys one 700: the other 700 stays up, under 999.
+    assert take_under(SELLING, [(700, 2), (1000, 5)], CONFIG, gold=1000) is None
+    out = take_under(SELLING, [(700, 2), (1000, 5)], CONFIG, gold=1000, checked=False)
+    assert (out.units, out.cost, out.post_at) == (1, 700, 699)
+
+
+def test_a_vendor_way_buy_under_takes_every_listing_under_it_and_posts_none():
+    vendor = BuyUnder(LINEN_KEY, 833, Action.VENDOR, units=None, seen=1, window_days=7)
+
+    out = take_under(vendor, [(500, 20), (800, 3), (900, 1)], CONFIG)
+
+    assert (out.units, out.cost, out.post_at) == (23, 12_400, None)
 
 
 def test_a_buy_under_with_no_units_left_isnt_shown(db):

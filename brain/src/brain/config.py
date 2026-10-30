@@ -288,6 +288,10 @@ class Config:
     # (#200). It lost the Backtest by 138g, so off, only a long Risky row does (ADR-0041).
     # Not read from config.toml.
     recent_price_skips_cutoff: bool = False
+    # Whether a Buy Under has a Sell way (#173). As standing orders they lost the Backtest
+    # with the price-moved test and a Recent Price check alike, so off: only the Backtest's
+    # buyunder policies turn it on, to grade them again. Not read from config.toml.
+    buy_under_sell_way: bool = False
     # The risk caps (ADR-0034): off only in the Backtest's uncapped policy (#170). Not read
     # from config.toml.
     risk_caps: bool = True

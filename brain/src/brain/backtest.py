@@ -30,11 +30,13 @@ from brain.observation import (
 from brain.predictions import Prediction
 from brain.recommend import (
     Action,
+    BuyUnder,
     MarketRecommendations,
     Row,
     auction_cut,
     deposit_of,
     recommend_market,
+    take_under,
 )
 from brain.scan import item_id_of
 
@@ -64,6 +66,9 @@ POLICIES: dict[str, Callable[[Config], Config]] = {
     "uncapped": lambda c: replace(c, risk_caps=False),
 }
 
+# The Buy Unders as standing orders (#173), with the price-moved test or without it.
+BUY_UNDER_POLICIES: dict[str, bool] = {"buyunder": True, "buyunder_unchecked": False}
+
 
 @dataclass(frozen=True)
 class Buy:
@@ -75,6 +80,7 @@ class Buy:
     cost: float
     post_at: float  # per unit, before the cut
     back: float = 0.0  # gold back at once, from units vendored as bought
+    way: Action | None = None  # a Buy Under's way out, for its P&L by way (#173)
 
 
 # (Scan time, gold, Item Keys with units still posted, what the units still posted cost)
@@ -112,6 +118,7 @@ class Trade:
     salvage_market: float = 0.0
     relisted: bool = False
     closed: bool = False
+    way: Action | None = None  # a Buy Under's way out (#173)
 
     @property
     def left(self) -> float:
@@ -202,7 +209,9 @@ def _buy(sim: Simulation, at: int, policy: BuyPolicy, terms: Terms) -> None:
     for buy in policy(at, sim.gold, posted, _tied_up(sim)):
         if buy.item_key in posted:
             continue
-        trade = Trade(buy.item_key, buy.units, buy.cost, buy.post_at, at, proceeds=buy.back)
+        trade = Trade(
+            buy.item_key, buy.units, buy.cost, buy.post_at, at, proceeds=buy.back, way=buy.way
+        )
         trade.closed = not buy.units
         sim.gold += buy.back - buy.cost
         sim.trades.append(trade)
@@ -281,10 +290,10 @@ def backtest(
     start_gold: float = START_GOLD,
     no_buys_in_last_seconds: int = WEEK_SECONDS,
 ) -> list[MarketBacktest]:
-    """Each Market's `policies` (names in POLICIES) trading its Scans in [since, until]
-    from `start_gold`, buying nothing in the last `no_buys_in_last_seconds` of them, so
-    every buy gets its week. Flips to Disenchant are left out: their mats aren't
-    simulated."""
+    """Each Market's `policies` (names in POLICIES or BUY_UNDER_POLICIES) trading its
+    Scans in [since, until] from `start_gold`, buying nothing in the last
+    `no_buys_in_last_seconds` of them, so every buy gets its week. Flips to Disenchant
+    are left out: their mats aren't simulated."""
     config = replace(config, grades_path=None)  # a Backtest never freezes a Grade
     result = []
     for market in character_markets(conn):
@@ -304,7 +313,7 @@ def backtest(
             name: [
                 simulate(
                     times,
-                    _brain_policy(conn, POLICIES[name](config), market, predictions, cache, terms),
+                    _policy(conn, config, name, market, predictions, cache, terms),
                     records,
                     terms,
                     start_gold,
@@ -340,6 +349,73 @@ def _terms(conn: sqlite3.Connection, config: Config, market: Market) -> Terms:
         vendor=lambda item_key: vendor.get(item_id_of(item_key), 0),
         cheapest_ask=cheapest_ask,
     )
+
+
+def _policy(
+    conn: sqlite3.Connection,
+    config: Config,
+    name: str,
+    market: Market,
+    predictions: Sequence[Prediction],
+    cache: FairValueCache,
+    terms: Terms,
+) -> BuyPolicy:
+    if name in BUY_UNDER_POLICIES:
+        # Graded with the Sell way the Brain leaves off (#173).
+        config = replace(config, buy_under_sell_way=True)
+        checked = BUY_UNDER_POLICIES[name]
+        return _buy_under_policy(conn, config, market, predictions, cache, terms, checked)
+    return _brain_policy(conn, POLICIES[name](config), market, predictions, cache, terms)
+
+
+def _buy_under_policy(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    cache: FairValueCache,
+    terms: Terms,
+    checked: bool,
+) -> BuyPolicy:
+    """The Buy Unders as standing orders (#173): at each Scan, the previous Scan's Sell and
+    Vendor ways take other players' Listings up now (`take_under`, `checked` or not) while
+    the gold lasts. A Sell way posts what it takes; a Vendor way vendors it at once. Craft
+    and Disenchant ways are left out: their outputs and mats aren't simulated."""
+    standing: list[BuyUnder] = []
+
+    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
+        offers = supply_at(conn, market, at, others_only=True)
+        buys = []
+        for b in standing:
+            if b.item_key is None or b.item_key in posted:
+                continue
+            if b.way not in (Action.SELL, Action.VENDOR):
+                continue
+            taken = take_under(b, offers.get(b.item_key, []), config, gold, checked)
+            if taken is None:
+                continue
+            if taken.post_at is None:
+                back = taken.units * terms.vendor(b.item_key)
+                buys.append(Buy(b.item_key, 0, taken.cost, 0, back=back, way=b.way))
+            else:
+                buys.append(Buy(b.item_key, taken.units, taken.cost, taken.post_at, way=b.way))
+            gold -= buys[-1].cost - buys[-1].back
+        cache.start_pass()
+        m = recommend_market(
+            conn,
+            config,
+            market,
+            predictions,
+            at,
+            as_of=at,
+            fair_value_cache=cache,
+            paid=False,
+            loot_alert=False,
+        )
+        standing[:] = m.buy_under
+        return buys
+
+    return policy
 
 
 def _brain_policy(

@@ -588,7 +588,10 @@ class BuyUnder:
     `units` is how many units it's good for, None for no limit. `seen` is how many
     distinct Scans in the last `window_days` saw another player's Listing at or under it,
     and `listed_now` whether the latest one did. A Craft way names its recipe, output and
-    crafter, a Disenchant way its disenchanter and the expected mats of one Disenchant."""
+    crafter, a Disenchant way its disenchanter and the expected mats of one Disenchant.
+    A Sell way carries `post_at`, the price it was valued at: a Listing under the Buy Under
+    is only worth buying while nothing else is listed under that (#173, `take_under`). Only
+    the Backtest turns the Sell way on (`buy_under_sell_way`, ADR-0019)."""
 
     item_key: str | None
     price: int
@@ -603,6 +606,7 @@ class BuyUnder:
     disenchanter: str | None = None
     mats: tuple[MatYield, ...] = ()
     group: Group | None = None
+    post_at: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1155,6 +1159,7 @@ class _WayOut:
     plan: "_Plan | None" = None  # a Craft way's
     disenchanter: str | None = None  # a Disenchant way's, with the expected mats of one
     mats: tuple[MatYield, ...] = ()
+    post_at: int | None = None  # a Sell way's: the price one unit posts at
 
 
 def _buy_unders(
@@ -1205,6 +1210,7 @@ def _buy_unders(
             out.disenchanter,
             out.mats,
             group,
+            out.post_at,
         )
         result.append((net - price, buy))
 
@@ -1220,7 +1226,7 @@ def _buy_unders(
         add(
             item_key,
             None,
-            _way_out(item_key, valuer, config, sources),
+            _way_out(item_key, valuer, config, sources, sell=config.buy_under_sell_way),
             valuer.effort(item_key),
             cheapest,
         )
@@ -1235,6 +1241,51 @@ def _buy_unders(
         add(None, group, _disenchant_way(disenchanter, expected, sources, config), effort, cheapest)
     result.sort(key=lambda pair: -pair[0])
     return [buy for _, buy in result]
+
+
+@dataclass(frozen=True)
+class TakenUnder:
+    """What a Buy Under takes of the Listings up: the units, what they cost, and the price
+    a Sell way posts them at (None for any other way)."""
+
+    units: int
+    cost: int
+    post_at: int | None
+
+
+def take_under(
+    buy: BuyUnder,
+    offers: Supply,
+    config: Config,
+    gold: float = math.inf,
+    checked: bool = True,
+) -> TakenUnder | None:
+    """Other players' `offers` a Buy Under takes, cheapest first: those at or under it, up
+    to its units and the `gold`. A Sell way posts 1c under the cheapest Listing left, never
+    over the `post_at` it was valued at. `checked`, it takes nothing if that Listing is
+    under its `post_at`: a Listing under a standing price turns up mostly when the market
+    is falling, and then the resale price has fallen too (#173). None if it takes nothing."""
+    cap = math.inf if buy.units is None else buy.units
+    taken: Supply = []
+    units, cost = 0, 0
+    for unit, quantity in sorted(offers):
+        if unit > buy.price or units >= cap:
+            break
+        n = int(min(quantity, cap - units, (gold - cost) // unit))
+        if n <= 0:
+            break
+        taken.append((unit, n))
+        units += n
+        cost += n * unit
+    if not units:
+        return None
+    if buy.post_at is None:
+        return TakenUnder(units, cost, None)
+    left = cheapest_without(offers, taken)
+    if checked and left is not None and left < buy.post_at:
+        return None
+    post_at = buy.post_at if left is None else min(buy.post_at, left - config.post_undercut_copper)
+    return TakenUnder(units, cost, post_at)
 
 
 def _nothing_held(valuer: "_Valuer", plans: list["_Plan"], config: Config) -> "_Sources":
@@ -1413,31 +1464,35 @@ def _mats_value(
 
 
 def _way_out(
-    item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None" = None
+    item_key: str,
+    valuer: "_Valuer",
+    config: Config,
+    sources: "_Sources | None" = None,
+    sell: bool = True,
 ) -> _WayOut | None:
     """The best of an Item Key's ways out for one more unit, or None without any: Vendor,
-    Sell, or with `sources` a Craft it's a reagent of or Disenchant. A way with no units
-    left isn't one.
+    Sell (unless not `sell`), or with `sources` a Craft it's a reagent of or Disenchant. A
+    way with no units left isn't one.
 
     The Valuer remembers it for the pass (#141): the Buy Unders, the Loot Alert and the
     Flips to Disenchant ask ~26k times, and the Disenchant and Craft ways ask again
     inside. Nothing the answer reads changes while the Valuer is alive: a Valuer with
     other units held or bought is a new one (`after`), and these `sources` are never
     committed to. The entry holds `sources` and `config`, so neither id is reused."""
-    key = (item_key, None if sources is None else id(sources))
+    key = (item_key, None if sources is None else id(sources), sell)
     known = valuer.ways_out.get(key)
     if known is not None and known[0] is sources and known[1] is config:
         return known[2]
-    out = _best_way_out(item_key, valuer, config, sources)
+    out = _best_way_out(item_key, valuer, config, sources, sell)
     valuer.ways_out[key] = (sources, config, out)
     return out
 
 
 def _best_way_out(
-    item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None"
+    item_key: str, valuer: "_Valuer", config: Config, sources: "_Sources | None", sell: bool
 ) -> _WayOut | None:
     """`_way_out` worked out afresh, with nothing remembered."""
-    ways = [_sell_way(item_key, valuer, config)]
+    ways = [_sell_way(item_key, valuer, config) if sell else None]
     vendor = valuer.vendor.get(item_id_of(item_key))
     if vendor is not None:
         ways.append(_WayOut(vendor, Action.VENDOR, None))
@@ -1505,7 +1560,7 @@ def _sell_way(item_key: str, valuer: "_Valuer", config: Config) -> _WayOut | Non
         return None
     lost = _flip_queue(valuer.queue(item_key, flips=True), demand, config).lost(held)
     value = post_at * (1 - valuer.cut) - valuer.effort(item_key) - lost
-    return _WayOut(value, Action.SELL, room)
+    return _WayOut(value, Action.SELL, room, post_at=math.floor(post_at))
 
 
 def _under_margin(net: float, config: Config) -> int:
@@ -2126,10 +2181,10 @@ class _Valuer:
         # The cheapest of the player's own Listings by Item Key. `supply` and `others`
         # don't change, so every Valuer `after` this one shares it (#141).
         self._own_cheapest: dict[str, int | None] = {} if own_cheapest is None else own_cheapest
-        # `_way_out`'s answers by (Item Key, id of its Sources), with the Sources and
-        # Config they were for.
+        # `_way_out`'s answers by (Item Key, id of its Sources, whether Sell counts), with
+        # the Sources and Config they were for.
         self.ways_out: dict[
-            tuple[str, int | None], tuple[_Sources | None, Config, _WayOut | None]
+            tuple[str, int | None, bool], tuple[_Sources | None, Config, _WayOut | None]
         ] = {}
 
     def after(self, bought: dict[str, Supply], held: Mapping[str, int] | None = None) -> "_Valuer":

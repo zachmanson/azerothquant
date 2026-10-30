@@ -37,7 +37,15 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from brain.archive import Archive, ArchivedScan
-from brain.backtest import POLICIES, START_GOLD, MarketBacktest, Simulation, Trade, backtest
+from brain.backtest import (
+    BUY_UNDER_POLICIES,
+    POLICIES,
+    START_GOLD,
+    MarketBacktest,
+    Simulation,
+    Trade,
+    backtest,
+)
 from brain.beta_prior import BetaPrior, beta_prior
 from brain.config import (
     APP_FOLDER,
@@ -600,6 +608,13 @@ def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float
             f"{name}: sold out in week 1 {_trades_line(split.sold_out_in_week_1)}; "
             f"relisted {_trades_line(split.relisted)}; the rest {_trades_line(split.rest)}\n"
         )
+        if name in BUY_UNDER_POLICIES:
+            # The pass bar is on the Sell way: a Vendor way can't lose this way (#173).
+            ways = [
+                f"{way} {_trades_line([t for t in sim.trades if t.way is way])}"
+                for way in (Action.SELL, Action.VENDOR)
+            ]
+            splits.append(f"{name} by way: {'; '.join(ways)}\n")
     scans = "Scan" if m.scans == 1 else "Scans"
     return (
         f"{_graded_title(m.market)}\n"
@@ -1519,13 +1534,16 @@ def watch_step(
         watcher.retry(path, now=clock())
 
 
+BACKTEST_POLICIES = [*POLICIES, *BUY_UNDER_POLICIES]
+
+
 def _policies(text: str) -> list[str]:
     """`--policy`'s comma-separated Backtest policies."""
     names = [name.strip() for name in text.split(",") if name.strip()]
-    unknown = [name for name in names if name not in POLICIES]
+    unknown = [name for name in names if name not in BACKTEST_POLICIES]
     if unknown or not names:
         raise argparse.ArgumentTypeError(
-            f"unknown policy {', '.join(unknown)}; pick from {', '.join(POLICIES)}"
+            f"unknown policy {', '.join(unknown)}; pick from {', '.join(BACKTEST_POLICIES)}"
         )
     return names
 
@@ -1574,7 +1592,7 @@ def main(argv: list[str] | None = None) -> int:
         "--policy",
         default="brain",
         type=_policies,
-        help=f"comma-separated, of {', '.join(POLICIES)} (default brain)",
+        help=f"comma-separated, of {', '.join(BACKTEST_POLICIES)} (default brain)",
     )
     backtesting.add_argument(
         "--start-gold",

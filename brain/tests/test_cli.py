@@ -2264,10 +2264,24 @@ def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
     assert "Flips to Disenchant not simulated." in text
 
 
+def test_backtest_splits_a_buy_under_policys_trades_by_way(tmp_path):
+    # #173: the pass bar is on the Sell way, so a Vendor way's sure profit can't hide it.
+    config = _three_linen_held(tmp_path)
+
+    text = run_backtest(
+        config, since=None, until=None, policies=["brain", "buyunder"], start_gold=400_000
+    )
+
+    by_way = [line for line in text.splitlines() if "by way" in line]
+    assert by_way == ["buyunder by way: Sell 0 made 0c on 0c spent; Vendor 0 made 0c on 0c spent"]
+
+
 @pytest.mark.parametrize("policies", ["brain,nope", ","])
 def test_backtest_refuses_a_policy_it_does_not_know(policies, capsys):
     with pytest.raises(SystemExit) as refused:
         main(["backtest", "--policy", policies])
 
     assert refused.value.code == 2
-    assert "pick from brain, relaxed" in capsys.readouterr().err
+    assert "pick from brain, relaxed, uncapped, buyunder, buyunder_unchecked" in (
+        capsys.readouterr().err
+    )

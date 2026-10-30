@@ -103,7 +103,8 @@ _HEADER = (
     "-- crafter. A Disenchant way names its disenchanter and the expected mats of one\n"
     "-- Disenchant as mats = { { itemKey, quantity } }. A Disenchant source group's entry\n"
     '-- has no itemKey but group = { quality, class = "armor"|"weapon", minLevel, maxLevel }:\n'
-    "-- the most to pay for any item in it that can be Disenchanted.\n"
+    "-- the most to pay for any item in it that can be Disenchanted. A Sell way (off but in\n"
+    "-- the Backtest) has postAt: worth buying only while nothing else is listed under it.\n"
     "-- A Flip to Disenchant's row (action Disenchant on the shoppingList, no itemKey) has\n"
     "-- disenchant = { group, disenchanter, mats, buys = { { itemKey, price } } }: the\n"
     "-- group it buys, as a Buy Under's, and the Listings it buys, cheapest first.\n"
@@ -345,6 +346,7 @@ def _buy_under(buy: BuyUnder) -> dict[str, object]:
         "output": buy.output,
         "crafter": buy.crafter,
         "disenchanter": buy.disenchanter,
+        "postAt": buy.post_at,
     }
     out |= {key: value for key, value in optional.items() if value is not None}
     if buy.mats:

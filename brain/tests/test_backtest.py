@@ -338,6 +338,65 @@ def test_the_brains_risk_caps_are_on_its_simulated_stake_and_uncapped_has_none(d
     assert (uncapped.units, uncapped.price) == (5, 999)
 
 
+ORE_ITEM = "item:2770::::::::20:1490"
+
+
+@pytest.mark.parametrize(
+    ("dump", "policy", "linen"),
+    [
+        # Nothing else under the 9s 99c it was valued at: bought, posted at that.
+        (False, "buyunder", [(2, 1400, 999)]),
+        (False, "buyunder_unchecked", [(2, 1400, 999)]),
+        # 5 more turned up at 9s 50c: the market moved, so it's left alone, or unchecked
+        # bought and posted 1c under them.
+        (True, "buyunder", []),
+        (True, "buyunder_unchecked", [(2, 1400, 949)]),
+    ],
+)
+def test_the_buy_under_policies_buy_under_the_previous_scans_buy_unders(db, dump, policy, linen):
+    # #173: at T0 + 1 h, Linen has a Sell way (it sold under the 10s) and Ore a Vendor way
+    # (a 10s Vendor Price, so 8s 33c). At T0 + 2 h, 2 Linen at 7s and 3 Ore at 5s are up.
+    ore = {"itemString": ORE_ITEM, "quantity": 3, "buyout": 1500, "timeLeft": 4}
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000), history_row(quantity=5, unit=500)),
+        history_scan(
+            T0 + HOUR, history_row(quantity=18, unit=1000), {**ore, "quantity": 1, "buyout": 500}
+        ),
+        history_scan(
+            T0 + 2 * HOUR,
+            history_row(quantity=16, unit=1000),
+            history_row(quantity=2, unit=700),
+            *([history_row(quantity=5, unit=950)] if dump else []),
+            ore,
+        ),
+    ]
+    read = {
+        "readAt": T0,
+        "realm": REALM,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "bags": [],
+        "vendorPrices": {"2589": 10, "2770": 1000},
+    }
+    import_scans(db, scans, Era.BETA, CONFIG)
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(
+        db, CONFIG, [], policies=(policy,), start_gold=10_000, no_buys_in_last_seconds=0
+    )
+
+    trades = result.runs[policy].trades
+    assert [(t.units, t.cost, t.price) for t in trades if t.way is Action.SELL] == linen
+    [vendored] = [t for t in trades if t.way is Action.VENDOR]
+    assert (vendored.item_key, vendored.units, vendored.cost, vendored.profit()) == (
+        "2770",
+        0,
+        1500,
+        1500,
+    )
+
+
 def test_the_minimum_profit_holds_but_in_the_relaxed_policy(db):
     # #197: the 5 Linen above, posted at 9s 99c, make 31s 45c. A 40s Minimum Profit leaves
     # them off for the Brain and uncapped alike; relaxed loosens every buy-side gate and

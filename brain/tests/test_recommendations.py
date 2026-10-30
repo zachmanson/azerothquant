@@ -579,6 +579,7 @@ def test_a_real_lua_reads_the_buy_unders(tmp_path, lua):
             crafter="Kash-Patel",
         ),
         BuyUnder("2770", 833, Action.VENDOR, units=None, seen=1, window_days=7),
+        BuyUnder("2771", 790, Action.SELL, units=16, seen=2, window_days=7, post_at=999),
     ]
     file = tmp_path / FILE_NAME
     file.write_text(
@@ -591,12 +592,13 @@ def test_a_real_lua_reads_the_buy_unders(tmp_path, lua):
         file,
         'for _, b in ipairs(r.recommendations["Quel\'Thalas"].Horde.buyUnder) do '
         "print(b.itemKey, b.price, b.way, b.units, b.seen, b.windowDays, b.listedNow, "
-        "b.recipe, b.output, b.crafter) end",
+        "b.recipe, b.output, b.crafter, b.postAt) end",
     )
 
     assert out.splitlines() == [
-        "2589	2070	Craft	12	14	7	true	2963	2996	Kash-Patel",
-        "2770	833	Vendor	nil	1	7	nil	nil	nil	nil",
+        "2589	2070	Craft	12	14	7	true	2963	2996	Kash-Patel	nil",
+        "2770	833	Vendor	nil	1	7	nil	nil	nil	nil	nil",
+        "2771	790	Sell	16	2	7	nil	nil	nil	nil	999",
     ]
 
 

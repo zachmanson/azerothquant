@@ -832,7 +832,7 @@ def test_a_way_out_asked_again_in_a_pass_is_the_one_worked_out_afresh(db, monkey
     with monkeypatch.context() as m:
         m.setattr(
             "brain.recommend._way_out",
-            lambda key, v, c, s=None: recommend_module._best_way_out(key, v, c, s),
+            lambda key, v, c, s=None, sell=True: recommend_module._best_way_out(key, v, c, s, sell),
         )
         expected = {
             (key, s): recommend_module._way_out(key, valuer, config, sources if s else None)
