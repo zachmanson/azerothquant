@@ -69,6 +69,12 @@ POLICIES: dict[str, Callable[[Config], Config]] = {
 # The Buy Unders as standing orders (#173), with the price-moved test or without it.
 BUY_UNDER_POLICIES: dict[str, bool] = {"buyunder": True, "buyunder_unchecked": False}
 
+# A player flipping with Auctionator, the Dec 2 baseline (#196, ADR-0039).
+AUCTIONATOR = "auctionator"
+# Auctionator has no cap of its own; a careful player spreads the Stake over 5 Item Keys
+# or more (ADR-0039's #196 note).
+AUCTIONATOR_STAKE_SHARE = 0.2
+
 
 @dataclass(frozen=True)
 class Buy:
@@ -360,6 +366,8 @@ def _policy(
     cache: FairValueCache,
     terms: Terms,
 ) -> BuyPolicy:
+    if name == AUCTIONATOR:
+        return _auctionator_policy(conn, market, terms)
     if name in BUY_UNDER_POLICIES:
         # Graded with the Sell way the Brain leaves off (#173).
         config = replace(config, buy_under_sell_way=True)
@@ -416,6 +424,63 @@ def _buy_under_policy(
         return buys
 
     return policy
+
+
+def _auctionator_policy(conn: sqlite3.Connection, market: Market, terms: Terms) -> BuyPolicy:
+    """A player flipping with Auctionator (#196): Flips to Sell only, of the Listings at
+    an Item Key's cheapest ask when posting 1c under its next-lowest ask still beats it
+    after the cut and one Deposit (stricter than the spread alone: the cut is on the post).
+    Up to a fifth of the Stake each, most profit first while the gold lasts, in whole
+    Listings, smallest first: the last Item Key gets the ones the gold left still buys."""
+
+    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
+        cap = AUCTIONATOR_STAKE_SHARE * (gold + tied_up)
+        options = []
+        for item_key, offers in supply_at(conn, market, at, others_only=True).items():
+            if item_key in posted:
+                continue
+            cheapest = min(unit for unit, _ in offers)
+            above = [unit for unit, _ in offers if unit > cheapest]
+            if not above:
+                continue
+            post_at = min(above) - 1
+            margin = post_at * (1 - terms.cut) - terms.deposit(item_key) - cheapest
+            if margin <= 0:
+                continue
+            listings = sorted(quantity for unit, quantity in offers if unit == cheapest)
+            option = _AuctionatorOption(item_key, cheapest, post_at, margin, listings)
+            if option.units(cap):
+                options.append(option)
+        buys = []
+        for option in sorted(options, key=lambda o: -o.margin * o.units(cap)):
+            units = option.units(min(cap, gold))
+            if units:
+                buys.append(Buy(option.item_key, units, units * option.ask, option.post_at))
+                gold -= buys[-1].cost
+        return buys
+
+    return policy
+
+
+@dataclass(frozen=True)
+class _AuctionatorOption:
+    """An Item Key's Listings at its cheapest `ask` (their quantities, smallest first), and
+    the `margin` a unit makes posted at `post_at`."""
+
+    item_key: str
+    ask: int
+    post_at: int
+    margin: float
+    listings: list[int]
+
+    def units(self, spend: float) -> int:
+        """The units of the Listings, smallest first, that `spend` buys whole."""
+        units = 0
+        for quantity in self.listings:
+            if (units + quantity) * self.ask > spend:
+                break
+            units += quantity
+        return units
 
 
 def _brain_policy(

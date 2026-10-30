@@ -2276,12 +2276,95 @@ def test_backtest_splits_a_buy_under_policys_trades_by_way(tmp_path):
     assert by_way == ["buyunder by way: Sell 0 made 0c on 0c spent; Vendor 0 made 0c on 0c spent"]
 
 
+def _auctionator_loses(tmp_path):
+    """Auctionator buys 2 Linen at 2s at the first Scan, and they never sell, so it
+    loses. The Brain, with no Sale Event yet, buys nothing."""
+    config = config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA))
+    linen = "item:2589::::::::20:1490"
+
+    def scan(at, *rows):
+        return {
+            "requestedAt": at,
+            "realm": MARKET.realm,
+            "faction": "Alliance",
+            "character": "Kash-Patel",
+            "listings": [
+                {"itemString": linen, "quantity": q, "buyout": q * unit, "timeLeft": 4}
+                for q, unit in rows
+            ],
+        }
+
+    read = {
+        "readAt": 1_790_000_000,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "faction": "Alliance",
+        "money": 0,
+        "vendorPrices": {2589: 10},
+        "bags": [],
+    }
+    with closing(open_history(config.history_path)) as conn:
+        scans = [scan(1_790_000_000, (20, 1000), (2, 200)), scan(1_790_000_000 + 8 * 86400)]
+        import_scans(conn, scans, Era.BETA, config)
+        import_character_reads(conn, [read], Era.BETA, config)
+    return config
+
+
+AUCTIONATOR_LOSES_GAP = (
+    "Dec 2 gap, (brain - auctionator) / |auctionator| on P&L vendor mark: +100.0% at x1, "
+    "+100.0% at x0.65, +100.0% at x1.2"
+)
+
+
+def test_backtest_prints_the_dec_2_gap_between_the_brain_and_auctionator(tmp_path):
+    # #196, ADR-0039: the Brain beats Auctionator by all of Auctionator's loss, at every
+    # grade.
+    config = _auctionator_loses(tmp_path)
+
+    text = run_backtest(
+        config, since=None, until=None, policies=["brain", "auctionator"], start_gold=400_000
+    )
+
+    assert AUCTIONATOR_LOSES_GAP in text
+
+
+def test_backtest_takes_the_policy_option_more_than_once(tmp_path, capsys):
+    _auctionator_loses(tmp_path)
+    config_file = _config_file(tmp_path)
+
+    args = [
+        "--config",
+        str(config_file),
+        "backtest",
+        "--policy",
+        "brain",
+        "--policy",
+        "auctionator",
+    ]
+    assert main(args) == 0
+
+    assert AUCTIONATOR_LOSES_GAP in capsys.readouterr().out
+
+
+def test_backtest_has_no_dec_2_gap_when_auctionator_made_nothing(tmp_path):
+    config = _three_linen_held(tmp_path)
+
+    text = run_backtest(
+        config, since=None, until=None, policies=["brain", "auctionator"], start_gold=400_000
+    )
+
+    assert (
+        "Dec 2 gap, (brain - auctionator) / |auctionator| on P&L vendor mark: none at x1, "
+        "none at x0.65, none at x1.2 (auctionator made 0c)"
+    ) in text
+
+
 @pytest.mark.parametrize("policies", ["brain,nope", ","])
 def test_backtest_refuses_a_policy_it_does_not_know(policies, capsys):
     with pytest.raises(SystemExit) as refused:
         main(["backtest", "--policy", policies])
 
     assert refused.value.code == 2
-    assert "pick from brain, relaxed, uncapped, buyunder, buyunder_unchecked" in (
+    assert "pick from brain, relaxed, uncapped, buyunder, buyunder_unchecked, auctionator" in (
         capsys.readouterr().err
     )

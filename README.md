@@ -20,7 +20,7 @@ You always do the buying and selling yourself. The Addon never buys, bids or tak
 - **Guild Scan Pool:** guildies with a code share their Scans, so everyone's Brain learns faster. Only the Scans are shared, nothing about your characters.
 - **Beta Prior:** early in Live, each row shows what the item went for on Beta.
 - **Post button and tooltips:** post the selected row at the right price, and an `AQ:` line on item tooltips.
-- **Grading:** the Brain grades its own picks against Auctionator and an emulated TSM, grades the Flips you made, and backtests buy-side changes on past sales.
+- **Grading:** the Brain grades the Flips you made, and backtests buy-side changes and its own picks against an Auctionator player on past sales.
 - **One-file install:** a single `AzerothQuantBrain.exe` installs the Brain and the Addon, starts with Windows, and updates both when you run a newer one.
 
 ## More

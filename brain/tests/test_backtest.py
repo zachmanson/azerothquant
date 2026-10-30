@@ -246,9 +246,9 @@ def history_scan(at, *rows):
     }
 
 
-def history_row(quantity=1, unit=100):
+def history_row(quantity=1, unit=100, item_id="2589"):
     return {
-        "itemString": LINEN_ITEM,
+        "itemString": f"item:{item_id}::::::::20:1490",
         "quantity": quantity,
         "buyout": quantity * unit,
         "timeLeft": 4,
@@ -436,6 +436,142 @@ def test_the_minimum_profit_holds_but_in_the_relaxed_policy(db):
     assert result.runs["brain"].trades == []
     assert result.runs["uncapped"].trades == []
     assert [t.units for t in result.runs["relaxed"].trades] == [5]
+
+
+# --- the Auctionator baseline (#196, ADR-0039) ---
+
+SELLER_READ = {
+    "readAt": T0,
+    "realm": REALM,
+    "character": "Kash-Patel",
+    "faction": "Alliance",
+    "money": 0,
+    "bags": [],
+    "vendorPrices": {"2589": 10, "2770": 10},
+}
+
+
+def auctionator_trades(db, scans, start_gold=10_000, config=CONFIG, read=SELLER_READ):
+    import_scans(db, scans, Era.BETA, config)
+    import_character_reads(db, [read], Era.BETA, config)
+    [result] = backtest(
+        db,
+        config,
+        [],
+        policies=("auctionator",),
+        start_gold=start_gold,
+        no_buys_in_last_seconds=0,
+    )
+    return [(t.item_key, t.units, t.cost, t.price) for t in result.runs["auctionator"].trades]
+
+
+def test_auctionator_buys_the_cheapest_ask_and_posts_1c_under_the_next_lowest(db):
+    # At T0, Linen has one ask, so nothing under a next-lowest. At T0 + 1 h, 2 Listings of
+    # 1 at 2s sit far under the 10s: both are bought and posted at 9s 99c.
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(
+            T0 + HOUR,
+            history_row(quantity=18, unit=1000),
+            history_row(quantity=1, unit=200),
+            history_row(quantity=1, unit=200),
+        ),
+    ]
+
+    assert auctionator_trades(db, scans) == [(LINEN, 2, 400, 999)]
+
+
+@pytest.mark.parametrize(("cheapest", "bought"), [(800, [("2770", 1, 800, 999)]), (900, [])])
+def test_auctionator_buys_only_when_the_next_ask_beats_the_cheapest_by_the_cut_and_deposit(
+    db, cheapest, bought
+):
+    # Posted at 9s 99c, an Ore brings 9s 49.05c after the 5% cut, less a 50c Deposit:
+    # 8s 99.05c. That beats an 8s ask, but not a 9s one, though the cut alone would.
+    config = replace(CONFIG, ah_deposit_share=1.0, ah_deposit_min_copper=0)
+    read = {**SELLER_READ, "vendorPrices": {"2589": 10, "2770": 50}}
+    scans = [
+        history_scan(
+            T0,
+            history_row(quantity=5, unit=1000, item_id="2770"),
+            history_row(unit=cheapest, item_id="2770"),
+        )
+    ]
+
+    assert auctionator_trades(db, scans, config=config, read=read) == bought
+
+
+def test_auctionator_spends_at_most_a_fifth_of_its_stake_on_an_item_key(db):
+    # From 10s, a fifth is 2s: 2 of the 3 Linen at 80c. Then 8s 40c of gold and 1s 60c
+    # posted still make a 10s Stake, so 2 of the 3 Ore at 90c fit too (not on the gold
+    # alone: a fifth of 8s 40c is 1s 68c).
+    scans = [
+        history_scan(
+            T0, history_row(quantity=5, unit=1000), *[history_row(unit=80) for _ in range(3)]
+        ),
+        history_scan(
+            T0 + HOUR,
+            history_row(quantity=5, unit=1000, item_id="2770"),
+            *[history_row(unit=90, item_id="2770") for _ in range(3)],
+        ),
+    ]
+
+    assert auctionator_trades(db, scans, start_gold=1000) == [
+        (LINEN, 2, 160, 999),
+        ("2770", 2, 180, 999),
+    ]
+
+
+def test_auctionator_spends_its_gold_most_profit_first_and_the_last_on_what_fits(db):
+    # 6 Item Keys each have 2 at 1s under a next ask of 10s to 15s, within a fifth of 11s:
+    # the 5 with the most profit take 10s, and the 1s left buys 1 of the Linen under 10s.
+    ids = ["2589", "2770", "2771", "2772", "2775", "2776"]
+    rows = [
+        row
+        for i, item_id in enumerate(ids)
+        for row in (
+            history_row(unit=100, item_id=item_id),
+            history_row(unit=100, item_id=item_id),
+            history_row(unit=1000 + 100 * i, item_id=item_id),
+        )
+    ]
+
+    trades = auctionator_trades(db, [history_scan(T0, *rows)], start_gold=1100)
+
+    assert [(item_key, units, price) for item_key, units, _, price in trades] == [
+        ("2776", 2, 1499),
+        ("2775", 2, 1399),
+        ("2772", 2, 1299),
+        ("2771", 2, 1199),
+        ("2770", 2, 1099),
+        (LINEN, 1, 999),
+    ]
+
+
+def test_auctionator_leaves_its_gold_for_others_than_the_item_keys_it_still_has_posted(db):
+    # The 2 Linen it bought at T0 are still up in the Scan at T0 + 1 h (the Scans don't
+    # show our buys), with the most profit, but the 8s left all go on the other 4.
+    others = ["2770", "2771", "2772", "2775"]
+    linen = [history_row(unit=100), history_row(unit=100), history_row(unit=2000)]
+    scans = [
+        history_scan(T0, *linen),
+        history_scan(
+            T0 + HOUR,
+            *linen,
+            *[
+                row
+                for item_id in others
+                for row in (
+                    history_row(unit=100, item_id=item_id),
+                    history_row(unit=100, item_id=item_id),
+                    history_row(unit=1000, item_id=item_id),
+                )
+            ],
+        ),
+    ]
+
+    trades = auctionator_trades(db, scans, start_gold=1000)
+
+    assert sorted(item_key for item_key, *_ in trades) == ["2589", *others]
 
 
 def test_the_lots_split_into_sold_out_in_week_1_relisted_and_the_rest():

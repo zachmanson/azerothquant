@@ -28,3 +28,14 @@ The 0.65x and 1.2x grades are shown beside it, so a lead that only holds at 1.2x
 - No ablation table any more. A feature's worth is judged by a Backtest policy with the feature off, when one is wanted.
 - Crafting and how Holdings are handled aren't compared with a baseline: the Backtest's policies only buy.
 - The Beta read on #83 (Brain +51.82g, Auctionator -4273.97g, TSM -5463.67g) stands as a replay result; its logs (`brain/replay-83/`) weren't kept.
+
+## The Auctionator policy's post cap (#196)
+
+Auctionator has no cap of its own, but the old replay stand-in posting everything is most of why it lost by thousands on #83's Beta read, and a player flipping by hand doesn't put all their gold into one Item Key. The `auctionator` policy spends at most **a fifth of its Stake** (gold plus the units still posted at cost, as the Brain's risk caps use) on one Item Key at a Scan, in whole Listings. It's a spread-it-out rule that needs no sale data, which Auctionator doesn't have, and it grows with the gold from 40g to Live. When the gold runs short, the last Item Key gets the Listings it still affords (smallest first), as a player would buy what they can. A Listing bigger than the cap on its own is skipped.
+
+- **A fixed unit cap (a stack of 20).** Simple, but 20 copper herbs and 20 epics are very different bets, and it doesn't grow with the gold.
+- **A tenth of the Stake.** At 40g that's 4g an Item Key, which skips most Flips worth doing, so the baseline would lose by doing too little rather than by its rule.
+
+The buy test takes the cut on the post (1c under the next-lowest ask), not on the spread, and charges one Deposit: a hair stricter than "under by more than the cut plus the Deposit", and what a player reading Auctionator's prices would work out.
+
+`brain backtest --policy brain --policy auctionator` (or `--policy brain,auctionator`) prints the gap line.

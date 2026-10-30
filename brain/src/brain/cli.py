@@ -38,6 +38,7 @@ from pathlib import Path
 
 from brain.archive import Archive, ArchivedScan
 from brain.backtest import (
+    AUCTIONATOR,
     BUY_UNDER_POLICIES,
     POLICIES,
     START_GOLD,
@@ -621,9 +622,40 @@ def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float
         f"Backtested {m.scans} {scans} from {_money(start_gold)}, no buys in the last 7 days\n"
         f"{table}\n"
         + "".join(splits)
+        + _gap_line(m, low, high)
         + _calibration_line("Grader", "sold", m.grader_calibration)
         + _calibration_line("Sell Rate", "Probable Sales", m.sell_rate_calibration)
         + "Flips to Disenchant not simulated.\n"
+    )
+
+
+def _gap_line(m: MarketBacktest, low: float, high: float) -> str:
+    """The number the Dec 2 checkpoint reads (ADR-0039): how far the Brain's P&L at the
+    vendor mark is above Auctionator's, as a share of Auctionator's, at the 1x grade and
+    the grader's bounds (x1, then low and high). To 0.1%, since its bands are at 5% and
+    10%. None at a grade where Auctionator made 0c. Nothing unless both ran."""
+    if "brain" not in m.runs or AUCTIONATOR not in m.runs:
+        return ""
+    (brain_low, brain_high), (auctionator_low, auctionator_high) = (
+        m.bounds["brain"],
+        m.bounds[AUCTIONATOR],
+    )
+    grades = [
+        ("x1", m.runs["brain"], m.runs[AUCTIONATOR]),
+        (f"x{low:g}", brain_low, auctionator_low),
+        (f"x{high:g}", brain_high, auctionator_high),
+    ]
+    gaps = []
+    for grade, brain, auctionator in grades:
+        if not auctionator.profit():
+            gaps.append(f"none at {grade}")
+            continue
+        gap = (brain.profit() - auctionator.profit()) / abs(auctionator.profit())
+        gaps.append(f"{gap:+.1%} at {grade}")
+    made_nothing = any(gap.startswith("none") for gap in gaps)
+    return (
+        f"Dec 2 gap, (brain - {AUCTIONATOR}) / |{AUCTIONATOR}| on P&L vendor mark: "
+        f"{', '.join(gaps)}{f' ({AUCTIONATOR} made 0c)' if made_nothing else ''}\n"
     )
 
 
@@ -1534,7 +1566,7 @@ def watch_step(
         watcher.retry(path, now=clock())
 
 
-BACKTEST_POLICIES = [*POLICIES, *BUY_UNDER_POLICIES]
+BACKTEST_POLICIES = [*POLICIES, *BUY_UNDER_POLICIES, AUCTIONATOR]
 
 
 def _policies(text: str) -> list[str]:
@@ -1590,9 +1622,9 @@ def main(argv: list[str] | None = None) -> int:
     backtesting.add_argument("--until", type=date.fromisoformat, help="last day, YYYY-MM-DD")
     backtesting.add_argument(
         "--policy",
-        default="brain",
+        action="extend",
         type=_policies,
-        help=f"comma-separated, of {', '.join(BACKTEST_POLICIES)} (default brain)",
+        help=f"comma-separated or repeated, of {', '.join(BACKTEST_POLICIES)} (default brain)",
     )
     backtesting.add_argument(
         "--start-gold",
@@ -1692,7 +1724,12 @@ def _run_command(args: argparse.Namespace, config_path: Path) -> int:
         return _profit(config, args.since, args.until)
     if args.command == "backtest":
         return _backtest(
-            config, args.since, args.until, args.policy, round(args.start_gold * 10000)
+            config,
+            args.since,
+            args.until,
+            # Defaulted here: `extend` would add to a default list, not replace it.
+            args.policy or ["brain"],
+            round(args.start_gold * 10000),
         )
     if args.command == "disenchants":
         return _disenchants(config)

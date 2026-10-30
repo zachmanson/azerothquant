@@ -163,7 +163,7 @@ _Avoid_: craft log, craft event
 ## Decisions
 
 **Backtest**:
-A policy trading a Market's past Scans in time order on its own simulated gold (40g by default), graded by the Sale Records after each buy: a post sells to a later one at or above its price, our cheapest units first; a lot unsold after a week is relisted once under the cheapest ask, then vendored. It reports gold made at the vendor mark and the market mark. It's the yardstick for buy-side changes (ADR-0032); `brain backtest` runs it, with the Brain under a config as each policy (`brain`, `relaxed`).
+A policy trading a Market's past Scans in time order on its own simulated gold (40g by default), graded by the Sale Records after each buy: a post sells to a later one at or above its price, our cheapest units first; a lot unsold after a week is relisted once under the cheapest ask, then vendored. It reports gold made at the vendor mark and the market mark. It's the yardstick for buy-side changes (ADR-0032); `brain backtest` runs it, with the Brain under a config as each policy (`brain`, `relaxed`), and `auctionator`, a player flipping with Auctionator, as the Dec 2 baseline (ADR-0039).
 _Avoid_: replay (ADR-0015's per-Scan grade against Auctionator and TSM, retired by ADR-0039). What it buys aren't Lots: those come from the player's real Purchases
 
 **Candidate Item**:
