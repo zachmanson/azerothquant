@@ -521,6 +521,14 @@ def test_auctionator_spends_at_most_a_fifth_of_its_stake_on_an_item_key(db):
     ]
 
 
+def test_auctionator_buys_at_most_a_stack_of_an_item_key(db):
+    # 30 Listings of 1 Linen at 1c, far under the 10s and well within a fifth of 10s: a
+    # stack of 20 is bought, not all 30.
+    rows = [history_row(quantity=5, unit=1000), *[history_row(unit=1) for _ in range(30)]]
+
+    assert auctionator_trades(db, [history_scan(T0, *rows)]) == [(LINEN, 20, 20, 999)]
+
+
 def test_auctionator_spends_its_gold_most_profit_first_and_the_last_on_what_fits(db):
     # 6 Item Keys each have 2 at 1s under a next ask of 10s to 15s, within a fifth of 11s:
     # the 5 with the most profit take 10s, and the 1s left buys 1 of the Linen under 10s.

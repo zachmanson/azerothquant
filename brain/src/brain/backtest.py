@@ -74,6 +74,9 @@ AUCTIONATOR = "auctionator"
 # Auctionator has no cap of its own; a careful player spreads the Stake over 5 Item Keys
 # or more (ADR-0039's #196 note).
 AUCTIONATOR_STAKE_SHARE = 0.2
+# And no more than a stack: with no sale data it can't tell what sells, so it doesn't
+# buy hundreds of anything (#196: 528 Copper Rods lost 75g in Deposits on Beta).
+AUCTIONATOR_MAX_UNITS = 20
 
 
 @dataclass(frozen=True)
@@ -430,7 +433,7 @@ def _auctionator_policy(conn: sqlite3.Connection, market: Market, terms: Terms) 
     """A player flipping with Auctionator (#196): Flips to Sell only, of the Listings at
     an Item Key's cheapest ask when posting 1c under its next-lowest ask still beats it
     after the cut and one Deposit (stricter than the spread alone: the cut is on the post).
-    Up to a fifth of the Stake each, most profit first while the gold lasts, in whole
+    Up to a fifth of the Stake and a stack each, most profit first while the gold lasts, in whole
     Listings, smallest first: the last Item Key gets the ones the gold left still buys."""
 
     def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
@@ -474,10 +477,11 @@ class _AuctionatorOption:
     listings: list[int]
 
     def units(self, spend: float) -> int:
-        """The units of the Listings, smallest first, that `spend` buys whole."""
+        """The units of the Listings, smallest first, that `spend` buys whole, up to a
+        stack."""
         units = 0
         for quantity in self.listings:
-            if (units + quantity) * self.ask > spend:
+            if (units + quantity) * self.ask > spend or units + quantity > AUCTIONATOR_MAX_UNITS:
                 break
             units += quantity
         return units
