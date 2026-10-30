@@ -4,6 +4,8 @@ kept."""
 
 import dataclasses
 import random
+from collections.abc import Sequence
+from datetime import date, timedelta
 from functools import partial
 
 import pytest
@@ -22,6 +24,7 @@ from brain.history import (
     roll_back_pooled,
     scan_times,
 )
+from brain.predictions import Prediction
 from brain.recommend import _others_lows, _others_lows_as_of, recommend
 
 LINEN = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
@@ -60,12 +63,14 @@ def next_pass_cache(request):
     return lambda: cache
 
 
-def assert_kept_pass_matches_a_fresh_one(conn, config, cache: FairValueCache) -> None:
+def assert_kept_pass_matches_a_fresh_one(
+    conn, config, cache: FairValueCache, predictions: Sequence[Prediction] = ()
+) -> None:
     """One pass with the kept cache, as `brain watch` makes it after an import, must give
     what a pass with nothing kept does."""
-    kept = recommend(conn, config, [], fair_value_cache=cache, why_not=True)
+    kept = recommend(conn, config, predictions, fair_value_cache=cache, why_not=True)
     assert kept
-    assert kept == recommend(conn, config, [], why_not=True)
+    assert kept == recommend(conn, config, predictions, why_not=True)
 
 
 def cheap_flip_scans(rng: random.Random, scans: int) -> list[dict]:
@@ -202,3 +207,66 @@ def test_a_kept_pass_matches_a_fresh_one_when_known_recipes_or_skills_change(db,
     ):
         import_character_reads(db, [read(at + n, **change)], Era.BETA, config)
         assert_kept_pass_matches_a_fresh_one(db, config, cache)
+
+
+def held_prediction(scans: Sequence[dict]) -> Prediction:
+    """A Prediction over the held Linen and Wool, written the day after the last Scan, as
+    the launch ones were on Beta: no Scan after its written day freezes what it held."""
+    written = date.fromtimestamp(scans[-1]["requestedAt"]) + timedelta(days=1)
+    return Prediction(
+        "Cloth", "reason", ("2589", "2592"), "Launch", written, written + timedelta(days=7)
+    )
+
+
+def graded_prediction(scans: Sequence[dict]) -> Prediction:
+    """A Prediction over the held Linen, ended a Sale Horizon before the first Scan: due
+    its Grade on every pass, as none is frozen without a grades.toml."""
+    first = date.fromtimestamp(scans[0]["requestedAt"])
+    return Prediction(
+        "Old cloth",
+        "reason",
+        ("2589",),
+        "Gone",
+        first - timedelta(days=30),
+        first - timedelta(days=20),
+    )
+
+
+def test_a_kept_pass_with_predictions_matches_a_fresh_one(db, config):
+    # #116: what a Prediction held at writing is valued with the kept cache too.
+    rng = random.Random(116)
+    cache = FairValueCache()
+    bags = (item(LINEN, count=4), item(WOOL, count=2, slot=2))
+    import_character_reads(db, [read(T0 - 60, bags=bags)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=6)
+    predictions = [held_prediction(scans), graded_prediction(scans)]
+    for s in scans:
+        import_scans(db, [s], Era.BETA, config)
+        assert_kept_pass_matches_a_fresh_one(db, config, cache, predictions)
+        # A reload with no Scan: what's held changes, so what the Predictions hold too.
+        bags = (item(LINEN, count=rng.randint(1, 9)), item(WOOL, count=rng.randint(0, 3), slot=2))
+        import_character_reads(db, [read(s["requestedAt"] + 1, bags=bags)], Era.BETA, config)
+        assert_kept_pass_matches_a_fresh_one(db, config, cache, predictions)
+
+
+def test_a_pass_with_no_new_scan_loads_no_listings_with_predictions_held(db, config, monkeypatch):
+    # #116: a reload with no new Scan reuses the kept Listings, even for the Valuers that
+    # cost what a Prediction held at writing or Grade one. Without them it took minutes on
+    # Beta.
+    rng = random.Random(116)
+    cache = FairValueCache()
+    import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=6)
+    import_scans(db, scans, Era.BETA, config)
+    predictions = [held_prediction(scans), graded_prediction(scans)]
+    recommend(db, config, predictions, fair_value_cache=cache)
+    loads = []
+    monkeypatch.setattr(
+        "brain.recommend.listings", lambda *args, **kw: loads.append(args) or listings(*args, **kw)
+    )
+    monkeypatch.setattr(
+        "brain.fair_value.listings_by_id", lambda *args, **kw: loads.append(args) or []
+    )
+
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert loads == []

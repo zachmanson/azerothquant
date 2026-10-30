@@ -4404,7 +4404,7 @@ def worth_nothing(*args):
     return 0.0
 
 
-def valued_at_nothing(conn, config, market, held, at, bound=None):
+def valued_at_nothing(conn, config, market, held, at, bound=None, fair_value_cache=None):
     return dict.fromkeys(held, 0.0)
 
 

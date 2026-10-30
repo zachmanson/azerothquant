@@ -785,7 +785,9 @@ def recommend_market(
     spend = _spend(gold, budget)
     # Without `paid`, a past Scan's Lots may rest on what it named (#55), so the own
     # Listings up are at Best Exit Value.
-    paid_lots = market_lots(conn, config, market, predictions, seen) if paid else []
+    paid_lots = (
+        market_lots(conn, config, market, predictions, seen, fair_value_cache) if paid else []
+    )
     if tied_up is None:
         tied_up = _at_cost(_own_units(supply, for_sale), paid_lots, valuer)
     stake = gold + tied_up
@@ -859,11 +861,11 @@ def recommend_market(
         + disenchanted
         + crafting.rows
     )
-    graded = grades(conn, config, market, predictions, now)
+    graded = grades(conn, config, market, predictions, now, fair_value_cache)
     pooled = pooled_return(graded)
     caps = _Caps(gold, config, brake=pooled is not None and pooled < 0)
     bound = {k: _bound(h) for k, h in held.items()}
-    lot_costs = _lot_costs(conn, config, market, active, seen)
+    lot_costs = _lot_costs(conn, config, market, active, seen, fair_value_cache)
     rows = _hold(rows, active, bound, vendor, caps, lot_costs)
     if paid:
         rows = _with_roi(rows, paid_lots, cut, config)
@@ -1570,22 +1572,56 @@ def _under_margin(net: float, config: Config) -> int:
     return math.floor(min(net / (1 + share), net - floor))
 
 
+@dataclass(frozen=True)
+class _HeldAtWriting:
+    """What each Prediction held at writing, for a Market and a Config, kept for the rest
+    of a pass."""
+
+    config: Config
+    by_prediction: dict[Prediction, list[Held]]
+
+
+def _held_this_pass(
+    cache: FairValueCache | None, market: Market, config: Config
+) -> dict[Prediction, list[Held]]:
+    """The Market's `_HeldAtWriting` so far this pass, to add to: a fresh one without a
+    cache or for another Config."""
+    if cache is None:
+        return {}
+    key = (_HeldAtWriting, market)
+    kept = cache.this_pass.get(key)
+    if not isinstance(kept, _HeldAtWriting) or kept.config != config:
+        kept = _HeldAtWriting(config, {})
+        cache.this_pass[key] = kept
+    return kept.by_prediction
+
+
 def held_at_writing(
-    conn: sqlite3.Connection, config: Config, market: Market, predictions: Sequence[Prediction]
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[Held]:
     """The units of each Prediction's Item Keys the Market's Characters held at the start
     of its written day, costed at what their best Action would have brought then, as of
     the latest Scan up to that moment (ADR-0007). Bound units are never Held.
 
     Once the Market has a Scan after its written day, a Prediction's are frozen in
-    grades.toml and read from there from then on (#66)."""
+    grades.toml and read from there from then on (#66). Until then they're costed every
+    pass, so with the pass's `fair_value_cache`: worked out once a pass for each
+    Prediction (again if a caller brings another Config) (#116)."""
     characters = character_markets(conn).get(market, [])
     frozen = load_frozen(config.grades_path, market).held
     times = scan_times(conn, market)
     result = []
+    held_this_pass = _held_this_pass(fair_value_cache, market, config)
     for p in predictions:
         if p.name in frozen:
             result += frozen[p.name]
+            continue
+        if p in held_this_pass:
+            result += held_this_pass[p]
             continue
         at = start_of(p.written)
         held = market_holdings(conn, market, characters, as_of=at)
@@ -1595,11 +1631,12 @@ def held_at_writing(
             if h is None or not h.bags + h.bank:
                 continue
             units = h.bags + h.bank
-            cost = _exit_value(conn, config, market, item_key, units, at)
+            cost = _exit_value(conn, config, market, item_key, units, at, fair_value_cache)
             costed.append(Held(p.name, item_key, units, round(cost)))
         day_passed = times and times[-1] >= start_of(p.written + timedelta(days=1))
         if config.grades_path is not None and day_passed:
             freeze_held(config.grades_path, market, p.name, costed)
+        held_this_pass[p] = costed
         result += costed
     return result
 
@@ -1610,17 +1647,21 @@ def grades(
     market: Market,
     predictions: Sequence[Prediction],
     now: int,
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[Grade]:
     """The Grade of each Prediction a Sale Horizon has passed since it ended, by `now`.
     A Grade is frozen in grades.toml the first time the Market has a Scan at or after its
-    grading moment, and read from there from then on (#66)."""
+    grading moment, and read from there from then on (#66). `fair_value_cache` as in
+    `recommend`."""
     due = [p for p in predictions if ended_at(p) + config.sale_horizon_seconds <= now]
     if not due:
         return []
     frozen = load_frozen(config.grades_path, market).grades
     if all(p.name in frozen for p in due):
         return [frozen[p.name] for p in due]
-    every_lot = prediction_lots(conn, config, market, predictions)
+    every_lot = prediction_lots(
+        conn, config, market, predictions, fair_value_cache=fair_value_cache
+    )
     times = scan_times(conn, market)
     result = []
     for p in due:
@@ -1631,7 +1672,10 @@ def grades(
         settled = settle(p, every_lot, graded_at, auction_cut(market, config))
         # Valued together, so open units that yield the same mats share them (#102).
         open_units = {k: Holding(bags=units) for k, units in settled.open_units.items() if units}
-        open_value = sum(exit_values(conn, config, market, open_units, graded_at).values())
+        values = exit_values(
+            conn, config, market, open_units, graded_at, fair_value_cache=fair_value_cache
+        )
+        open_value = sum(values.values())
         grade = Grade(p.name, graded_at, settled.proceeds, open_value, settled.cost)
         # Once a Scan at or after its grading moment is in, what it rests on is too.
         if config.grades_path is not None and times and times[-1] >= graded_at:
@@ -1646,10 +1690,12 @@ def market_lots(
     market: Market,
     predictions: Sequence[Prediction],
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[Lot]:
     """The Market's Lots, For Use Purchases starting none (ADR-0025). `seen` is the
-    Market's `listings`, when the caller has them already (#105)."""
-    return market_lots_with_crafts(conn, config, market, predictions, seen).lots
+    Market's `listings`, when the caller has them already (#105), and `fair_value_cache`
+    as in `recommend`."""
+    return market_lots_with_crafts(conn, config, market, predictions, seen, fair_value_cache).lots
 
 
 def market_lots_with_crafts(
@@ -1658,12 +1704,18 @@ def market_lots_with_crafts(
     market: Market,
     predictions: Sequence[Prediction],
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> LotsWithCrafts:
     """`market_lots`, and the crafts that opened no Lot for uncosted reagents (#114)."""
-    seen = listings(conn, market) if seen is None else seen
+    if seen is None:
+        seen = (
+            listings(conn, market)
+            if fair_value_cache is None
+            else fair_value_cache.listings(conn, market)
+        )
     market_purchases = purchases(conn, market)
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
-    held = held_at_writing(conn, config, market, predictions)
+    held = held_at_writing(conn, config, market, predictions, fair_value_cache)
     kept = split_purchases(conn, config, market, predictions, market_purchases).kept
     return lots_with_crafts(kept, linked, predictions, held, lot_craft_results(conn, market))
 
@@ -1706,16 +1758,23 @@ def prediction_lots(
     market: Market,
     predictions: Sequence[Prediction],
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> list[Lot]:
     """The Market's Prediction Lots, without working out what any Scan named: other Lots
     never close a Prediction's units, as those before it was written are folded into its
-    held Lot and those after it ended are younger. `seen` as in `market_lots`."""
+    held Lot and those after it ended are younger. `seen` and `fair_value_cache` as in
+    `market_lots`."""
     if not predictions:
         return []
-    seen = listings(conn, market) if seen is None else seen
+    if seen is None:
+        seen = (
+            listings(conn, market)
+            if fair_value_cache is None
+            else fair_value_cache.listings(conn, market)
+        )
     market_purchases = purchases(conn, market)
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
-    held = held_at_writing(conn, config, market, predictions)
+    held = held_at_writing(conn, config, market, predictions, fair_value_cache)
     under = [p for p in market_purchases if bought_under(p, predictions) is not None]
     return lots(under, linked, predictions, held)
 
@@ -1843,13 +1902,14 @@ def _lot_costs(
     market: Market,
     predictions: Sequence[Prediction],
     seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
 ) -> dict[tuple[str, str], list[tuple[float, int]]]:
     """The open units of each Prediction's Lots and what each of them cost, oldest Lot
-    first, by (Prediction, Item Key). `seen` as in `market_lots`."""
+    first, by (Prediction, Item Key). `seen` and `fair_value_cache` as in `market_lots`."""
     if not predictions:
         return {}
     result: dict[tuple[str, str], list[tuple[float, int]]] = {}
-    for lot in prediction_lots(conn, config, market, predictions, seen):
+    for lot in prediction_lots(conn, config, market, predictions, seen, fair_value_cache):
         if lot.open_units:
             result.setdefault((lot.prediction, lot.item_key), []).append(
                 (lot.cost / lot.units, lot.open_units)
@@ -1867,14 +1927,22 @@ def pooled_return(graded: Sequence[Grade]) -> float | None:
 
 
 def _exit_value(
-    conn: sqlite3.Connection, config: Config, market: Market, item_key: str, units: int, at: int
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    item_key: str,
+    units: int,
+    at: int,
+    fair_value_cache: FairValueCache | None = None,
 ) -> float:
     """What `units` of an Item Key would have brought by their best Action, as of the
     latest Scan up to `at`, with nothing on that Scan's Shopping List taken as bought
     (ADR-0017). Vendor Prices are the latest seen,
     since a vendor's price doesn't move, and so are Merchant Costs. Units without enough
-    data to choose an exit count at the Vendor Price, as when Holding them (_hold)."""
-    return exit_values(conn, config, market, {item_key: Holding(bags=units)}, at)[item_key]
+    data to choose an exit count at the Vendor Price, as when Holding them (_hold).
+    `fair_value_cache` as in `recommend`."""
+    held = {item_key: Holding(bags=units)}
+    return exit_values(conn, config, market, held, at, fair_value_cache=fair_value_cache)[item_key]
 
 
 def exit_values(
@@ -1884,18 +1952,23 @@ def exit_values(
     held: Mapping[str, Holding],
     at: int,
     bound: Mapping[str, Mapping[str, int]] = MappingProxyType({}),
+    fair_value_cache: FairValueCache | None = None,
 ) -> dict[str, float]:
     """What each Item Key's `held` units would have brought by their best Actions, as
     `_exit_value` values them: Best Exit Value (#76). The Disenchant way is valued over
     all of `held` at once, as the Holdings Disenchant Actions are, so held mats and the
     mats other Item Keys yield take the Sale Horizon first (#102). Each Item Key gets its
     own Disenchant proceeds and the worth of its units left. `bound` is who holds the
-    bound units (`_disenchants`); without it, none is Disenchanted."""
+    bound units (`_disenchants`); without it, none is Disenchanted. `fair_value_cache` as
+    in `recommend`."""
     scanned = [t for t in scan_times(conn, market) if t <= at]
     scan = scanned[-1] if scanned else None
-    valuer, _ = _valuer(
-        conn, config, market, scan, unbound=_unbound_units(dict(held)), skills_as_of=at
+    # Without the Flips in that Scan: they don't change the Valuer, and nothing here
+    # buys them (#116).
+    before_flips = _valuer_at(
+        conn, config, market, scan, fair_value_cache=fair_value_cache, skills_as_of=at
     )
+    valuer = before_flips.after({}, _unbound_units(dict(held)))
     rows, left = _disenchants(held, valuer, bound=bound)
     proceeds: Counter[str] = Counter()
     for row in rows:
@@ -1914,7 +1987,7 @@ def deposit_of(conn: sqlite3.Connection, config: Config, market: Market) -> Call
     """What posting one unit of an Item Key costs in the Market (`_Valuer.deposit`), at
     the post size as of its latest Scan (#192): like the rate, the latest seen."""
     times = scan_times(conn, market)
-    return _valuer(conn, config, market, times[-1] if times else None)[0].deposit
+    return _valuer_at(conn, config, market, times[-1] if times else None).deposit
 
 
 def _valuer(
@@ -1934,6 +2007,20 @@ def _valuer(
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
     `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
     the latest, or as of `skills_as_of` (#103)."""
+    valuer = _valuer_at(conn, config, market, at, seen, fair_value_cache, skills_as_of)
+    return valuer.flips(under, unbound)
+
+
+def _valuer_at(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    at: int | None,
+    seen: Sequence[Listing] | None = None,
+    fair_value_cache: FairValueCache | None = None,
+    skills_as_of: int | None = None,
+) -> "_Valuer":
+    """`_valuer` before the Flips: what they're worked out on."""
     # With a cache, its Listings: what it keeps below is worked out from them (#143).
     cache = fair_value_cache
     if cache is not None:
@@ -1963,7 +2050,7 @@ def _valuer(
     cut = auction_cut(market, config)
     # Like Vendor Prices, the latest seen: a deposit rate doesn't move.
     linked = link_sales(outcomes(conn, market), seen, purchases(conn, market))
-    valuer = _Valuer(
+    return _Valuer(
         supply,
         others,
         {},
@@ -1971,7 +2058,9 @@ def _valuer(
         vendor,
         merchant,
         cut,
-        non_stacking(conn, market, seen),
+        _scan_only(
+            cache, conn, market, ("non_stacking",), lambda: non_stacking(conn, market, seen)
+        ),
         deposits(linked, config.ah_deposit_min_copper),
         config,
         disenchanting=_Disenchanting(
@@ -1990,7 +2079,6 @@ def _valuer(
         else {},
         recent_since=at - RECENT_PRICE_DAYS * 24 * 3600 if scanned else None,
     )
-    return valuer.flips(under, unbound)
 
 
 def _others_lows_as_of(

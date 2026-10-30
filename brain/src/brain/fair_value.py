@@ -85,10 +85,11 @@ class FairValueCache:
     was kept from those Scans goes (#142).
 
     It also keeps what's worked out from a Market's Scans alone (`scan_only`): its
-    `listings`, Sell Rates, supply and others' lows (#143). A reload with no new Scan
-    reuses them; any change to the Market's Scans drops them all. When the change is only
-    Scans newer than every one seen before, the pass can still see what was dropped
-    (`before_new_scans`), to bring it up to date rather than work it out afresh (#155).
+    `listings`, Sell Rates, supply and others' lows (#143), and which Item Keys don't stack
+    (#116). A reload with no new Scan reuses them; any change to the Market's Scans drops
+    them all. When the change is only Scans newer than every one seen before, the pass can
+    still see what was dropped (`before_new_scans`), to bring it up to date rather than
+    work it out afresh (#155).
     `this_pass` holds anything else worked out from the Listings, for the rest of the
     pass only.
 
