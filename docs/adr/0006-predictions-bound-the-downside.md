@@ -27,3 +27,12 @@ A Prediction never looks at the upside, but an Item Key an NPC merchant sells in
 
 - Not dropping merchant-sold Item Keys from Predictions: the player still wants to buy them cheap on the Auction House ahead of a Catalyst.
 - Not a hand-kept list of which items a merchant sells: Merchant Cost is already read in game, per realm and faction.
+
+## Amendment: The exit if wrong steps down to where it would sell (#205)
+
+A unit's Max Loss assumed it was resold at its post price, if the Sale Events at or above that price had room for it, and otherwise Vendored. In a rising market the asks sit above every past sale, so there was never room at the post price, and the exit fell straight to the Vendor Price: Prediction buys skipped exactly the Item Keys a Prediction is right about (on the last Beta Scan, Swiftthistle's first unit had a Max Loss of 99.6%). A player whose Prediction turns out wrong doesn't vendor: they undercut until it sells. So a unit with no room at its post price is now valued at the dearest Sale Event price at or under that post price with room for it, judged as strictly as before (only the Sale Events at or above that price, at least the Flip minimum of them, less the Deposits it's expected to lose in the queue there), and never under the Vendor Price. Early in Live, Beta's Sale Event prices count too, scaled to Live's by the Fair Value ratio, as the Beta Sell Rate's demand already does (ADR-0024). It's still only the downside: the prices are past sales, never a target.
+
+- Not raising `prediction_max_loss_share` for Predictions: a riser still has to have traded near its ask to be bought, which is the honest bound.
+- Not a same-Scan dump test (buy what's far under the other Listings, with no sales behind it): with no exit there's nothing to bound the loss by without guessing a price.
+- Not for Flips: a Flip earns at its post price, and loosening Flip to Sell lost in the Backtest (ADR-0036, ADR-0040).
+- On Beta the risers rose with almost no trades (Swiftthistle had none at even half its last price), so this buys them only once Live trades them a little under the ask.

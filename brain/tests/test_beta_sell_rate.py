@@ -51,8 +51,13 @@ def scan(at, *rows, realm=BETA_REALM):
     }
 
 
-def row(quantity=1, unit=100):
-    return {"itemString": LINEN, "quantity": quantity, "buyout": quantity * unit, "timeLeft": 4}
+def row(quantity=1, unit=100, time_left=4):
+    return {
+        "itemString": LINEN,
+        "quantity": quantity,
+        "buyout": quantity * unit,
+        "timeLeft": time_left,
+    }
 
 
 def character_read(at, realm=LIVE_REALM):
@@ -219,3 +224,28 @@ def test_beta_hours_without_a_sale_event_at_the_price_still_count_as_hours(db):
 
     assert [b.quantity for b in result[LIVE].prediction_buys] == [3]
     assert [b.quantity for b in alone[0].prediction_buys] == [6]
+
+
+def test_a_prediction_buys_exit_can_step_down_to_a_beta_sale_event_price(db):
+    # #205: Beta's Linen sold at 196 before that stack expired, under the 200 that's Beta's
+    # Fair Value now, so it counts at 98 scaled to Live: under the 119 and 99 the 100s would
+    # post at, so neither has room. At half weight, 4 sell at 98 in the 3 h horizon. Undercut
+    # down to 98, each brings in 93.10, losing 6.90 (within 10%); the 5th has no exit.
+    beta = [
+        scan(
+            T0 + n * 30 * MINUTE,
+            row(quantity=5, unit=200),
+            row(quantity=10 - n, unit=196, time_left=4 if n < 3 else 1),
+        )
+        for n in range(4)
+    ]
+    beta.append(scan(T0 + 4 * 30 * MINUTE, row(quantity=5, unit=200)))
+
+    result = run(db, beta, [live_first_scan()])
+    without = recommend(db, replace(CONFIG, beta_sell_rate_weight=0), [prediction(LIVE_START)])
+
+    [buy] = result[LIVE].prediction_buys
+    assert (buy.quantity, buy.cost) == (4, 4 * 100)
+    assert buy.max_loss == pytest.approx(4 * (100 - 98 * 0.95))
+    assert buy.beta_room is not None and buy.beta_room.from_beta > 0
+    assert [r.prediction_buys for r in without if r.market == LIVE] == [[]]

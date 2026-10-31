@@ -4008,8 +4008,10 @@ def _hold_buys(
     the Prediction were wrong, after the `held` ones, judged as strictly as a Flip: only
     the Sale Events at or above the resale's post price count (#107), and it's never
     above what a merchant charges (#63). Each is less the deposits it's expected to lose
-    waiting its turn in the `queue` at that rate (#78). The rest can only be Vendored, or
-    are worth nothing without a Vendor Price. Nothing is bought at or above the Merchant
+    waiting its turn in the `queue` at that rate (#78). The rest, if the Prediction were
+    wrong, would be undercut down to the highest Sale Event price at or under that post
+    price with room for them (#205), and what's left can only be Vendored, or is worth
+    nothing without a Vendor Price. Nothing is bought at or above the Merchant
     Cost after the `cut`, since no Sell fetches more than that (#91). Early in Live, the
     demand at the post price also counts the `beta` Sell Rate (#110, ADR-0024). With the
     `cheap` Listings, it counts only since the ones bought so far showed up, as a Flip's
@@ -4018,6 +4020,8 @@ def _hold_buys(
     bought: Supply = []
     buys = []
     selling = True  # until a Listing is only partly taken: the rest of it stays up
+    stepped = 0  # units bought that would only sell under their post price (#205)
+    cap = None  # the last post price, which no unit steps above
     most = math.inf if merchant_cost is None else merchant_cost * (1 - cut)
     for unit, quantity in sorted(offers):
         if unit >= most:
@@ -4034,21 +4038,74 @@ def _hold_buys(
                     rate, price, held, config, config.sale_horizon_seconds, beta, cheap
                 ),
             )
+        cap = cap if post_at is None else post_at
         resale = post_at * (1 - cut) if take else 0
-        beta_room = _beta_room(rate, beta, post_at, held, config, cheap) if take else None
         at_price = _flip_queue(queue, _demand_at(rate, post_at, beta, cheap), config)
         exits = [
-            max(resale - at_price.lost(queued + i), vendor_price or 0) for i in range(take)
-        ] + [vendor_price or 0] * (quantity - take)
-        parts = [(len(list(same)), exit_value) for exit_value, same in groupby(exits)]
-        for n, exit_value in parts:
+            (max(resale - at_price.lost(queued + i), vendor_price or 0), post_at)
+            for i in range(take)
+        ] + _stepped_exits(
+            rate,
+            beta,
+            cheap,
+            cap,
+            queued - held + take + stepped,
+            quantity - take,
+            held,
+            queue,
+            cut,
+            vendor_price,
+            config,
+        )
+        for (exit_value, sold_at), same in groupby(exits):
             max_loss = unit - exit_value
             if max_loss > unit * config.prediction_max_loss_share:
                 return buys
-            buys.append(_HoldBuy(item_key, prediction, unit, n, max_loss, beta_room))
+            beta_room = _beta_room(rate, beta, sold_at, held, config, cheap)
+            buys.append(_HoldBuy(item_key, prediction, unit, len(list(same)), max_loss, beta_room))
         bought.append((unit, take))
+        stepped += quantity - take
         selling = selling and take == quantity
     return buys
+
+
+def _stepped_exits(
+    rate: SellRate | None,
+    beta: BetaSellRate | None,
+    cheap: _Cheap | None,
+    cap: float | None,
+    start: int,
+    units: int,
+    held: int,
+    queue: _Queue,
+    cut: float,
+    vendor_price: int | None,
+    config: Config,
+) -> list[tuple[float, float | None]]:
+    """The exits, and the prices they'd sell at, of `units` bought to Hold that have no room
+    at their post price, from bought unit `start` (0-based, after the `held` ones) on (#205).
+    If the Prediction is wrong, each is undercut down to the highest Sale Event price at
+    or under `cap` with room for it (`_room_at`), less the deposits it's expected to lose
+    in the queue there, and never under the Vendor Price. Beta's Sale Event prices count,
+    scaled to Live's. What has room at no price is Vendored: None for its price."""
+    vendor = vendor_price or 0
+    exits: list[tuple[float, float | None]] = []
+    if cap is not None:
+        prices = set() if rate is None else {price for price, _, _ in rate.sale_prices}
+        if beta is not None:
+            prices |= {price / beta.ratio for price, _, _ in beta.rate.sale_prices}
+        for price in sorted((p for p in prices if p <= cap), reverse=True):
+            first = start + len(exits)  # the next unit to find an exit for
+            room = _room_at(rate, price, held, config, config.sale_horizon_seconds, beta, cheap)
+            if room <= first:
+                continue
+            at_price = _flip_queue(queue, _demand_at(rate, price, beta, cheap), config)
+            for i in range(first, min(room, start + units)):
+                exit_value = price * (1 - cut) - at_price.lost(held + i)
+                exits.append((exit_value, price) if exit_value > vendor else (vendor, None))
+            if len(exits) == units:
+                break
+    return exits + [(vendor, None)] * (units - len(exits))
 
 
 def _beta_room(

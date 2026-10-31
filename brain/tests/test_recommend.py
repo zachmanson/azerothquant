@@ -4242,6 +4242,31 @@ def test_a_prediction_buys_max_loss_counts_only_the_sale_events_at_or_above_the_
     ]
 
 
+@pytest.mark.parametrize(("sold_at", "bought"), [(950, 4), (800, 0)])
+def test_a_prediction_buys_exit_steps_down_to_the_price_it_would_sell_at(db, sold_at, bought):
+    # #205: the asks rose to 1000 over Linen that sold at `sold_at`. Nothing sold at the
+    # 999 a bought 1000 would post at, but if the Prediction is wrong it can still be
+    # undercut down to where Linen sold: at 950 it brings in 902.50, losing 97.50 (9.75%,
+    # within 10%); at 800 it brings in 760, losing 24%. Only 4 should sell at 950 within
+    # the horizon under the Flip priors, and with no Vendor Price the 5th is worth nothing.
+    scans = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=20 - 2 * n, unit=sold_at, time_left=4 if n < 3 else 1),
+            row(quantity=5, unit=1000),
+        )
+        for n in range(4)
+    ]
+    scans.append(scan(T0 + 4 * HOUR, row(quantity=5, unit=1000)))
+
+    result = run(db, scans, [character_read(money=GOLD)], predictions=[prediction(LINEN_KEY)])
+
+    assert sum(r.quantity for r in result[MARKET].prediction_buys) == bought
+    assert sum(r.max_loss for r in result[MARKET].prediction_buys) == pytest.approx(
+        bought * (1000 - 950 * 0.95)
+    )
+
+
 def test_held_units_count_toward_a_predictions_cap_before_it_buys(db):
     # 15% of 1g is 15s. The 3 Ore held would Vendor for 1s each today, so 12s is left for
     # Linen at 1s, which can lose 5c each against the 95c a vendor pays.
