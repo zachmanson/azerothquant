@@ -72,7 +72,7 @@ describe("SearchButton.state", function()
     local prediction = { record = { itemKey = "2589", quantity = 20, price = 62, prediction = "Patch 1.2" } }
     local buyUnder = { record = { itemKey = "2589", way = "Sell", price = 62 } }
 
-    assert.are.equal("Search", SearchButton.state(prediction, ctx({ section = "Prediction buys" })).label)
+    assert.are.equal("Search", SearchButton.state(prediction, ctx({ section = "Predictions" })).label)
     assert.are.equal("Search", SearchButton.state(buyUnder, ctx({ section = "Buy Under" })).label)
   end)
 
@@ -81,7 +81,11 @@ describe("SearchButton.state", function()
     local craft = { record = { action = "Craft", itemKey = "2580", quantity = 1, price = 900 } }
     local group = { record = { group = { quality = 2, class = "armor", minLevel = 5, maxLevel = 15 }, way = "Disenchant", price = 300 } }
 
+    -- A Prediction's line with no buy (#207) has no price to search against.
+    local noBuy = { record = { itemKey = "2447", held = 0, reason = "would lose 37%" } }
+
     assert.is_nil(SearchButton.state(nil, ctx()))
+    assert.is_nil(SearchButton.state(noBuy, ctx({ section = "Predictions" })))
     assert.is_nil(SearchButton.state(holding, ctx({ section = "Holdings" })))
     assert.is_nil(SearchButton.state(craft, ctx({ section = "Flips to Craft" })))
     assert.is_nil(SearchButton.state(group, ctx({ section = "Buy Under" })))

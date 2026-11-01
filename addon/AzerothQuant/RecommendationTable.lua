@@ -352,7 +352,7 @@ end
 -- Table folds these into a count, and item tooltips leave them out. A Buy Under has a way
 -- out rather than an Action (#88).
 function RecommendationTable.lowValue(r)
-  return (r.action == nil and r.way == nil) or (r.action == "Vendor" and r.profit == 0)
+  return (r.action == nil and r.way == nil and r.reason == nil) or (r.action == "Vendor" and r.profit == 0)
 end
 
 -- A Craft's note names reagents by ID, which is no use in game: the summary keeps the
@@ -451,15 +451,46 @@ local function lossShare(r)
   return r.maxLoss and r.cost and r.cost > 0 and r.maxLoss / r.cost or nil
 end
 
-local function predictionBuyCells(r, name)
+-- A Prediction line (#207): units held under it, then its buy's cells, or the Brain's reason
+-- it has none where they'd be.
+local function predictionCells(r, name)
+  if r.reason then
+    return { name, tostring(r.held), r.reason }
+  end
   return {
-    name, r.prediction or "", tostring(r.quantity), money(r.price), money(r.maxLoss),
+    name, tostring(r.held), tostring(r.quantity), money(r.price), money(r.maxLoss),
     sharePercent(lossShare(r)), money(r.cost),
   }
 end
 
-local function predictionBuyKeys(r, name, cells)
-  return { name:lower(), cells[2]:lower(), r.quantity, r.price, r.maxLoss, lossShare(r), r.cost }
+-- A line with no buy has no buy keys; `sort` puts it after its Prediction's buys anyway.
+local function predictionKeys(r, name)
+  return { name:lower(), r.held, r.quantity, r.price, r.maxLoss, lossShare(r), r.cost }
+end
+
+-- A Prediction's header line (#207), e.g. "Launch week mats: 13 held, 14g 54s of 14g 55s
+-- tied up, lapses 2026-11-11". Only active Predictions are written, so a Catalyst marked
+-- as happened is still ahead.
+local function predictionHeader(p)
+  local ending = p.happened and ("Catalyst on " .. p.happened) or ("lapses " .. p.lapse)
+  return p.name .. ": " .. p.held .. " held, " .. Money.format(p.tiedUp) .. " of " .. Money.format(p.cap)
+    .. " tied up, " .. ending
+end
+
+-- Each Prediction's lines as rows for `section`: its buy with the units held and the
+-- Prediction's place (predictionAt), or the Item Key with its reason.
+local function predictionRecords(predictions)
+  local records = {}
+  for at, p in ipairs(predictions) do
+    for _, line in ipairs(p.lines) do
+      local r = { itemKey = line.itemKey, held = line.held, reason = line.reason, predictionAt = at }
+      for k, v in pairs(line.buy or {}) do
+        r[k] = v
+      end
+      records[#records + 1] = r
+    end
+  end
+  return records
 end
 
 -- How a Buy Under gets out (#88): Vendor, Sell, e.g. "Craft Bolt of Linen Cloth
@@ -606,7 +637,10 @@ local WHAT_TO_DO = {
     return "Disenchant", "Buy the items below, disenchant them on " .. r.disenchant.disenchanter
       .. ", then sell what you get."
   end,
-  ["Prediction buys"] = function(r)
+  ["Predictions"] = function(r)
+    if r.reason then
+      return "No buy", "Nothing to buy right now: " .. r.reason .. "."
+    end
     return "Buy", buyUpTo(r) .. ", and keep them: " .. LATER
   end,
   ["Buy Under"] = function(r)
@@ -621,17 +655,32 @@ local NOTHING = {
   ["Shopping List"] = "Nothing on the Shopping List right now",
   ["Flips to Craft"] = "No Flips to Craft right now",
   ["Flips to Disenchant"] = "No Flips to Disenchant right now",
-  ["Prediction buys"] = "No Prediction buys right now",
+  ["Predictions"] = "No Predictions right now",
   ["Buy Under"] = "No Buy Unders right now",
 }
 
 -- Orders a section's rows by state.column, largest first when state.descending. Rows
 -- marked Bought (#97) go after the rest, and rows without a key for that column go last.
 -- Ties go largest Price x Qty first (so Holds, whose Profit is unknown, line up by the gold
--- they tie up), then in the Brain's order.
+-- they tie up), then in the Brain's order. On the Predictions tab (#207) the sort is within
+-- each Prediction: its rows stay in the Brain's order of Predictions, its header on top.
 function RecommendationTable.sort(section, state)
   local c = state.column
   table.sort(section.rows, function(a, b)
+    if a.predictionAt ~= b.predictionAt then
+      return a.predictionAt < b.predictionAt
+    end
+    if a.header ~= b.header then
+      return a.header ~= nil
+    end
+    -- Lua's sort may weigh a row against itself: a header is only ever level with itself.
+    if a.header then
+      return false
+    end
+    -- A Prediction buy comes before the lines with a reason, whatever the column (#207).
+    if (a.record.reason == nil) ~= (b.record.reason == nil) then
+      return a.record.reason == nil
+    end
     if a.bought ~= b.bought then
       return b.bought ~= nil
     end
@@ -653,7 +702,7 @@ function RecommendationTable.sort(section, state)
 end
 
 -- Columns sorted by their text. A first click sorts these A to Z and the rest largest first.
-local TEXT_COLUMNS = { Item = true, Action = true, Prediction = true, ["Way out"] = true }
+local TEXT_COLUMNS = { Item = true, Action = true, ["Way out"] = true }
 
 -- The sort after a click on a column header: the clicked column's first direction, or the
 -- other direction if it's the column already sorted by.
@@ -712,7 +761,9 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
     -- kept under (#97). A Buy Under has a way out instead of an action, and two Characters
     -- can each Craft one output.
     local id = table.concat({ r.itemKey or name, r.action or r.way or "", r.character or "" }, " ")
-    local bought = marks and marks[id] ~= nil or nil
+    -- A Prediction's line with no buy (#207) has nothing to mark.
+    local markable = marks ~= nil and r.reason == nil
+    local bought = markable and marks[id] ~= nil or nil
     -- A marked row stays on show whatever it's worth now: its mark is still undone there.
     if RecommendationTable.lowValue(r) and not bought then
       folded = folded + 1
@@ -748,12 +799,13 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
         rowDetails[#rowDetails + 1] = BOUGHT_LINE
       end
       local action, todo = WHAT_TO_DO[title](r)
-      if todo and marks and not bought then
+      if todo and markable and not bought then
         todo = todo .. BOUGHT_HINT
       end
       out.rows[#out.rows + 1] = {
         id = id,
         bought = bought,
+        markable = markable,
         record = r,
         itemString = r.itemKey and itemString(r.itemKey),
         cells = rowCells,
@@ -826,7 +878,11 @@ end
 
 -- The tab the table opens on. The AH is where the Shopping List gets bought, so opening
 -- there always lands on it; /aq recs reopens the tab last picked (saved as its title).
+-- Tabs saved under a title they've since lost (#207).
+local RENAMED = { ["Prediction buys"] = "Predictions" }
+
 function RecommendationTable.openingTab(saved, byAuctionHouse)
+  saved = RENAMED[saved] or saved
   if byAuctionHouse or not NOTHING[saved] then
     return "Shopping List"
   end
@@ -861,6 +917,48 @@ function RecommendationTable.daysText(days)
     return ""
   end
   return (string.format("%.4f", days):gsub("0+$", ""):gsub("%.$", ""))
+end
+
+-- The Predictions tab (#207): a header row per Prediction, then a row per Item Key of it.
+-- Headers aren't items, so nothing selects, marks or searches them; `sort` keeps each above
+-- its own lines. The tab counts the buys, as the other buy-side tabs count their rows.
+local function predictionsSection(entry, nameOf, holdersOf, marks)
+  local predictions = entry.predictions or {}
+  local columns = { "Item", "Held", "Qty", "Max price", "Max Loss", "Loss %", "Cost" }
+  local out = section(
+    "Predictions",
+    columns,
+    predictionRecords(predictions),
+    predictionCells,
+    predictionKeys,
+    { column = 5, descending = false },
+    nameOf,
+    holdersOf,
+    nil,
+    nil,
+    entry.beta,
+    marks
+  )
+  local buys = 0
+  for _, row in ipairs(out.rows) do
+    row.predictionAt = row.record.predictionAt
+    if row.record.reason then
+      -- The reason stands in place of the buy cells, from Qty on.
+      row.span = columnAt(columns, "Qty")
+    else
+      buys = buys + 1
+    end
+  end
+  for at, p in ipairs(predictions) do
+    out.rows[#out.rows + 1] = { header = true, text = predictionHeader(p), predictionAt = at, keys = {} }
+  end
+  RecommendationTable.sort(out, out.sort)
+  out.tab = "Predictions (" .. buys .. ")"
+  -- A Prediction with no lines still has its header on show.
+  if #predictions > 0 then
+    out.empty = nil
+  end
+  return out
 end
 
 -- character: the logged-in Character, as the Brain names it ("Name-Realm"). budget: the
@@ -960,20 +1058,7 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
         marks,
         entry
       ),
-      section(
-        "Prediction buys",
-        { "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost" },
-        entry.predictionBuys,
-        predictionBuyCells,
-        predictionBuyKeys,
-        { column = 5, descending = false },
-        nameOf,
-        holdersOf,
-        nil,
-        nil,
-        entry.beta,
-        marks
-      ),
+      predictionsSection(entry, nameOf, holdersOf, marks),
       -- In the Brain's order, best profit per unit first: no column sorts it by default, so
       -- the rows fall through to the tie-break on their order (a Buy Under's worth is 0).
       -- Never over the Budget: the player only buys one when it shows up on the AH (#88).

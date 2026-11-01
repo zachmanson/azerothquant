@@ -15,7 +15,8 @@ Tips.TABS = {
   ["Shopping List"] = "Things to buy on the Auction House right now and sell again for a profit. Best at the top.",
   ["Flips to Craft"] = "Buy the materials, craft the item, and sell it for more than the materials cost.",
   ["Flips to Disenchant"] = "Buy gear, disenchant it, and sell the materials for more than the gear cost.",
-  ["Prediction buys"] = "Items expected to go up in price soon. Riskier: these are guesses.",
+  ["Predictions"] = "Items expected to go up in price soon, grouped by why, with what to buy now or why not. "
+    .. "Riskier: these are guesses.",
   ["Buy Under"] = "Price limits: if you see one of these on the Auction House at or under this price, it's a good buy.",
 }
 
@@ -36,7 +37,7 @@ Tips.COLUMNS = {
   ["Cost"] = "Gold you need to buy it all.",
   ["Way out"] = "How it turns into gold: sell it, vendor it, craft something with it, or disenchant it.",
   ["Listings"] = "How many listings to buy.",
-  ["Prediction"] = "Why its price is expected to go up.",
+  ["Held"] = "How many you already have for this guess.",
   ["Max Loss"] = "The most you could lose if the guess is wrong.",
   ["Loss %"] = "Max Loss as a share of what you spend. 5% means you'd lose 5g of every 100g if the guess is wrong.",
   ["Buy Under"] = "The most to pay for one. Anything at or under this is a good buy.",

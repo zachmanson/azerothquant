@@ -13,7 +13,7 @@
 -- narrow to show. A click selects the row and shift-click links the item (ADR-0016). With
 -- the AH open, the pane's Post button posts the selected Sell row (#81): one protected call
 -- per click, made only in onPostClick (spec/protected_calls_spec.lua). On a Shopping List,
--- Prediction buys or single-item Buy Under row not yet in the bags, the Search button takes
+-- Prediction buy or single-item Buy Under row not yet in the bags, the Search button takes
 -- its slot (#39): a click searches the AH for the row's Item Key and a line under it shows
 -- the cheapest Listing.
 -- Selecting a Craft row opens its Craft Chain panel on the left (#77). A right-click on a
@@ -202,8 +202,9 @@ local function getLine(i)
 end
 
 -- Lays out one line: for an item, its icon and then its cells in the columns of layout
--- (ColumnLayout.fit over section), striped on every other row. Otherwise one text spans
--- the line (the empty-tab line, "N more"). marks, for a row of a buy-side tab, are the
+-- (ColumnLayout.fit over section), striped on every other row; an item's span (#207) is the
+-- column whose text runs over the empty cells after it. Otherwise one text spans the line
+-- (the empty-tab line, "N more", a Prediction's header). marks, for a row of a buy-side tab, are the
 -- Market's Bought marks.
 local function drawLine(i, texts, layout, font, item, justify, marks, section)
   local line = getLine(i)
@@ -236,6 +237,18 @@ local function drawLine(i, texts, layout, font, item, justify, marks, section)
   if layout then
     for k, p in ipairs(layout) do
       placed[k], widths[k] = texts[p.column], p.width
+    end
+    -- A Prediction's reason (#207) runs over the empty buy cells after it. A cell with no
+    -- text takes no room, so the cells after those stay in their columns.
+    local from
+    for k, p in ipairs(layout) do
+      if item and p.column == item.span then
+        from = k
+      elseif from and placed[k] == nil then
+        widths[from] = widths[from] + p.width
+      else
+        from = nil
+      end
     end
   else
     placed[1] = texts[1]
@@ -698,8 +711,13 @@ function redraw()
           add({ section.empty }, nil, "GameFontDisable", nil, "CENTER")
         end
         for _, row in ipairs(section.rows) do
-          local font = row.bought and "GameFontDisable" or "GameFontHighlight"
-          add(row.cells, layout, font, row, nil, section.markable and marks or nil, section)
+          if row.header then
+            -- A Prediction's header (#207): one line, not an item to select, mark or search.
+            add({ row.text }, nil, "GameFontNormal")
+          else
+            local font = row.bought and "GameFontDisable" or "GameFontHighlight"
+            add(row.cells, layout, font, row, nil, row.markable and marks or nil, section)
+          end
         end
         if section.more then
           add({ section.more }, nil, "GameFontDisable")
@@ -808,7 +826,7 @@ end
 -- RecommendationTable.build gives them, each with its row count. A click is remembered, so
 -- /aq recs reopens that tab.
 local TAB_TITLES = {
-  "Holdings", "Shopping List", "Flips to Craft", "Flips to Disenchant", "Prediction buys", "Buy Under",
+  "Holdings", "Shopping List", "Flips to Craft", "Flips to Disenchant", "Predictions", "Buy Under",
 }
 
 -- Retail's top tab, if this client has it (checked by name, since CreateFrame with a missing

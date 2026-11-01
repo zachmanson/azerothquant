@@ -39,6 +39,16 @@ local function entry(fields)
   return { [REALM] = { [FACTION] = e } }
 end
 
+-- Buy rows under one Prediction's lines, as the Brain writes them (#207). On the Predictions
+-- tab the Prediction's header row comes first.
+local function predicted(buys)
+  local lines = {}
+  for i, r in ipairs(buys) do
+    lines[i] = { itemKey = r.itemKey, held = 0, buy = r }
+  end
+  return { { name = "Phase 2", held = 0, tiedUp = 0, cap = 0, lapse = "2026-11-11", lines = lines } }
+end
+
 -- A Flip to Craft as the Brain writes it (brain/tests/test_recommendations.py).
 local function flipToCraft()
   return {
@@ -231,7 +241,7 @@ describe("RecommendationTable.build", function()
 
   it("says when a Prediction buy's room came partly from the Beta Sell Rate (#110)", function()
     local function tooltip(r)
-      return build(entry({ predictionBuys = { r } }), AS_OF, names).sections[5].rows[1].details
+      return build(entry({ predictions = predicted({ r }) }), AS_OF, names).sections[5].rows[2].details
     end
     local buy = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens" }
     local fromBeta = { itemKey = "12359", action = "Hold", quantity = 10, price = 800, maxLoss = 1500, prediction = "BWL opens", roomFromBeta = true }
@@ -630,7 +640,7 @@ describe("RecommendationTable.build", function()
         "Shopping List (0)",
         "Flips to Craft (0)",
         "Flips to Disenchant (0)",
-        "Prediction buys (0)",
+        "Predictions (0)",
         "Buy Under (0)",
       },
       {
@@ -658,7 +668,7 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Nothing on the Shopping List right now", build(entry()).sections[2].empty)
     assert.are.equal("No Flips to Craft right now", view.sections[3].empty)
     assert.are.equal("No Flips to Disenchant right now", view.sections[4].empty)
-    assert.are.equal("No Prediction buys right now", view.sections[5].empty)
+    assert.are.equal("No Predictions right now", view.sections[5].empty)
     assert.are.equal("No Buy Unders right now", view.sections[6].empty)
   end)
 
@@ -777,9 +787,9 @@ describe("RecommendationTable.build", function()
     assert.are.equal("Buy 12 item:2589 @ max 1s 20c", view.sections[3].rows[1].details[2])
   end)
 
-  it("shows Prediction buys after the Flips to Craft", function()
+  it("shows the Predictions after the Flips to Craft", function()
     local view = build(entry({
-      predictionBuys = {
+      predictions = predicted({
         {
           itemKey = "12359",
           action = "Hold",
@@ -789,16 +799,15 @@ describe("RecommendationTable.build", function()
           prediction = "Phase 2",
           maxLoss = 12000,
         },
-      },
+      }),
     }))
 
     local buys = view.sections[5]
-    assert.are.equal("Prediction buys", buys.title)
-    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost" }, buys.columns)
-    assert.are.same({ "item:12359", "Phase 2", "20", "25s", "1g 20s", "24%", "5g" }, buys.rows[1].cells)
+    assert.are.equal("Predictions", buys.title)
+    assert.are.same({ "item:12359", "0", "20", "25s", "1g 20s", "24%", "5g" }, buys.rows[2].cells)
   end)
 
-  it("shows the Buy Unders after the Prediction buys, with the way out, units and Scans that saw one (#88)", function()
+  it("shows the Buy Unders after the Predictions, with the way out, units and Scans that saw one (#88)", function()
     local view = build(entry({
       buyUnder = {
         { itemKey = "2589", price = 2100, way = "Sell", units = 40, seen = 14, windowDays = 7, listedNow = true },
@@ -938,7 +947,7 @@ describe("the Beta Prior column (#90)", function()
     craft.itemKey = "4306"
     local view = build(entry({
       shoppingList = { flip, craft },
-      predictionBuys = { { itemKey = "2589", action = "Hold", quantity = 1, price = 10, cost = 10, prediction = "P", maxLoss = 1 } },
+      predictions = predicted({ { itemKey = "2589", action = "Hold", quantity = 1, price = 10, cost = 10, prediction = "P", maxLoss = 1 } }),
       buyUnder = { { itemKey = "4306", price = 5, way = "Sell", units = 1, seen = 1, windowDays = 7 } },
       beta = beta(),
     }))
@@ -950,8 +959,8 @@ describe("the Beta Prior column (#90)", function()
     assert.are.equal(GREY .. "2s 50c|r", shopping.rows[1].cells[11])
     assert.are.equal("Beta", crafts.columns[8])
     assert.are.equal(GREY .. "9s*|r", crafts.rows[1].cells[8])
-    assert.are.same({ "Item", "Prediction", "Qty", "Max price", "Max Loss", "Loss %", "Cost", "Beta" }, predictions.columns)
-    assert.are.equal(GREY .. "2s 50c|r", predictions.rows[1].cells[8])
+    assert.are.same({ "Item", "Held", "Qty", "Max price", "Max Loss", "Loss %", "Cost", "Beta" }, predictions.columns)
+    assert.are.equal(GREY .. "2s 50c|r", predictions.rows[2].cells[8])
     assert.are.equal("Beta", buyUnder.columns[6])
     assert.are.equal(GREY .. "9s*|r", buyUnder.rows[1].cells[6])
   end)
@@ -1042,14 +1051,13 @@ describe("rows marked Bought (#97)", function()
     local held = { itemKey = "2770", action = "Hold", quantity = 5, price = 90 }
     local under = { itemKey = "2770", price = 80, way = "Hold", units = 5, seen = 3, windowDays = 7 }
     local view = marked(
-      entry({ holdings = { held }, shoppingList = { flipToCraft() }, predictionBuys = { hold }, buyUnder = { under } }),
+      entry({ holdings = { held }, shoppingList = { flipToCraft() }, predictions = predicted({ hold }), buyUnder = { under } }),
       { ["2996 Craft Kash-Patel"] = 1250, ["2770 Hold "] = 450 }
     )
 
     assert.is_nil(view.sections[1].rows[1].bought)
     assert.is_true(view.sections[3].rows[1].bought)
-    assert.is_true(view.sections[5].rows[1].bought)
-    assert.are.equal("Phase 2", view.sections[5].rows[1].cells[2])
+    assert.is_true(view.sections[5].rows[2].bought)
     assert.is_nil(view.sections[6].rows[1].bought)
     local markable = {}
     for i, section in ipairs(view.sections) do
@@ -1071,9 +1079,9 @@ describe("rows marked Bought (#97)", function()
     local buys = {
       { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, cost = 50000, prediction = "Phase 2", maxLoss = 12000 },
     }
-    local view = marked(entry({ shoppingList = { sell() }, predictionBuys = buys }), { ["9749 Sell "] = 3000 }, 4000, 100000)
+    local view = marked(entry({ shoppingList = { sell() }, predictions = predicted(buys) }), { ["9749 Sell "] = 3000 }, 4000, 100000)
 
-    assert.are.equal(1, #view.sections[5].rows)
+    assert.are.equal("Predictions (1)", view.sections[5].tab)
     assert.is_nil(view.sections[5].more)
   end)
 
@@ -1219,7 +1227,11 @@ describe("RecommendationTable.openingTab", function()
   end)
 
   it("reopens the last tab picked when /aq recs opens the table", function()
-    assert.are.equal("Prediction buys", RecommendationTable.openingTab("Prediction buys", false))
+    assert.are.equal("Predictions", RecommendationTable.openingTab("Predictions", false))
+  end)
+
+  it("reopens Predictions when the tab last picked was its old name, Prediction buys (#207)", function()
+    assert.are.equal("Predictions", RecommendationTable.openingTab("Prediction buys", false))
   end)
 
   it("opens the Shopping List when no tab was saved, or the saved one no longer exists", function()
@@ -1231,8 +1243,10 @@ end)
 describe("sorting the Recommendation Table", function()
   local function itemStrings(section)
     local out = {}
-    for i, row in ipairs(section.rows) do
-      out[i] = row.itemString
+    for _, row in ipairs(section.rows) do
+      if not row.header then
+        out[#out + 1] = row.itemString
+      end
     end
     return out
   end
@@ -1270,7 +1284,7 @@ describe("sorting the Recommendation Table", function()
     local function buy(itemKey, maxLoss)
       return { itemKey = itemKey, action = "Hold", quantity = 1, price = 100, prediction = "Phase 2", maxLoss = maxLoss }
     end
-    local view = build(entry({ predictionBuys = { buy("1", 5000), buy("2", 40), buy("3", 900) } }))
+    local view = build(entry({ predictions = predicted({ buy("1", 5000), buy("2", 40), buy("3", 900) }) }))
 
     local buys = view.sections[5]
     assert.are.same({ "item:2", "item:3", "item:1" }, itemStrings(buys))
@@ -1282,7 +1296,7 @@ describe("sorting the Recommendation Table", function()
       return { itemKey = itemKey, action = "Hold", quantity = 1, price = cost, cost = cost, prediction = "Phase 2", maxLoss = maxLoss }
     end
     -- 50%, 5%, 20%: the smallest Max Loss isn't the smallest share.
-    local view = build(entry({ predictionBuys = { buy("1", 500, 1000), buy("2", 5000, 100000), buy("3", 40, 200) } }))
+    local view = build(entry({ predictions = predicted({ buy("1", 500, 1000), buy("2", 5000, 100000), buy("3", 40, 200) }) }))
     local buys = view.sections[5]
 
     RecommendationTable.sort(buys, { column = 6, descending = false })
@@ -1291,16 +1305,16 @@ describe("sorting the Recommendation Table", function()
 
   it("leaves a Prediction buy's Loss % blank, and last, without a Cost", function()
     local view = build(entry({
-      predictionBuys = {
+      predictions = predicted({
         { itemKey = "1", action = "Hold", quantity = 1, price = 100, prediction = "Phase 2", maxLoss = 40 },
         { itemKey = "2", action = "Hold", quantity = 1, price = 100, cost = 100, prediction = "Phase 2", maxLoss = 10 },
-      },
+      }),
     }))
     local buys = view.sections[5]
 
     RecommendationTable.sort(buys, { column = 6, descending = false })
     assert.are.same({ "item:2", "item:1" }, itemStrings(buys))
-    assert.are.equal("", buys.rows[2].cells[6])
+    assert.are.equal("", buys.rows[3].cells[6])
   end)
 
   it("re-sorts by a money column's value, not its text, keeping rows with no value last", function()
@@ -1388,7 +1402,8 @@ end)
 
 describe("the side pane's Action and what to do (#160)", function()
   local function first(view, tab)
-    local row = view.sections[tab].rows[1]
+    local rows = view.sections[tab].rows
+    local row = rows[1].header and rows[2] or rows[1]
     return { row.action, row.todo }
   end
 
@@ -1461,7 +1476,7 @@ describe("the side pane's Action and what to do (#160)", function()
           },
         },
       },
-      predictionBuys = { { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, cost = 50000, prediction = "Phase 2", maxLoss = 1 } },
+      predictions = predicted({ { itemKey = "12359", action = "Hold", quantity = 20, price = 2500, cost = 50000, prediction = "Phase 2", maxLoss = 1 } }),
       buyUnder = {
         { itemKey = "2589", price = 2100, way = "Sell", units = 40, seen = 14, windowDays = 7 },
         { itemKey = "2590", price = 90, way = "Vendor", seen = 1, windowDays = 7 },
@@ -1544,5 +1559,113 @@ describe("RecommendationTable saved sorts", function()
   it("restores nothing for a column the section no longer has, or with nothing saved", function()
     assert.is_nil(RecommendationTable.restoredSort(holdings, { column = "Gone", descending = true }))
     assert.is_nil(RecommendationTable.restoredSort(holdings, nil))
+  end)
+end)
+
+describe("the Predictions tab (#207)", function()
+  -- A Prediction as the Brain writes it (brain/tests/test_recommendations.py).
+  local function hold(itemKey, maxLoss, cost)
+    return {
+      itemKey = itemKey, action = "Hold", quantity = 5, price = 100, cost = cost or 500,
+      prediction = "Launch week mats", maxLoss = maxLoss or 50,
+    }
+  end
+
+  local function launchWeek(lines)
+    return {
+      name = "Launch week mats", held = 13, tiedUp = 145400, cap = 145500, lapse = "2026-11-11",
+      lines = lines or {
+        { itemKey = "2447", held = 0, reason = "would lose 37%" },
+        { itemKey = "2589", held = 3, buy = hold("2589") },
+      },
+    }
+  end
+
+  local function predictions(view)
+    return view.sections[5]
+  end
+
+  it("heads each Prediction with its units held, gold tied up of its cap and lapse date", function()
+    local tab = predictions(build(entry({ predictions = { launchWeek() } })))
+
+    assert.are.equal("Predictions", tab.title)
+    assert.are.same({ "Item", "Held", "Qty", "Max price", "Max Loss", "Loss %", "Cost" }, tab.columns)
+    assert.is_true(tab.rows[1].header)
+    assert.are.equal("Launch week mats: 13 held, 14g 54s of 14g 55s tied up, lapses 2026-11-11", tab.rows[1].text)
+  end)
+
+  it("gives a line per Item Key: its buy's cells, or its reason where they'd be", function()
+    local tab = predictions(build(entry({ predictions = { launchWeek() } })))
+
+    assert.are.same({ "item:2589", "3", "5", "1s", "50c", "10%", "5s" }, tab.rows[2].cells)
+    assert.are.same({ "item:2447", "0", "would lose 37%" }, tab.rows[3].cells)
+    assert.are.equal(3, tab.rows[3].span)
+    assert.is_nil(tab.rows[2].span)
+  end)
+
+  it("keeps each Prediction's header above its own lines, whatever the sort", function()
+    local weeks = {
+      name = "Weeks 2-3 mats", held = 0, tiedUp = 0, cap = 145500, lapse = "2026-11-25",
+      lines = { { itemKey = "4306", held = 0, reason = "none listed" }, { itemKey = "2996", held = 2, buy = hold("2996") } },
+    }
+    local tab = predictions(build(entry({ predictions = { launchWeek(), weeks } })))
+    local function order()
+      local out = {}
+      for i, row in ipairs(tab.rows) do
+        out[i] = row.header and row.text:match("^[^:]+") or row.itemString
+      end
+      return out
+    end
+
+    -- By default Prediction buys come first, smallest Max Loss first.
+    assert.are.same(
+      { "Launch week mats", "item:2589", "item:2447", "Weeks 2-3 mats", "item:2996", "item:4306" },
+      order()
+    )
+    -- Whatever the sort, Prediction buys come before its lines with a reason.
+    RecommendationTable.sort(tab, { column = 1, descending = true })
+    assert.are.same(
+      { "Launch week mats", "item:2589", "item:2447", "Weeks 2-3 mats", "item:2996", "item:4306" },
+      order()
+    )
+  end)
+
+  it("sorts without error when Lua's sort weighs a header against itself", function()
+    local ore = { name = "Ore spike", held = 0, tiedUp = 0, cap = 0, lapse = "2027-01-01", lines = { { itemKey = "2770", held = 0, reason = "none listed" } } }
+    local tab = predictions(build(entry({ predictions = { launchWeek(), ore } })))
+
+    assert.are.equal(5, #tab.rows)
+    assert.are.equal("Ore spike: 0 held, 0c of 0c tied up, lapses 2027-01-01", tab.rows[4].text)
+  end)
+
+  it("says when a Prediction's Catalyst is due instead of its lapse date", function()
+    local p = launchWeek()
+    p.happened = "2026-11-04"
+    local tab = predictions(build(entry({ predictions = { p } })))
+
+    assert.are.equal("Launch week mats: 13 held, 14g 54s of 14g 55s tied up, Catalyst on 2026-11-04", tab.rows[1].text)
+  end)
+
+  it("counts the Prediction buys on the tab, not the lines with a reason", function()
+    local tab = predictions(build(entry({ predictions = { launchWeek() } })))
+
+    assert.are.equal("Predictions (1)", tab.tab)
+    assert.is_nil(tab.empty)
+  end)
+
+  it("isn't empty while it has a Prediction, even one with no lines", function()
+    local tab = predictions(build(entry({ predictions = { launchWeek({}) } })))
+
+    assert.are.equal(1, #tab.rows)
+    assert.is_nil(tab.empty)
+  end)
+
+  it("says what to do with a line with no buy: nothing, and why, and it can't be marked Bought", function()
+    local tab = predictions(build(entry({ predictions = { launchWeek() } })))
+    local line = tab.rows[3]
+
+    assert.are.same({ "No buy", "Nothing to buy right now: would lose 37%." }, { line.action, line.todo })
+    assert.is_false(line.markable)
+    assert.is_true(tab.rows[2].markable)
   end)
 end)

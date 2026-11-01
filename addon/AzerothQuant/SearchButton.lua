@@ -38,15 +38,16 @@ end
 
 -- The tabs whose rows are bought on the Auction House. Flips to Craft and Flips to
 -- Disenchant have their own tabs, so a Shopping List row is a Flip to Sell or to Vendor.
-local BUY_TABS = { ["Shopping List"] = true, ["Prediction buys"] = true, ["Buy Under"] = true }
+local BUY_TABS = { ["Shopping List"] = true, ["Predictions"] = true, ["Buy Under"] = true }
 
 -- row is a RecommendationTable row, or nil. ctx is what the glue knows right now:
 -- { section (the row's tab), ahOpen, throttled, bagUnits, loaded (the client has the item) }.
 -- Returns nil when the slot is Post's, else { enabled, label, reason, call }.
 function SearchButton.state(row, ctx)
   local r = row and row.record
-  -- A Disenchant source group's Buy Under is for no one item (#88).
-  if not r or not r.itemKey or not BUY_TABS[ctx.section] then
+  -- A Disenchant source group's Buy Under is for no one item (#88), and a Prediction's line
+  -- with no buy has no price to search against (#207).
+  if not r or not r.itemKey or r.reason or not BUY_TABS[ctx.section] then
     return nil
   end
   -- Bought, so posting it is next (#81).
