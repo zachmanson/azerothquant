@@ -4006,16 +4006,19 @@ def test_held_units_of_a_predictions_item_keys_are_held_under_it(db):
 
 
 @pytest.mark.parametrize(
-    ("ended", "prediction_"),
+    ("stands", "prediction_"),
     [
-        (False, prediction(LINEN_KEY, lapse=TODAY)),  # its last day
-        (True, prediction(LINEN_KEY, written=TODAY - timedelta(weeks=9))),  # Lapsed
-        (True, prediction(LINEN_KEY, happened=TODAY)),
-        (False, prediction(LINEN_KEY, happened=TODAY + timedelta(days=1))),
+        (True, prediction(LINEN_KEY, lapse=TODAY)),  # its last day
+        (False, prediction(LINEN_KEY, written=TODAY - timedelta(weeks=9))),  # Lapsed
+        (False, prediction(LINEN_KEY, happened=TODAY)),
+        (True, prediction(LINEN_KEY, happened=TODAY + timedelta(days=1))),
+        (False, prediction(LINEN_KEY, written=TODAY + timedelta(days=1))),  # not written yet
     ],
-    ids=["lapses today", "lapsed", "catalyst happened", "catalyst still to come"],
+    ids=["lapses today", "lapsed", "catalyst happened", "catalyst still to come", "not yet written"],
 )
-def test_a_prediction_ends_when_its_catalyst_happens_or_it_lapses(db, ended, prediction_):
+def test_a_prediction_stands_from_its_written_day_until_its_catalyst_or_lapse(
+    db, stands, prediction_
+):
     result = run(
         db,
         selling_two_linen_an_hour(),
@@ -4023,9 +4026,9 @@ def test_a_prediction_ends_when_its_catalyst_happens_or_it_lapses(db, ended, pre
         predictions=[prediction_],
     )
 
-    # Once it ends, the units go to their best Action without it.
+    # Before it's written or once it ends, the units go to their best Action without it.
     actions = [r.action for r in result[MARKET].holdings]
-    assert actions == ([Action.SELL, Action.VENDOR] if ended else [Action.HOLD])
+    assert actions == ([Action.HOLD] if stands else [Action.SELL, Action.VENDOR])
 
 
 def test_units_held_since_a_prediction_was_written_tie_up_their_written_day_cost(db):

@@ -30,9 +30,13 @@ class Prediction:
     happened: date | None = None  # when the player marked the Catalyst as happened
 
     def active_on(self, day: date) -> bool:
-        """Whether it still stands on `day`: its Catalyst hasn't happened and it hasn't
-        Lapsed. It lasts through its lapse date."""
-        return (self.happened is None or day < self.happened) and day <= self.lapse
+        """Whether it stands on `day`: it has been written, its Catalyst hasn't happened and
+        it hasn't Lapsed. It starts on its written day and lasts through its lapse date."""
+        return (
+            self.written <= day
+            and (self.happened is None or day < self.happened)
+            and day <= self.lapse
+        )
 
 
 def load_predictions(path: Path) -> list[Prediction]:
