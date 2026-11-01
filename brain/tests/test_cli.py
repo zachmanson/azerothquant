@@ -2264,6 +2264,17 @@ def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
     assert "Flips to Disenchant not simulated." in text
 
 
+def test_backtest_splits_the_trades_with_their_postings_and_deposits_lost(tmp_path):
+    # #204: sold out / part vendored / still posted, each with what its postings lost.
+    config = _three_linen_held(tmp_path)
+
+    text = run_backtest(config, since=None, until=None, policies=["brain"], start_gold=400_000)
+
+    [split] = [line for line in text.splitlines() if line.startswith("brain: ")]
+    none = "0 made 0c on 0c spent, 0 postings expired losing 0c in Deposits"
+    assert split == f"brain: sold out {none}; part vendored {none}; still posted {none}"
+
+
 def test_backtest_splits_a_buy_under_policys_trades_by_way(tmp_path):
     # #173: the pass bar is on the Sell way, so a Vendor way's sure profit can't hide it.
     config = _three_linen_held(tmp_path)

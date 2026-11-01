@@ -606,8 +606,9 @@ def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float
     for name, sim in m.runs.items():
         split = sim.split()
         splits.append(
-            f"{name}: sold out in week 1 {_trades_line(split.sold_out_in_week_1)}; "
-            f"relisted {_trades_line(split.relisted)}; the rest {_trades_line(split.rest)}\n"
+            f"{name}: sold out {_split_line(split.sold_out)}; "
+            f"part vendored {_split_line(split.part_vendored)}; "
+            f"still posted {_split_line(split.still_posted)}\n"
         )
         if name in BUY_UNDER_POLICIES:
             # The pass bar is on the Sell way: a Vendor way can't lose this way (#173).
@@ -683,6 +684,14 @@ def _trades_line(trades: Sequence[Trade]) -> str:
     made = sum(t.profit() for t in trades)
     spent = sum(t.cost for t in trades)
     return f"{len(trades)} made {_money(made)} on {_money(spent)} spent"
+
+
+def _split_line(trades: Sequence[Trade]) -> str:
+    """`_trades_line`, and the postings of the trades that expired and the Deposits they
+    lost (#204)."""
+    postings = sum(t.postings for t in trades)
+    lost = sum(t.deposits for t in trades)
+    return f"{_trades_line(trades)}, {postings} postings expired losing {_money(lost)} in Deposits"
 
 
 def _graded_title(market: Market) -> str:

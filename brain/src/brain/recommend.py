@@ -568,6 +568,17 @@ class _Queue:
 
 
 @dataclass(frozen=True)
+class HoldingsAdvice:
+    """What the Holdings advice for an Item Key's held units works from at a Scan, for the
+    Backtest's exits (#204): the price to post at (None without one), the units that sell
+    within the Sale Horizon, and the deposits unit i of its queue is expected to lose."""
+
+    post_at: float | None
+    room: int
+    lost: Callable[[int], float]
+
+
+@dataclass(frozen=True)
 class CharacterHolding:
     """How many units of an Item Key one Character holds. `bound` is the part of
     `bags` and `bank` that can't be mailed or sold."""
@@ -1990,6 +2001,31 @@ def deposit_of(conn: sqlite3.Connection, config: Config, market: Market) -> Call
     return _valuer_at(conn, config, market, times[-1] if times else None).deposit
 
 
+def holdings_advice(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    fair_value_cache: FairValueCache | None = None,
+) -> Callable[[str, int], HoldingsAdvice]:
+    """What the Holdings advice for an Item Key's held units works from, as of the Market's
+    Scan requested at a time (#204): its `post_at`, Sale Horizon room and queue under the
+    Holdings priors, as `_holding_rows` splits Sell from Vendor by. The queue loses
+    `deposit_of`'s Deposits, the ones the Backtest charges. Only the latest Scan asked
+    about keeps its Valuer."""
+    valuers: dict[int, _Valuer] = {}
+    deposit = deposit_of(conn, config, market)
+
+    def advice(item_key: str, at: int) -> HoldingsAdvice:
+        if at not in valuers:
+            valuers.clear()
+            valuers[at] = _valuer_at(conn, config, market, at, fair_value_cache=fair_value_cache)
+        valuer = valuers[at]
+        queue = replace(valuer.queue(item_key, flips=False), deposit=deposit(item_key))
+        return HoldingsAdvice(valuer.post_at(item_key), valuer.holdings_room(item_key), queue.lost)
+
+    return advice
+
+
 def _valuer(
     conn: sqlite3.Connection,
     config: Config,
@@ -2516,30 +2552,35 @@ class _Valuer:
 
     def rows(self, item_key: str, holding: Holding) -> list[Row]:
         own = self.rates.get(item_key)
-        rate, sibling_sales = self.held_rate(item_key)
+        _, sibling_sales = self.held_rate(item_key)
         has_data = self.has_data(item_key)
         post_at = self.post_at(item_key) if has_data else None
         wait_at = self.wait_at(item_key) if has_data else None
         waiting = wait_at is not None and (post_at is None or wait_at > post_at)
-        c = self._config
-        room = sellable_units(
-            rate,
-            c.sell_rate_prior_hours_holdings,
-            c.sale_size_prior_events_holdings,
-            c.sale_horizon_seconds,
-        )
         return _holding_rows(
             item_key,
             holding,
             has_data,
             wait_at if waiting else post_at,
-            room,
+            self.holdings_room(item_key),
             own.sale_events if own else None,
             sibling_sales,
             self.vendor.get(item_id_of(item_key)),
             self.queue(item_key, flips=False),
             self.cut,
             Action.WAIT if waiting else Action.SELL,
+        )
+
+    def holdings_room(self, item_key: str) -> int:
+        """The held units of an Item Key that sell within the Sale Horizon, at its
+        `held_rate` under the Holdings priors."""
+        c = self._config
+        rate, _ = self.held_rate(item_key)
+        return sellable_units(
+            rate,
+            c.sell_rate_prior_hours_holdings,
+            c.sale_size_prior_events_holdings,
+            c.sale_horizon_seconds,
         )
 
     def has_data(self, item_key: str) -> bool:
@@ -2760,10 +2801,11 @@ def _holding_rows(
     elif unbound:
         sell_price = 0.0 if post_at is None else post_at * (1 - cut)
         sellable = min(unbound, room)
-        selling = 0
-        if post_at is not None:
-            while selling < sellable and sell_price - queue.lost(selling) > (vendor_price or 0):
-                selling += 1
+        selling = (
+            0
+            if post_at is None
+            else units_selling(sell_price, sellable, queue.lost, vendor_price or 0)
+        )
         if selling:
             profit = selling * sell_price - queue.lost_by(0, selling)
             rows.append(
@@ -2792,6 +2834,18 @@ def _holding_rows(
             )
         )
     return rows
+
+
+def units_selling(
+    sell_price: float, most: float, lost: Callable[[int], float], vendor_price: float
+) -> int:
+    """How many held units Sell rather than Vendor (#78): unit i of the queue Sells while
+    `sell_price`, after the cut, less the deposits it's expected to lose (`lost`) beats
+    the Vendor Price, up to `most`. The Backtest's exits use it too (#204)."""
+    selling = 0
+    while selling < most and sell_price - lost(selling) > vendor_price:
+        selling += 1
+    return selling
 
 
 # Enum.ItemBind values whose items can't go on the Auction House: Bind on Pickup and

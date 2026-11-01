@@ -3,12 +3,16 @@ its own simulated gold, and is graded by the Sale Records that came after each b
 
 A posted unit sells to a later Sale Record of its Item Key at or above its price, up to
 the record's units, our cheapest units first (a buyer takes the cheapest, so our cheaper
-unit would have gone instead). Only a record whose Listing was still up at or after the
-Scan we posted in counts. A sold unit brings its price after the cut, less a Deposit for
-every 24 h posting it waited through. A Buy's units unsold a week after it was posted is relisted
-once, for another week, at the lower of its price and 1c under other players' cheapest
-ask then, if that still beats the Vendor Price after the cut; unsold after that, it's
-vendored after losing a Deposit for each day posted. All amounts are copper.
+unit would have gone instead). Only a record whose Listing was still up while our posting
+was (at or after the Scan we posted in, and before its 24 h ran out) counts. A sold unit
+brings its price after the cut.
+
+A posting's unsold units exit as the Brain's Holdings advice would (#204): at the first
+Scan at or after its 24 h runs out, each loses a Deposit, and unit i reposts at the
+Holdings price then (its own without one) while that price after the cut, less the
+Deposits it's expected to lose waiting its turn, beats the Vendor Price, up to what sells
+within the Sale Horizon; the rest are vendored. Every policy exits this way. Between a
+posting running out and that Scan the units aren't on the AH. All amounts are copper.
 """
 
 import math
@@ -31,12 +35,15 @@ from brain.predictions import Prediction
 from brain.recommend import (
     Action,
     BuyUnder,
+    HoldingsAdvice,
     MarketRecommendations,
     Row,
     auction_cut,
     deposit_of,
+    holdings_advice,
     recommend_market,
     take_under,
+    units_selling,
 )
 from brain.scan import item_id_of
 
@@ -100,13 +107,14 @@ BuyPolicy = Callable[[int, float, frozenset[str], float], Sequence[Buy]]
 @dataclass(frozen=True)
 class Terms:
     """What the Market charges and pays: its cut, a Deposit per unit posted for 24 h, the
-    Vendor Price, and other players' cheapest unit buyout of an Item Key in a Scan (None
-    when they have none up)."""
+    Vendor Price, other players' cheapest unit buyout of an Item Key in a Scan (None
+    when they have none up), and the Brain's Holdings advice for an Item Key at a Scan."""
 
     cut: float
     deposit: Callable[[str], float]
     vendor: Callable[[str], int]
     cheapest_ask: Callable[[str, int], int | None]
+    holdings: Callable[[str, int], HoldingsAdvice]
 
 
 @dataclass
@@ -116,37 +124,39 @@ class Trade:
     item_key: str
     units: int
     cost: float
-    price: float  # per unit, as posted (lowered by a relist)
-    posted_at: int
+    price: float  # per unit, as posted (moved by a repost)
+    posted_at: int  # when its current posting went up
     sold: float = 0  # in part when the grader believes a share of a record (#167)
+    vendored: float = 0
+    postings: int = 0  # that expired
+    deposits: float = 0.0  # lost on them
     proceeds: float = 0.0
     # Its unsold units at their Vendor Price (`salvage`), or at other players' cheapest
     # ask then (`salvage_market`), less the Deposits they lost: when vendored, or as
     # marked at the end if still posted (not `closed`).
     salvage: float = 0.0
     salvage_market: float = 0.0
-    relisted: bool = False
     closed: bool = False
     way: Action | None = None  # a Buy Under's way out (#173)
 
     @property
     def left(self) -> float:
-        return self.units - self.sold
+        return self.units - self.sold - self.vendored
 
     def profit(self, market: bool = False) -> float:
         """Gold it made, at the vendor mark or the market mark."""
-        return self.proceeds + (self.salvage_market if market else self.salvage) - self.cost
+        salvage = self.salvage_market if market else self.salvage
+        return self.proceeds + salvage - self.deposits - self.cost
 
 
 @dataclass(frozen=True)
 class Split:
-    """The trades by how they went: sold out without a relist (or done at once), sold
-    or vendored after one, and the rest (vendored unsold after a week, or still posted
-    at the end)."""
+    """The trades by how they went (#204): sold out (or done at once), some units
+    vendored, and units still posted at the end."""
 
-    sold_out_in_week_1: list[Trade]
-    relisted: list[Trade]
-    rest: list[Trade]
+    sold_out: list[Trade]
+    part_vendored: list[Trade]
+    still_posted: list[Trade]
 
 
 @dataclass
@@ -177,10 +187,10 @@ class Simulation:
         return sum(t.profit(market) for t in self.trades)
 
     def split(self) -> Split:
-        week_1 = [t for t in self.trades if not t.left and not t.relisted]
-        relisted = [t for t in self.trades if t.relisted]
-        rest = [t for t in self.trades if t.left and not t.relisted]
-        return Split(week_1, relisted, rest)
+        still_posted = [t for t in self.trades if t.left]
+        part_vendored = [t for t in self.trades if not t.left and t.vendored]
+        sold_out = [t for t in self.trades if not t.left and not t.vendored]
+        return Split(sold_out, part_vendored, still_posted)
 
 
 def simulate(
@@ -239,11 +249,12 @@ def _fill(sim: Simulation, records: Sequence[SaleRecord], terms: Terms, grade_sh
         for trade in sorted(by_item.get(r.item_key, []), key=lambda t: t.price):
             if units <= 0 or trade.price > r.unit_buyout:
                 break
-            if r.last_seen < trade.posted_at or trade.sold == trade.units:
+            if not trade.posted_at <= r.last_seen < trade.posted_at + POSTING_SECONDS:
+                continue  # sold before our posting went up, or after it ran out
+            if not trade.left:
                 continue
-            n = min(units, trade.units - trade.sold)
-            waits = max(0, math.ceil((r.seen_at - trade.posted_at) / POSTING_SECONDS) - 1)
-            got = n * (trade.price * (1 - terms.cut) - waits * terms.deposit(trade.item_key))
+            n = min(units, trade.left)
+            got = n * trade.price * (1 - terms.cut)  # its Deposits went as its postings ran out
             trade.sold += n
             trade.proceeds += got
             sim.gold += got
@@ -251,29 +262,54 @@ def _fill(sim: Simulation, records: Sequence[SaleRecord], terms: Terms, grade_sh
 
 
 def _expire(sim: Simulation, at: int, terms: Terms, end: bool = False) -> None:
-    """Relist or vendor the posted units whose week ran out by the Scan at `at`, and close the
-    sold-out ones. At the `end`, mark what's still posted instead (left open)."""
+    """Exit the units of each posting run out by the Scan at `at` as the Brain's Holdings
+    advice would then (#204), and close the sold-out lots. At the `end`, mark what's still
+    posted instead (left open)."""
     for trade in sim.trades:
         if trade.closed:
             continue
-        age = at - trade.posted_at
-        if trade.left and not end and age < (2 if trade.relisted else 1) * WEEK_SECONDS:
-            continue
-        vendor = terms.vendor(trade.item_key)
-        ask = terms.cheapest_ask(trade.item_key, at)
-        if trade.left and not end and not trade.relisted:
-            price = trade.price if ask is None else min(trade.price, ask - 1)
-            if price * (1 - terms.cut) > vendor:
-                trade.price, trade.relisted = price, True
-                continue
-        lost = math.floor(min(age, 2 * WEEK_SECONDS) / POSTING_SECONDS) * terms.deposit(
-            trade.item_key
-        )
-        market = vendor if ask is None else min(ask - 1, trade.price) * (1 - terms.cut)
-        trade.salvage = trade.left * (vendor - lost)
-        trade.salvage_market = trade.left * (max(vendor, market) - lost)
-        sim.gold += trade.salvage
-        trade.closed = not end or not trade.left
+        if not trade.left:
+            trade.closed = True
+        elif end:
+            vendor = trade.left * terms.vendor(trade.item_key)
+            trade.salvage += vendor
+            trade.salvage_market += trade.left * _market_mark(trade, at, terms)
+            sim.gold += vendor
+        elif at >= trade.posted_at + POSTING_SECONDS:
+            _repost(sim, trade, at, terms)
+
+
+def _repost(sim: Simulation, trade: Trade, at: int, terms: Terms) -> None:
+    """Lose a Deposit on each unit of `trade`'s expired posting, then repost the units the
+    Holdings advice at `at` keeps posting at its price (theirs without one) and vendor the
+    rest."""
+    lost = trade.left * terms.deposit(trade.item_key)
+    trade.postings += 1
+    trade.deposits += lost
+    sim.gold -= lost
+    advice = terms.holdings(trade.item_key, at)
+    price = trade.price if advice.post_at is None else advice.post_at
+    vendor = terms.vendor(trade.item_key)
+    # As the Holdings split Sell from Vendor; `trade.left` may be part of a unit.
+    selling = units_selling(
+        price * (1 - terms.cut), min(trade.left, advice.room), advice.lost, vendor
+    )
+    keep = min(trade.left, selling)
+    vendoring = trade.left - keep
+    trade.salvage += vendoring * vendor
+    trade.salvage_market += vendoring * _market_mark(trade, at, terms)
+    trade.vendored += vendoring
+    sim.gold += vendoring * vendor
+    trade.price, trade.posted_at = price, at
+    trade.closed = not trade.left
+
+
+def _market_mark(trade: Trade, at: int, terms: Terms) -> float:
+    """An unsold unit of `trade` at other players' cheapest ask at `at` less 1c, after the
+    cut, capped at its price, and never under the Vendor Price."""
+    vendor = terms.vendor(trade.item_key)
+    ask = terms.cheapest_ask(trade.item_key, at)
+    return vendor if ask is None else max(vendor, min(ask - 1, trade.price) * (1 - terms.cut))
 
 
 @dataclass(frozen=True)
@@ -301,7 +337,7 @@ def backtest(
 ) -> list[MarketBacktest]:
     """Each Market's `policies` (names in POLICIES or BUY_UNDER_POLICIES) trading its
     Scans in [since, until] from `start_gold`, buying nothing in the last
-    `no_buys_in_last_seconds` of them, so every buy gets its week. Flips to Disenchant
+    `no_buys_in_last_seconds` of them, so every buy gets a week to sell. Flips to Disenchant
     are left out: their mats aren't simulated."""
     config = replace(config, grades_path=None)  # a Backtest never freezes a Grade
     result = []
@@ -315,7 +351,7 @@ def backtest(
             continue
         cache = FairValueCache()
         records = sale_records(conn, market, config, cache)
-        terms = _terms(conn, config, market)
+        terms = _terms(conn, config, market, cache)
 
         shares = (1.0, config.backtest_grade_low, config.backtest_grade_high)
         graded = {
@@ -341,7 +377,9 @@ def backtest(
     return result
 
 
-def _terms(conn: sqlite3.Connection, config: Config, market: Market) -> Terms:
+def _terms(
+    conn: sqlite3.Connection, config: Config, market: Market, cache: FairValueCache
+) -> Terms:
     vendor = vendor_prices(conn, market.era)
     asks: dict[int, Mapping[str, list[tuple[int, int]]]] = {}
 
@@ -357,6 +395,7 @@ def _terms(conn: sqlite3.Connection, config: Config, market: Market) -> Terms:
         deposit=deposit_of(conn, config, market),
         vendor=lambda item_key: vendor.get(item_id_of(item_key), 0),
         cheapest_ask=cheapest_ask,
+        holdings=holdings_advice(conn, config, market, cache),
     )
 
 
