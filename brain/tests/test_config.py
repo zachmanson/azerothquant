@@ -285,7 +285,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert config.row_min_profit_share == 0.005
     assert config.row_min_profit_copper == 1000
     assert config.row_min_profit_per_click == 500
-    assert config.risky_max_loss_share == 0.5
+    assert config.risky_max_loss_share == 0.25
     assert config.sell_rate_prior_hours_holdings == 3
     assert config.sell_rate_prior_hours_flips == 24
     assert config.sale_size_prior_events_holdings == 1

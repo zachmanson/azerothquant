@@ -46,3 +46,11 @@ Shopping List rows per Scan, over the 66 Scans the Backtest values at its own si
 - A Steel Bar-like run shows as Risky whatever the Stake, never as a normal row: the cutoff still holds for those.
 - Long Risky rows are common on Beta (several a Scan at a ~40g Stake, 18 to 29 units); they're named, flagged risky and not backtested, so their Flip Grades are what will say whether they pay.
 - `_flips` runs twice for an Item Key with a Recent Price and cheap stock, once with the skip, for the long runs.
+
+## Amendment: the loss limit is back to 25% of the Stake (#211)
+
+Decided in the grill of the 2026-11-01 independent audit (`docs/research/independent-audit-2026-11-01/pass2-audit.md`, finding 4). `risky_max_loss_share` defaults to 0.25 again, the grilled value, instead of the 0.5 it was raised to so that Steel Bar would show.
+
+On 10 sampled Beta Scans at 40g, Risky rows were 36 of 60 Shopping List rows and carried 79% of the list's expected profit, with unsold losses up to 43% of the Stake. Risky rows are never backtested, so nothing measured backs the higher limit. At 25%, a Steel Bar-like run at a ~40g Stake is hidden again; a player who wants it can set `risky_max_loss_share = 0.5` in config.toml.
+
+Revisit once 10 Risky Flips have Flip Grades (ADR-0042: judged on Flip Grades, not the Beta Backtest).

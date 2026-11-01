@@ -90,9 +90,9 @@
 # if none of it sold; the risk is yours to take. A longer one shows too if it's posted at
 # or under the price it's sold at lately, buys no more than it's been seen to sell, and
 # loses at most risky_max_loss_share of the Stake if none of it sold. Default to 5 and
-# 0.5. Must come before the first [[installs]].
+# 0.25. Must come before the first [[installs]].
 # risky_max_units = 5
-# risky_max_loss_share = 0.5
+# risky_max_loss_share = 0.25
 
 # Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
 # evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours

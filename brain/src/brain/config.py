@@ -149,8 +149,8 @@ DEFAULT_FLIP_TIED_UP_SHARE = 0.60
 # than this many units (#194, ADR-0037): the few-unit dear flips the cap hid made the money.
 DEFAULT_RISKY_MAX_UNITS = 5
 # A longer Risky row may lose at most this share of the Stake if none of it sells (#200,
-# ADR-0041).
-DEFAULT_RISKY_MAX_LOSS_SHARE = 0.5
+# ADR-0041). Back to the grilled 25% until 10 Risky Flips have Flip Grades (#211).
+DEFAULT_RISKY_MAX_LOSS_SHARE = 0.25
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
