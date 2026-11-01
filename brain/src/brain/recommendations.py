@@ -47,6 +47,8 @@ from brain.recommend import (
     DisenchantFlip,
     LootAlert,
     MarketRecommendations,
+    PredictionLine,
+    PredictionSummary,
     ReagentBuy,
     Row,
 )
@@ -194,6 +196,7 @@ def _recommendations(
             "holdings": [_row(r) for r in m.holdings],
             "shoppingList": [_row(r) for r in m.shopping_list],
             "predictionBuys": [_row(r) for r in m.prediction_buys],
+            "predictions": [_prediction(p) for p in m.predictions],
             "held": {
                 item_key: [
                     {"character": h.character, "bags": h.bags, "bank": h.bank, "bound": h.bound}
@@ -215,6 +218,31 @@ def _recommendations(
         if m.market in beta_priors:
             by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
     return by_realm
+
+
+def _prediction(p: PredictionSummary) -> dict[str, object]:
+    """A Prediction for the Predictions tab (#207): its header, and a line per Item Key
+    with its buy or the Brain's reason it has none."""
+    out: dict[str, object] = {
+        "name": p.name,
+        "held": p.held,
+        "tiedUp": math.floor(p.tied_up),
+        "cap": math.floor(p.cap),
+        "lapse": p.lapse.isoformat(),
+        "lines": [_prediction_line(line) for line in p.lines],
+    }
+    if p.happened is not None:
+        out["happened"] = p.happened.isoformat()
+    return out
+
+
+def _prediction_line(line: PredictionLine) -> dict[str, object]:
+    out: dict[str, object] = {"itemKey": line.item_key, "held": line.held}
+    if line.buy is not None:
+        out["buy"] = _row(line.buy)
+    if line.reason is not None:
+        out["reason"] = line.reason
+    return out
 
 
 def _beta(prior: BetaPrior) -> dict[str, object]:

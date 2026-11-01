@@ -32,6 +32,8 @@ from brain.recommend import (
     LootValue,
     MarketRecommendations,
     NodeKind,
+    PredictionLine,
+    PredictionSummary,
     ReagentBuy,
     ReagentUse,
     Row,
@@ -63,6 +65,8 @@ LINEN_LINK = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
 LINEN_KEY = "2589"
 ORE = "item:2770::::::::20:1490"
 ORE_KEY = "2770"
+WOOL = "item:2592::::::::20:1490"
+WOOL_KEY = "2592"
 GOLD = 100 * 100 * 100  # copper
 TAILORING = 197
 
@@ -4327,6 +4331,145 @@ def test_prediction_buys_get_the_budget_whatever_the_shopping_list_shows(db, bud
     assert (buy.quantity, buy.cost) == (units, units * 20)
 
 
+# --- The Predictions tab: every Item Key, and why it has no buy (#207) ---
+
+
+def lines_of(result, name="Linen spike"):
+    [p] = [p for p in result[MARKET].predictions if p.name == name]
+    return p.lines
+
+
+def test_an_item_key_nobody_lists_shows_none_listed_after_the_buys(db):
+    # As in the 10% test: 10 Linen bought. Nobody lists Ore.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=100), row(quantity=5, unit=105))],
+        [character_read(money=GOLD, vendor_prices={2589: 95})],
+        predictions=[prediction(ORE_KEY, LINEN_KEY)],
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert lines_of(result) == [
+        PredictionLine(LINEN_KEY, held=0, buy=buy),
+        PredictionLine(ORE_KEY, held=0, reason="none listed"),
+    ]
+
+
+def test_a_predictions_header_has_its_held_units_and_gold_tied_up_of_its_cap(db):
+    # As in the cap test: 3 Ore held tie up 3s, and 12 Linen bought 12s, of 15s.
+    ore = "|cffffffff|Hitem:2770::::::::20:1490:::::::::|h[Copper Ore]|h|r"
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=100))],
+        [character_read(item(ore, count=3), money=10000, vendor_prices={2589: 95, 2770: 100})],
+        predictions=[prediction(LINEN_KEY, ORE_KEY, lapse=TODAY + timedelta(days=9))],
+    )
+
+    [buy] = result[MARKET].prediction_buys
+    assert result[MARKET].predictions == [
+        PredictionSummary(
+            "Linen spike",
+            lapse=TODAY + timedelta(days=9),
+            happened=None,
+            held=3,
+            tied_up=1500,
+            cap=1500,
+            lines=[
+                PredictionLine(LINEN_KEY, held=0, buy=buy),
+                PredictionLine(ORE_KEY, held=3, reason="none listed"),
+            ],
+        )
+    ]
+
+
+def test_an_item_key_listed_only_at_the_merchant_cost_or_over_shows_so(db):
+    # #91: a merchant sells Linen for 100, so no Sell fetches more than 95.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=95), row(quantity=5, unit=96))],
+        [character_read(money=GOLD, vendor_prices={2589: 95}, merchant_costs={2589: 100})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert lines_of(result) == [PredictionLine(LINEN_KEY, reason="at Merchant Cost")]
+
+
+@pytest.mark.parametrize(("unit", "reason"), [(120, "would lose 21%"), (106, "would lose 11%")])
+def test_an_item_key_whose_cheapest_unit_loses_too_much_shows_its_loss_percent(db, unit, reason):
+    # A vendor pays 95, so a 120 could lose 25: 20.8% of it, over the 10% Max Loss. A 106
+    # could lose 10.4%, shown rounded up so it never reads as within the 10%.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=unit), row(quantity=5, unit=200))],
+        [character_read(money=GOLD, vendor_prices={2589: 95})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert lines_of(result) == [PredictionLine(LINEN_KEY, reason=reason)]
+
+
+def test_an_item_key_crowded_out_by_its_predictions_cap_shows_cap_full(db):
+    # 15% of 1g is 15s. Ore can lose 2% and fills it before Wool, which can lose 5%.
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=20, unit=100), row(WOOL, quantity=20, unit=100))],
+        [character_read(money=10000, vendor_prices={2592: 95, 2770: 98})],
+        predictions=[prediction(ORE_KEY, WOOL_KEY)],
+    )
+
+    assert [(line.item_key, line.reason) for line in lines_of(result)] == [
+        (ORE_KEY, None),
+        (WOOL_KEY, "cap full"),
+    ]
+
+
+def test_an_item_key_crowded_out_by_all_predictions_cap_shows_so(db):
+    # Each Prediction and all of them together are capped at 15s, which Ore fills.
+    result = run(
+        db,
+        [scan(T0, row(ORE, quantity=20, unit=100), row(quantity=20, unit=100))],
+        [character_read(money=10000, vendor_prices={2589: 95, 2770: 98})],
+        config=replace(CONFIG, predictions_cap_share=0.15),
+        predictions=[prediction(LINEN_KEY), prediction(ORE_KEY, name="Ore spike")],
+    )
+
+    assert lines_of(result) == [PredictionLine(LINEN_KEY, reason="all Predictions' cap full")]
+
+
+def test_a_cap_full_says_it_was_halved_while_the_brake_is_on(db):
+    # Halved, the cap is 7s 50c: 7 Linen at 1s, which can lose 5%, leave too little for Wool.
+    ore, bought = graded_ore_prediction(price=1000)  # -90%
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=100), row(WOOL, quantity=20, unit=100))],
+        [character_read(money=10000, vendor_prices={2589: 95, 2592: 90, 2770: 10})],
+        predictions=[prediction(LINEN_KEY, WOOL_KEY), ore],
+        mailbox_reads=[bought],
+    )
+
+    assert [(line.item_key, line.reason) for line in lines_of(result)] == [
+        (LINEN_KEY, None),
+        (WOOL_KEY, "cap full (halved: Predictions losing)"),
+    ]
+
+
+def test_an_item_key_the_gold_runs_out_before_shows_out_of_gold(db):
+    # With caps of all the gold, 1s buys 5 Linen at 20c, which can lose 5%, before Wool,
+    # which can lose 10%.
+    result = run(
+        db,
+        [scan(T0, row(quantity=20, unit=20), row(WOOL, quantity=20, unit=20))],
+        [character_read(money=100, vendor_prices={2589: 19, 2592: 18})],
+        config=replace(CONFIG, prediction_cap_share=1.0, predictions_cap_share=1.0),
+        predictions=[prediction(LINEN_KEY, WOOL_KEY)],
+    )
+
+    assert [(line.item_key, line.reason) for line in lines_of(result)] == [
+        (LINEN_KEY, None),
+        (WOOL_KEY, "out of gold"),
+    ]
+
+
 # --- Unlinked Sold Outcomes (#27) ---
 
 
@@ -5372,7 +5515,7 @@ def test_a_merged_prediction_buy_keeps_the_room_beta_added_to_over_a_bigger_one(
         ),
     ]
 
-    (row,) = _spend_on_predictions(buys, 100000, _Caps(100000, DEFAULTS))
+    (row,), _ = _spend_on_predictions(buys, 100000, _Caps(100000, DEFAULTS))
 
     assert row.quantity == 10
     assert row.beta_room == BetaRoom(950.0, room=8, from_beta=3)

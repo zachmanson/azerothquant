@@ -1278,7 +1278,9 @@ def test_recommend_chain_says_when_nothing_crafts_the_item_key(tmp_path):
     assert "No Craft row of 2589." in run_recommend(config, chain="2589")
 
 
-def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
+def _linen_spike_held_and_listed(tmp_path):
+    """A Prediction on Linen and Wool (2592), with 3 Linen held, 20 listed at 1s and no
+    Wool listed."""
     config = dataclasses.replace(
         config_for(tmp_path, Install(tmp_path / "_classic_beta_", Era.BETA)),
         predictions_path=tmp_path / "predictions.toml",
@@ -1288,7 +1290,7 @@ def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(
 [[predictions]]
 name = "Linen spike"
 reason = "Tailoring quests"
-item_keys = ["2589"]
+item_keys = ["2589", "2592"]
 catalyst = "Phase 2"
 written = 2026-09-01
 lapse = 2027-01-01
@@ -1328,14 +1330,25 @@ lapse = 2027-01-01
     with closing(open_history(config.history_path)) as conn:
         import_scans(conn, [scan], Era.BETA, config)
         import_character_reads(conn, [read], Era.BETA, config)
+    return config
 
-    text = run_recommend(config)
+
+def test_recommend_labels_what_depends_on_a_prediction_and_lists_its_buys_apart(tmp_path):
+    text = run_recommend(_linen_spike_held_and_listed(tmp_path))
 
     lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
     assert ["2589", "Hold", "3", "unknown", "under Linen spike"] in lines
     # The 3 held tie up 95c each of the 15s cap; 12 Linen at 1s can each lose 5c.
-    assert "Buy to Hold under a Prediction, upside unknown: 12s 00c in total" in text
-    assert ["2589", "Linen spike", "12", "1s 00c", "60c", "12s 00c"] in lines
+    assert "Predictions, upside unknown: 12s 00c to buy in total" in text
+    assert "Linen spike: 3 held, 14s 85c of 15s 00c tied up, lapses 2027-01-01" in text
+    assert ["2589", "3", "12", "1s 00c", "60c", "12s 00c"] in lines
+    assert ["2592", "0", "none listed"] in lines
+
+
+def test_recommend_why_not_explains_a_prediction_item_key_with_no_buy(tmp_path):
+    text = run_recommend(_linen_spike_held_and_listed(tmp_path), why_not="2592")
+
+    assert "2592: no Prediction buy under Linen spike: none listed" in text
 
 
 def test_recommend_shows_the_record_of_graded_predictions_and_the_brake(tmp_path):

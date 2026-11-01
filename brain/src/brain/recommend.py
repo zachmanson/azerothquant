@@ -637,6 +637,65 @@ class LootAlert:
     items: dict[str, LootValue] = field(default_factory=dict)
 
 
+class NoBuyKind(StrEnum):
+    """What stopped the next unit of an Item Key under a Prediction (#207), in the order
+    the Brain checks: its Listings, then the caps and the gold."""
+
+    NONE_LISTED = "none listed"
+    MERCHANT_COST = "at Merchant Cost"
+    MAX_LOSS = "would lose"
+    CAP = "cap full"
+    ALL_CAPS = "all Predictions' cap full"
+    GOLD = "out of gold"
+
+
+@dataclass(frozen=True)
+class NoBuy:
+    """Why an Item Key under a Prediction has no buy (#207). `loss_share` is the cheapest
+    unit's Max Loss as a share of its buyout, for MAX_LOSS. `brake` is whether the caps
+    were halved, for CAP and ALL_CAPS."""
+
+    kind: NoBuyKind
+    loss_share: float = 0.0
+    brake: bool = False
+
+
+def no_buy_reason(no_buy: NoBuy) -> str:
+    """The words for `no_buy`: the one place the CLI, `--why-not` and the Addon get them."""
+    if no_buy.kind is NoBuyKind.MAX_LOSS:
+        # Up, so a unit just over the Max Loss share never reads as at it.
+        return f"would lose {math.ceil(round(no_buy.loss_share * 100, 6))}%"
+    if no_buy.kind in (NoBuyKind.CAP, NoBuyKind.ALL_CAPS) and no_buy.brake:
+        return f"{no_buy.kind.value} (halved: Predictions losing)"
+    return no_buy.kind.value
+
+
+@dataclass(frozen=True)
+class PredictionLine:
+    """One Item Key of a Prediction on the Predictions tab (#207): the units Held under
+    it, and its buy, or else the first reason that stopped its next unit."""
+
+    item_key: str
+    held: int = 0
+    buy: Row | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class PredictionSummary:
+    """An active Prediction on the Predictions tab (#207): the units Held under it, the
+    gold they and its buys tie up against its cap, when it ends, and a line per Item Key,
+    those with a buy first."""
+
+    name: str
+    lapse: date
+    happened: date | None
+    held: int
+    tied_up: float
+    cap: float
+    lines: list[PredictionLine]
+
+
 @dataclass(frozen=True)
 class MarketRecommendations:
     market: Market
@@ -668,6 +727,8 @@ class MarketRecommendations:
     # is unknown (ADR-0006).
     prediction_buys: list[Row] = field(default_factory=list)
     prediction_cost: int = 0
+    # Each active Prediction with a line per Item Key, for the Predictions tab (#207).
+    predictions: list[PredictionSummary] = field(default_factory=list)
     # Sold Outcomes whose item name gave no single Item Key, so they close no Lot
     # (ADR-0007). If this isn't zero in practice, Character Reads should record names.
     unlinked_sales: int = 0
@@ -806,11 +867,12 @@ def recommend_market(
     min_profit = _min_profit(stake, config)
     ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
     beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
-    hold_buys = [
-        buy
-        for item_key, offers in sorted(for_sale.items())
-        if item_key in under
-        for buy in _hold_buys(
+    hold_buys: list[_HoldBuy] = []
+    stopped: dict[str, NoBuy] = {}  # what stopped the next unit of an Item Key with no buy
+    for item_key, offers in sorted(for_sale.items()):
+        if item_key not in under:
+            continue
+        found, stop = _hold_buys(
             item_key,
             under[item_key],
             offers,
@@ -825,7 +887,9 @@ def recommend_market(
             beta.get(item_key),
             valuer.cheap(item_key, flips=False),
         )
-    ]
+        hold_buys += found
+        if not found and stop is not None:
+            stopped[item_key] = stop
 
     def outlet(plan: _Plan) -> _Outlet:
         return _outlet(
@@ -886,7 +950,8 @@ def recommend_market(
     ]
     # Most expected profit first; rows without a number to rank by go last.
     rows.sort(key=lambda r: (r.profit is None, -(r.profit or 0)))
-    prediction_buys = _spend_on_predictions(hold_buys, spend, caps)
+    prediction_buys, crowded_out = _spend_on_predictions(hold_buys, spend, caps)
+    stopped |= crowded_out
     market_purchases = purchases(conn, market)
     linked = link_sales(outcomes(conn, market), seen, market_purchases)
     names = item_names(linked, seen, market_purchases)
@@ -905,6 +970,7 @@ def recommend_market(
         shopping_list=shopping,
         prediction_buys=prediction_buys,
         prediction_cost=sum(r.cost for r in prediction_buys),
+        predictions=_prediction_summaries(active, rows, prediction_buys, stopped, caps),
         unlinked_sales=sum(o.kind is MailKind.SOLD and o.item_key is None for o in linked),
         grades=graded,
         pooled_return=pooled,
@@ -3797,11 +3863,26 @@ class _Caps:
     def __init__(self, gold: int, config: Config, brake: bool = False):
         share = 0.5 if brake else 1.0
         self._each = gold * config.prediction_cap_share * share
+        self.brake = brake
         self._total_left = gold * config.predictions_cap_share * share
         self._used: Counter[str] = Counter()
 
+    @property
+    def cap(self) -> float:
+        """The most each Prediction may tie up."""
+        return self._each
+
     def room(self, prediction: str) -> float:
         return min(self._each - self._used[prediction], self._total_left)
+
+    def stop(self, prediction: str, gold: float) -> NoBuy:
+        """Why no unit fits under `prediction` with `gold` left: whichever of the gold,
+        its cap and all Predictions' cap has the least room, the gold on a tie."""
+        each = self._each - self._used[prediction]
+        if gold <= min(each, self._total_left):
+            return NoBuy(NoBuyKind.GOLD)
+        kind = NoBuyKind.CAP if each <= self._total_left else NoBuyKind.ALL_CAPS
+        return NoBuy(kind, brake=self.brake)
 
     def spend(self, prediction: str, gold: float) -> None:
         self._used[prediction] += gold
@@ -4052,10 +4133,11 @@ def _hold_buys(
     config: Config,
     beta: BetaSellRate | None = None,
     cheap: _Cheap | None = None,
-) -> list[_HoldBuy]:
+) -> tuple[list[_HoldBuy], NoBuy | None]:
     """What's worth buying of an Item Key to Hold under a Prediction, from other players'
     (unit buyout, quantity) offers, cheapest first: the units whose Max Loss is small
-    enough. `supply` is every unit on sale, and `held` the units the player could sell.
+    enough, and what stopped the next unit, None if the offers ran out (#207). `supply`
+    is every unit on sale, and `held` the units the player could sell.
 
     A unit's Max Loss is its buyout less its exit without the Prediction. That's Sell, at
     the resale a Flip would get, for the units that would sell within the Sale Horizon if
@@ -4079,7 +4161,7 @@ def _hold_buys(
     most = math.inf if merchant_cost is None else merchant_cost * (1 - cut)
     for unit, quantity in sorted(offers):
         if unit >= most:
-            return buys
+            return buys, NoBuy(NoBuyKind.MERCHANT_COST)
         queued = held + sum(n for _, n in bought)
         take, post_at = 0, None
         if selling:
@@ -4114,13 +4196,13 @@ def _hold_buys(
         for (exit_value, sold_at), same in groupby(exits):
             max_loss = unit - exit_value
             if max_loss > unit * config.prediction_max_loss_share:
-                return buys
+                return buys, NoBuy(NoBuyKind.MAX_LOSS, loss_share=max_loss / unit)
             beta_room = _beta_room(rate, beta, sold_at, held, config, cheap)
             buys.append(_HoldBuy(item_key, prediction, unit, len(list(same)), max_loss, beta_room))
         bought.append((unit, take))
         stepped += quantity - take
         selling = selling and take == quantity
-    return buys
+    return buys, None
 
 
 def _stepped_exits(
@@ -4180,14 +4262,19 @@ def _beta_room(
     return BetaRoom(post_at, room, room - without)
 
 
-def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[Row]:
+def _spend_on_predictions(
+    buys: list[_HoldBuy], gold: int, caps: _Caps
+) -> tuple[list[Row], dict[str, NoBuy]]:
     """The Prediction buys that fit in `gold` and the caps, lowest Max Loss for the gold
-    spent first, as one row per Item Key in that order."""
+    spent first, as one row per Item Key in that order, and what stopped the first unit
+    of each Item Key left without a row (#207): the gold or whichever cap had less room."""
     rows: dict[str, Row] = {}
+    stopped: dict[str, NoBuy] = {}
     for buy in sorted(buys, key=lambda buy: buy.unit_max_loss / buy.unit_buyout):
         room = min(gold, caps.room(buy.prediction))
         quantity = min(buy.quantity, max(0, math.floor(room / buy.unit_buyout)))
         if not quantity:
+            stopped.setdefault(buy.item_key, caps.stop(buy.prediction, gold))
             continue
         cost = quantity * buy.unit_buyout
         gold -= cost
@@ -4206,7 +4293,48 @@ def _spend_on_predictions(buys: list[_HoldBuy], gold: int, caps: _Caps) -> list[
                 default=None,
             ),
         )
-    return list(rows.values())
+    return list(rows.values()), {k: v for k, v in stopped.items() if k not in rows}
+
+
+def _prediction_summaries(
+    predictions: Sequence[Prediction],
+    holdings: Sequence[Row],
+    buys: Sequence[Row],
+    stopped: Mapping[str, NoBuy],
+    caps: _Caps,
+) -> list[PredictionSummary]:
+    """Each active Prediction with a line per Item Key (#207): the units of its Hold
+    `holdings`, its `buys` first in their order, then the rest with what `stopped` their
+    next unit, or none listed. `caps` as left once the Holds and buys are taken out."""
+    held: Counter[str] = Counter()
+    for r in holdings:
+        if r.action is Action.HOLD:
+            held[r.item_key] += r.quantity
+    bought = {r.item_key: r for r in buys}
+    result = []
+    for p in predictions:
+        its_buys = [r for r in buys if r.prediction == p.name]
+        its_holds = [r for r in holdings if r.prediction == p.name]
+        lines = [PredictionLine(r.item_key, held[r.item_key], buy=r) for r in its_buys] + [
+            PredictionLine(
+                k, held[k], reason=no_buy_reason(stopped.get(k, NoBuy(NoBuyKind.NONE_LISTED)))
+            )
+            for k in p.item_keys
+            if k not in bought
+        ]
+        tied_up = sum(r.cost or 0 for r in [*its_holds, *its_buys])
+        result.append(
+            PredictionSummary(
+                p.name,
+                p.lapse,
+                p.happened,
+                sum(held[k] for k in p.item_keys),
+                tied_up,
+                caps.cap,
+                lines,
+            )
+        )
+    return result
 
 
 def _sell_take(

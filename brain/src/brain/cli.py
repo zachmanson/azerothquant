@@ -95,6 +95,7 @@ from brain.recommend import (
     Check,
     MarketRecommendations,
     NodeKind,
+    PredictionSummary,
     Row,
     WhyNot,
     held_units,
@@ -920,20 +921,7 @@ def _render_market(
             for r in m.shopping_list
         ],
     )
-    prediction_buys = _table(
-        ["Item", "Prediction", "Qty", "Max price", "Max Loss", "Cost"],
-        [
-            [
-                r.item_key,
-                r.prediction,
-                str(r.quantity),
-                _money(r.price),
-                _money(r.max_loss),
-                _money(r.cost),
-            ]
-            for r in m.prediction_buys
-        ],
-    )
+    predictions = "".join(_render_prediction(p) for p in m.predictions) or "  (nothing)\n"
     buy_under = _table(
         ["Item", "Buy Under", "Way out", "Units", "Seen"],
         [
@@ -983,14 +971,35 @@ def _render_market(
         f"Shopping List, options each sized on its own within {_money(m.spend)}"
         f"{budget}{least_profit}\n"
         f"{shopping}\n"
-        f"Buy to Hold under a Prediction, upside unknown: {_money(m.prediction_cost)} in total\n"
-        f"{prediction_buys}\n"
+        f"Predictions, upside unknown: {_money(m.prediction_cost)} to buy in total\n"
+        f"{predictions}"
         f"Buy Under\n{buy_under}\n"
         f"{record}\n"
         f"{graded}"
         f"{_flip_record(made)}\n"
         f"{_flip_record(to_craft, 'Flips to Craft')}\n"
     )
+
+
+def _render_prediction(p: PredictionSummary) -> str:
+    """A Prediction's header and a line per Item Key (#207): its buy, or where the buy
+    cells would be, the reason it has none."""
+    # A Prediction only shows while active, so a Catalyst marked as happened is still ahead.
+    ending = f"Catalyst on {p.happened}" if p.happened else f"lapses {p.lapse.isoformat()}"
+    head = f"  {p.name}: {p.held} held, {_money(p.tied_up)} of {_money(p.cap)} tied up, {ending}\n"
+    lines = [
+        [
+            line.item_key,
+            str(line.held),
+            *(
+                [str(b.quantity), _money(b.price), _money(b.max_loss), _money(b.cost)]
+                if (b := line.buy)
+                else [line.reason or "", "", "", ""]
+            ),
+        ]
+        for line in p.lines
+    ]
+    return head + _lines([["Item", "Held", "Qty", "Max price", "Max Loss", "Cost"], *lines])
 
 
 def _render_beta_ratios(m: MarketRecommendations, weight: float) -> str:
@@ -1142,7 +1151,7 @@ def _render_why_not(markets: list[MarketRecommendations], item: str) -> str:
     """Every Check of the one Item Key on sale that `item` is, or else is part of the name
     of, in each Market it's on sale in (#108). Several matches are listed instead. A
     Prediction buy's Item Key, matched by Item Key only, shows its Beta room (#110)."""
-    candidates = {r.item_key: None for m in markets for r in m.prediction_buys}
+    candidates = {line.item_key: None for m in markets for p in m.predictions for line in p.lines}
     candidates |= {w.item_key: w.name for m in markets for w in m.why_not}
     if item in candidates:
         found = {item: candidates[item]}
@@ -1166,6 +1175,13 @@ def _render_why_not(markets: list[MarketRecommendations], item: str) -> str:
             for m in markets
             for r in m.prediction_buys
             if r.item_key == item_key
+        ]
+        + [
+            _market_title(m) + f"{item_key}: no Prediction buy under {p.name}: {line.reason}\n"
+            for m in markets
+            for p in m.predictions
+            for line in p.lines
+            if line.item_key == item_key and line.buy is None
         ]
     )
 

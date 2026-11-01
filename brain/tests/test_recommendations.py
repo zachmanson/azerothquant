@@ -1,5 +1,6 @@
 import subprocess
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 from brain import __version__
@@ -22,6 +23,8 @@ from brain.recommend import (
     MarketRecommendations,
     MatYield,
     NodeKind,
+    PredictionLine,
+    PredictionSummary,
     ReagentBuy,
     ReagentUse,
     Row,
@@ -814,7 +817,7 @@ def test_a_merged_prediction_buy_is_partly_from_beta_if_any_of_its_rooms_was():
             beta_room=BetaRoom(950.0, room=8, from_beta=3),
         ),
     ]
-    (row,) = _spend_on_predictions(buys, 100000, _Caps(100000, Config(installs=())))
+    (row,), _ = _spend_on_predictions(buys, 100000, _Caps(100000, Config(installs=())))
 
     assert _row(row)["roomFromBeta"] is True
 
@@ -951,3 +954,39 @@ def test_a_beta_market_is_never_young():
     data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
 
     assert "young" not in data["recommendations"]["Quel'Thalas"]["Horde"]
+
+
+def test_a_market_carries_each_prediction_with_a_line_per_item_key():
+    # #207: rounded down to the copper, the lapse as the player wrote it.
+    buy = Row("2589", Action.HOLD, 12, price=100, cost=1200, max_loss=60, prediction="Linen spike")
+    linen = PredictionSummary(
+        "Linen spike",
+        lapse=date(2027, 1, 1),
+        happened=None,
+        held=3,
+        tied_up=1485.7,
+        cap=1500.2,
+        lines=[
+            PredictionLine("2589", held=3, buy=buy),
+            PredictionLine("2592", reason="none listed"),
+        ],
+    )
+    due = PredictionSummary(
+        "Ore spike", date(2027, 1, 1), date(2026, 12, 1), held=0, tied_up=0, cap=0, lines=[]
+    )
+    m = MarketRecommendations(MARKET, 1790000000, 10000, predictions=[linen, due])
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    lua_linen, lua_due = data["recommendations"]["Quel'Thalas"]["Horde"]["predictions"]
+    assert {k: v for k, v in lua_linen.items() if k != "lines"} == {
+        "name": "Linen spike",
+        "held": 3,
+        "tiedUp": 1485,
+        "cap": 1500,
+        "lapse": "2027-01-01",
+    }
+    with_buy, without = lua_linen["lines"]
+    assert (with_buy["itemKey"], with_buy["held"], with_buy["buy"]["quantity"]) == ("2589", 3, 12)
+    assert without == {"itemKey": "2592", "held": 0, "reason": "none listed"}
+    assert lua_due["happened"] == "2026-12-01"
