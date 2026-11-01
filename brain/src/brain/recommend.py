@@ -639,11 +639,14 @@ class LootAlert:
 
 class NoBuyKind(StrEnum):
     """What stopped the next unit of an Item Key under a Prediction (#207), in the order
-    the Brain checks: its Listings, then the caps and the gold."""
+    the Brain checks: its Listings, then the caps and the gold. NO_SALES is a MAX_LOSS
+    whose unit could only be Vendored because the Item Key has too few Sale Events for
+    room at any price (#210)."""
 
     NONE_LISTED = "none listed"
     MERCHANT_COST = "at Merchant Cost"
     MAX_LOSS = "would lose"
+    NO_SALES = "no Live sales seen yet"
     CAP = "cap full"
     ALL_CAPS = "all Predictions' cap full"
     GOLD = "out of gold"
@@ -4196,6 +4199,8 @@ def _hold_buys(
         for (exit_value, sold_at), same in groupby(exits):
             max_loss = unit - exit_value
             if max_loss > unit * config.prediction_max_loss_share:
+                if sold_at is None and _too_few_sale_events(rate, beta, config):
+                    return buys, NoBuy(NoBuyKind.NO_SALES)
                 return buys, NoBuy(NoBuyKind.MAX_LOSS, loss_share=max_loss / unit)
             beta_room = _beta_room(rate, beta, sold_at, held, config, cheap)
             buys.append(_HoldBuy(item_key, prediction, unit, len(list(same)), max_loss, beta_room))
@@ -4203,6 +4208,15 @@ def _hold_buys(
         stepped += quantity - take
         selling = selling and take == quantity
     return buys, None
+
+
+def _too_few_sale_events(rate: SellRate | None, beta: BetaSellRate | None, config: Config) -> bool:
+    """Whether an Item Key has fewer Sale Events than a Flip needs for room at any price
+    (`_flip_room`): Live's, and Beta's at their weight while the Beta Sell Rate is on, as
+    `BetaSellRate.pooled` counts them (#210)."""
+    live = rate.sale_events if rate else 0
+    borrowed = beta.weight * beta.rate.sale_events if beta else 0
+    return live + borrowed < config.flip_min_sale_events
 
 
 def _stepped_exits(

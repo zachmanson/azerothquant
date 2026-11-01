@@ -249,3 +249,19 @@ def test_a_prediction_buys_exit_can_step_down_to_a_beta_sale_event_price(db):
     assert buy.max_loss == pytest.approx(4 * (100 - 98 * 0.95))
     assert buy.beta_room is not None and buy.beta_room.from_beta > 0
     assert [r.prediction_buys for r in without if r.market == LIVE] == [[]]
+
+
+@pytest.mark.parametrize(
+    ("weight", "reason"), [(0.5, "would lose 100%"), (0, "no Live sales seen yet")]
+)
+def test_beta_sale_events_count_toward_no_live_sales_only_while_the_beta_sell_rate_is_on(
+    db, weight, reason
+):
+    # #210: in a 1-minute horizon Beta's 48 Sale Events a day give no room, so the 100s
+    # have no exit (no Vendor Price). With the Beta Sell Rate on, its Sale Events say that's
+    # a real loss; off, Live has none, so what's missing is evidence.
+    config = replace(CONFIG, sale_horizon_seconds=MINUTE, beta_sell_rate_weight=weight)
+    result = run(db, beta_selling_linen_at(240), [live_first_scan()], config=config)
+
+    [p] = result[LIVE].predictions
+    assert [line.reason for line in p.lines] == [reason]

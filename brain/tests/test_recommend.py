@@ -4014,7 +4014,13 @@ def test_held_units_of_a_predictions_item_keys_are_held_under_it(db):
         (True, prediction(LINEN_KEY, happened=TODAY + timedelta(days=1))),
         (False, prediction(LINEN_KEY, written=TODAY + timedelta(days=1))),  # not written yet
     ],
-    ids=["lapses today", "lapsed", "catalyst happened", "catalyst still to come", "not yet written"],
+    ids=[
+        "lapses today",
+        "lapsed",
+        "catalyst happened",
+        "catalyst still to come",
+        "not yet written",
+    ],
 )
 def test_a_prediction_stands_from_its_written_day_until_its_catalyst_or_lapse(
     db, stands, prediction_
@@ -4400,15 +4406,50 @@ def test_an_item_key_listed_only_at_the_merchant_cost_or_over_shows_so(db):
 @pytest.mark.parametrize(("unit", "reason"), [(120, "would lose 21%"), (106, "would lose 11%")])
 def test_an_item_key_whose_cheapest_unit_loses_too_much_shows_its_loss_percent(db, unit, reason):
     # A vendor pays 95, so a 120 could lose 25: 20.8% of it, over the 10% Max Loss. A 106
-    # could lose 10.4%, shown rounded up so it never reads as within the 10%.
+    # could lose 10.4%, shown rounded up so it never reads as within the 10%. The one Linen
+    # at 50 sells, the 1 Sale Event a Flip needs here (#210), but 50 can't beat the Vendor Price.
     result = run(
         db,
-        [scan(T0, row(quantity=5, unit=unit), row(quantity=5, unit=200))],
+        [
+            scan(T0, row(unit=50), row(quantity=5, unit=unit), row(quantity=5, unit=200)),
+            scan(T0 + HOUR, row(quantity=5, unit=unit), row(quantity=5, unit=200)),
+        ],
         [character_read(money=GOLD, vendor_prices={2589: 95})],
         predictions=[prediction(LINEN_KEY)],
     )
 
     assert lines_of(result) == [PredictionLine(LINEN_KEY, reason=reason)]
+
+
+def test_an_item_key_with_no_sale_events_shows_no_live_sales_seen_yet(db):
+    # #210: one Scan, so no Sale Events. The 120s could only Vendor for 95, which reads
+    # as a bad trade when what's missing is evidence.
+    result = run(
+        db,
+        [scan(T0, row(quantity=5, unit=120))],
+        [character_read(money=GOLD, vendor_prices={2589: 95})],
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert lines_of(result) == [PredictionLine(LINEN_KEY, reason="no Live sales seen yet")]
+
+
+def test_an_item_key_with_fewer_sale_events_than_a_flip_needs_shows_no_live_sales_seen_yet(db):
+    # #210: a Linen at 50 sells in each of two Observation Windows, 2 Sale Events, under
+    # the 3 a Flip needs, so no unit has room at any price: the gap is still evidence.
+    result = run(
+        db,
+        [
+            scan(T0, row(unit=50), row(unit=50), row(quantity=5, unit=120)),
+            scan(T0 + HOUR, row(unit=50), row(quantity=5, unit=120)),
+            scan(T0 + 2 * HOUR, row(quantity=5, unit=120)),
+        ],
+        [character_read(money=GOLD, vendor_prices={2589: 95})],
+        config=replace(CONFIG, flip_min_sale_events=3),
+        predictions=[prediction(LINEN_KEY)],
+    )
+
+    assert lines_of(result) == [PredictionLine(LINEN_KEY, reason="no Live sales seen yet")]
 
 
 def test_an_item_key_crowded_out_by_its_predictions_cap_shows_cap_full(db):
