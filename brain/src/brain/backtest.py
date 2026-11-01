@@ -26,8 +26,10 @@ from brain.fair_value import FairValueCache
 from brain.history import Market, character_markets, scan_times, supply_at, vendor_prices
 from brain.observation import (
     Calibration,
+    OwnPurchasesTaken,
     SaleRecord,
     grader_calibration,
+    own_purchases_taken,
     sale_records,
     sell_rate_calibration,
 )
@@ -315,7 +317,8 @@ def _market_mark(trade: Trade, at: int, terms: Terms) -> float:
 @dataclass(frozen=True)
 class MarketBacktest:
     """One Market's Backtest: each policy's run over its Scans, its runs at the grader's
-    low and high bounds, and the grader and Sell Rate checked on own Listings."""
+    low and high bounds, the grader and Sell Rate checked on own Listings, and what own
+    Purchases took out of Sell Rate."""
 
     market: Market
     scans: int
@@ -323,6 +326,7 @@ class MarketBacktest:
     bounds: dict[str, tuple[Simulation, Simulation]]  # (low, high), by policy name
     grader_calibration: Calibration
     sell_rate_calibration: Calibration
+    own_purchases: OwnPurchasesTaken
 
 
 def backtest(
@@ -373,7 +377,10 @@ def backtest(
         bounds = {name: (low, high) for name, (_, low, high) in graded.items()}
         calibration = grader_calibration(conn, market, config)
         sell_rate = sell_rate_calibration(conn, market, config, cache)
-        result.append(MarketBacktest(market, len(times), runs, bounds, calibration, sell_rate))
+        own_purchases = own_purchases_taken(conn, market, config, cache)
+        result.append(
+            MarketBacktest(market, len(times), runs, bounds, calibration, sell_rate, own_purchases)
+        )
     return result
 
 

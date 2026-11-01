@@ -2264,6 +2264,46 @@ def test_backtest_prints_each_markets_policies_from_the_start_gold(tmp_path):
     assert "Flips to Disenchant not simulated." in text
 
 
+def test_backtest_says_what_own_purchases_took_out_of_sell_rate(tmp_path):
+    # #152: the 2 Linen that went in the hour were the player's own buy, so the one Sale
+    # Event is gone.
+    won = {
+        "index": 1,
+        "sender": "Alliance Auction House",
+        "subject": "Auction won: Linen Cloth",
+        "money": 0,
+        "daysLeft": 30,
+        "firstItemQuantity": 2,
+        "firstItemLink": "|cffffffff|Hitem:2589::::::::20:1490|h[Linen Cloth]|h|r",
+        "invoice": {"invoiceType": "buyer", "itemName": "Linen Cloth", "bid": 2000, "count": 2},
+    }
+    read = {
+        "readAt": 1_790_001_800,
+        "realm": MARKET.realm,
+        "character": "Kash-Patel",
+        "shownCount": 1,
+        "totalCount": 1,
+        "skippedMails": 0,
+        "mails": [won],
+    }
+    config = _three_linen_held(tmp_path, [read])
+
+    text = run_backtest(config, since=None, until=None, policies=["brain"], start_gold=400_000)
+
+    assert (
+        "Own Purchases left out of Sell Rate: 2 units, 1 of 1 Sale Events gone and 0 cut short;"
+        " most: Linen Cloth (2589) 2.\n" in text
+    )
+
+
+def test_backtest_says_when_own_purchases_took_nothing_out_of_sell_rate(tmp_path):
+    text = run_backtest(
+        _three_linen_held(tmp_path), since=None, until=None, policies=["brain"], start_gold=400_000
+    )
+
+    assert "Own Purchases left out of Sell Rate: none of 1 Sale Events.\n" in text
+
+
 def test_backtest_splits_the_trades_with_their_postings_and_deposits_lost(tmp_path):
     # #204: sold out / part vendored / still posted, each with what its postings lost.
     config = _three_linen_held(tmp_path)

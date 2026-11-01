@@ -1,3 +1,4 @@
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -861,3 +862,270 @@ def test_sell_rate_is_checked_on_own_listings_before_the_drop(db):
     calibration = sell_rate_calibration(db, MARKET, CONFIG)
 
     assert (calibration.matched, calibration.sold, calibration.sold_mails) == (2, 1, 2)
+
+
+# --- own Purchases leave Sell Rate (#152) ---
+
+
+def purchase_mail(name, item, count, price):
+    """A Purchase of `count` for `price` copper, arrived when its Mailbox Read was read."""
+    return {
+        "sender": "Alliance Auction House",
+        "subject": f"Auction won: {name}",
+        "money": 0,
+        "daysLeft": 30,
+        "firstItemQuantity": count,
+        "firstItemLink": f"|cffffffff|H{item}|h[{name}]|h|r",
+        "invoice": {"invoiceType": "buyer", "itemName": name, "bid": price, "count": count},
+    }
+
+
+def test_own_purchases_of_the_cheapest_listings_are_no_sale_event(db):
+    # Probe P2 of the 2026-10-06 review: the player buys the 3 cheapest of 10 Linen and
+    # nothing else trades.
+    run(
+        db,
+        scan(T0, *[row(unit=100 + i) for i in range(10)]),
+        scan(T0 + HOUR, *[row(unit=103 + i) for i in range(7)]),
+    )
+    read_mail(
+        db,
+        T0 + 30 * MINUTE,
+        *[purchase_mail("Linen Cloth", LINEN, 1, unit) for unit in (100, 101, 102)],
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.sale_events == []
+
+
+def test_an_own_sweep_across_listings_leaves_only_other_buyers_units(db):
+    # One Purchase of 3 Linen for 303 took the 100, 101 and 102; another player bought
+    # the 105. The Sale Event is theirs alone, at their price.
+    run(
+        db,
+        scan(T0, *[row(unit=100 + i) for i in range(10)]),
+        scan(T0 + HOUR, *[row(unit=103 + i) for i in range(7) if i != 2]),
+    )
+    read_mail(db, T0 + 30 * MINUTE, purchase_mail("Linen Cloth", LINEN, 3, 303))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.unit_buyout, e.units) for e in evidence.sale_events] == [(105, 1)]
+
+
+def test_an_own_purchase_of_a_listing_no_scan_saw_takes_nothing(db):
+    # The player bought a Linen for 90 posted and gone between the Scans; another player
+    # bought the 100.
+    run(db, scan(T0, row(unit=100), row(unit=110)), scan(T0 + HOUR, row(unit=110)))
+    read_mail(db, T0 + 30 * MINUTE, purchase_mail("Linen Cloth", LINEN, 1, 90))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.unit_buyout, e.units) for e in evidence.sale_events] == [(100, 1)]
+
+
+def test_an_own_purchase_out_of_a_stack_is_no_partial_sale(db):
+    run(db, scan(T0, row(quantity=10, unit=100)), scan(T0 + HOUR, row(quantity=7, unit=100)))
+    read_mail(db, T0 + 30 * MINUTE, purchase_mail("Linen Cloth", LINEN, 3, 300))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.sale_events == []
+
+
+def test_an_own_purchase_takes_units_only_from_the_window_it_fell_in(db):
+    # Another player bought a Linen in the first window; the player bought one in the
+    # second.
+    run(
+        db,
+        scan(T0, row(unit=100), row(unit=100)),
+        scan(T0 + HOUR, row(unit=100)),
+        scan(T0 + 2 * HOUR),
+    )
+    read_mail(db, T0 + 90 * MINUTE, purchase_mail("Linen Cloth", LINEN, 1, 100))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [e.seen_at for e in evidence.sale_events] == [T0 + HOUR]
+
+
+def test_an_own_purchase_read_after_the_range_is_still_a_sale_in_it(db):
+    # Arrived at T0 + 30 min, read at T0 + 2 h: a Backtest as of then can't know of it
+    # yet (#153).
+    run(db, scan(T0, row(unit=100)), scan(T0 + HOUR))
+    read_mail(
+        db, T0 + 2 * HOUR, purchase_mail("Linen Cloth", LINEN, 1, 100) | {"daysLeft": 30 - 1.5 / 24}
+    )
+
+    before = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + 2 * HOUR)
+    after = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert ([e.units for e in before.sale_events], after.sale_events) == ([1], [])
+
+
+def test_own_purchases_are_no_sale_records(db):
+    # Over a 6 h gap the player bought 2 of a stack of 20 and a Linen of 1 for 100;
+    # other players bought 3 of the stack and the 120.
+    run(
+        db,
+        scan(T0, row(quantity=20), row(unit=100), row(unit=120)),
+        scan(T0 + 6 * HOUR, row(quantity=15)),
+    )
+    read_mail(
+        db,
+        T0 + HOUR,
+        purchase_mail("Linen Cloth", LINEN, 2, 200),
+        purchase_mail("Linen Cloth", LINEN, 1, 100),
+    )
+
+    units = Counter()
+    for r in sale_records(db, MARKET, CONFIG):
+        units[r.unit_buyout] += r.units
+    assert units == {100: 3, 120: 1}
+
+
+def test_an_own_purchase_takes_the_listing_at_its_price_before_any_cheaper_one(db):
+    # The player bought the 200, priced too high to be a Probable Sale; another player
+    # bought the 100.
+    run(db, scan(T0, row(unit=100), row(unit=200), row(unit=300)), scan(T0 + HOUR, row(unit=300)))
+    read_mail(db, T0 + 30 * MINUTE, purchase_mail("Linen Cloth", LINEN, 1, 200))
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.unit_buyout, e.units) for e in evidence.sale_events] == [(100, 1)]
+
+
+# --- a Listing back in the next Scan was missed, not sold (#150) ---
+
+
+def test_listings_a_scan_missed_that_are_back_in_the_next_are_no_sale_event(db):
+    # Probe P1 of the 2026-10-06 review: the middle Scan misses 10 Linen and nothing
+    # trades. The dropped rows went unrecorded, as before #150's itemIDs.
+    run(
+        db,
+        scan(T0, *[row(unit=100) for _ in range(10)]),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, *[row(unit=100) for _ in range(10)]),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.sale_events == []
+
+
+def test_a_listing_back_with_more_time_left_is_a_new_post_so_the_old_one_sold(db):
+    run(
+        db,
+        scan(T0, row(unit=100, time_left=3)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100, time_left=4)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.seen_at, e.units) for e in evidence.sale_events] == [(T0 + HOUR, 1)]
+
+
+def test_a_listing_back_in_the_next_scan_explains_only_one_that_went_missing(db):
+    run(
+        db,
+        scan(T0, row(unit=100), row(unit=100)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.seen_at, e.units) for e in evidence.sale_events] == [(T0 + HOUR, 1)]
+
+
+def test_a_scan_after_the_range_does_not_say_a_listing_was_missed(db):
+    # A Backtest as of T0 + 2 h hasn't seen the Scan at T0 + 2 h yet.
+    run(
+        db,
+        scan(T0, row(unit=100)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100)),
+    )
+
+    before = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + 2 * HOUR)
+    after = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + 2 * HOUR + 1)
+
+    assert ([e.units for e in before.sale_events], after.sale_events) == ([1], [])
+
+
+def test_a_listing_a_scan_missed_that_is_back_in_the_next_is_no_sale_record(db):
+    run(
+        db,
+        scan(T0, row(unit=100), row(unit=100)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100)),
+    )
+
+    assert [(r.seen_at, r.units) for r in sale_records(db, MARKET, CONFIG)] == [(T0 + HOUR, 1)]
+
+
+def test_a_listing_is_back_only_as_it_stood_in_the_scan_it_came_back_in(db):
+    # Back with more time left at T0 + 2 h (a new post, so the old one sold), even though
+    # its bucket drops to the old one's by T0 + 3 h.
+    run(
+        db,
+        scan(T0, row(unit=100, time_left=3)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100, time_left=4)),
+        scan(T0 + 3 * HOUR, row(unit=100, time_left=3)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.seen_at, e.units) for e in evidence.sale_events] == [(T0 + HOUR, 1)]
+
+
+def test_a_listing_back_that_sold_part_since_was_still_missed(db):
+    # Back as a stack of 2 at T0 + 2 h, one of which sold by T0 + 3 h.
+    run(
+        db,
+        scan(T0, row(quantity=2, unit=100)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(quantity=2, unit=100)),
+        scan(T0 + 3 * HOUR, row(quantity=1, unit=100)),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert [(e.seen_at, e.units) for e in evidence.sale_events] == [(T0 + 3 * HOUR, 1)]
+
+
+@pytest.mark.parametrize("own_first", [True, False])
+def test_an_own_listing_gone_at_a_purchases_price_does_not_take_it(db, own_first):
+    # The player cancelled their own Linen at 100 and bought another player's at 100:
+    # nothing sold to anyone else, whichever Listing the history has first.
+    pair = [named_row("Linen Cloth", unit=100), row(unit=100)]
+    run(
+        db,
+        scan(T0, *(pair if own_first else pair[::-1]), row(unit=300)),
+        scan(T0 + HOUR, row(unit=300)),
+    )
+    read_mail(
+        db,
+        T0 + 30 * MINUTE,
+        purchase_mail("Linen Cloth", LINEN, 1, 100),
+        cancelled("Linen Cloth", LINEN, 1),
+    )
+
+    evidence = sell_rate_evidence(db, MARKET, CONFIG, since=T0, until=T0 + DAY)
+
+    assert evidence.sale_events == []
+
+
+def test_a_sale_record_is_back_only_as_it_stood_in_the_scan_it_came_back_in(db):
+    run(
+        db,
+        scan(T0, row(unit=100, time_left=3)),
+        scan(T0 + HOUR),
+        scan(T0 + 2 * HOUR, row(unit=100, time_left=4)),
+        scan(T0 + 3 * HOUR, row(unit=100, time_left=3)),
+    )
+
+    assert [(r.seen_at, r.units) for r in sale_records(db, MARKET, CONFIG)] == [(T0 + HOUR, 1)]

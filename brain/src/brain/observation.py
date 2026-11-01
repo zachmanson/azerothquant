@@ -11,7 +11,7 @@ import sqlite3
 from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 
 from brain.config import Config
@@ -20,12 +20,16 @@ from brain.history import (
     Listing,
     Market,
     Outcome,
+    Purchase,
     dropped_item_ids,
     listings,
+    listings_first_seen_in,
     outcomes,
     partial_sales,
+    purchases,
     scan_times,
 )
+from brain.lots import happened_at
 from brain.mailbox import MailKind
 from brain.scan import item_id_of
 
@@ -207,7 +211,8 @@ def sell_rate_evidence(
     Disappearances can only pair with Listings new in it, and their Sale Events are its.
     Reposts and coincidences come window by window, not ordered across them. An own
     Listing whose Outcome, read before `until`, says it was Cancelled or Expired is never
-    a Probable Sale (#153).
+    a Probable Sale (#153), and own Purchases read before `until` take their units out of
+    the window they fell in (#152).
     """
     seen = listings(conn, market) if seen is None else seen
     cache = FairValueCache() if fair_value_cache is None else fair_value_cache
@@ -232,11 +237,15 @@ def _evidence_of_windows(
     read_before: int | None,
 ) -> list["_WindowEvidence"]:
     """Each window's `_WindowEvidence`, dropping own Probable Sales by the Outcomes read
-    before `read_before` (None: all of them)."""
-    ends = _ends_of_windows(conn, market, config, windows, seen, cache)
+    before `read_before` (None: all of them), and seeing only the Scans before it."""
+    ends = _ends_of_windows(conn, market, config, windows, seen, cache, read_before)
     new = _new_listings(market, seen, cache)
     unsold = _unsold_own(conn, market, config, seen, cache, read_before)
-    return [_window_evidence(conn, market, config, w, ends[w], new, unsold, cache) for w in windows]
+    bought = _own_purchases(conn, market, cache, read_before)
+    return [
+        _window_evidence(conn, market, config, w, ends[w], new, unsold, bought, cache)
+        for w in windows
+    ]
 
 
 @dataclass(frozen=True)
@@ -246,7 +255,9 @@ class _EndsOfWindow:
     Sales seen at its end, as (Item Key, window end, unit buyout, units). Each Scan is
     matched only against the one before it, so these don't change until a re-match
     imports those Scans again. Items either Scan dropped rows of are left out of both
-    (#150): a Listing missing from a Scan may only have been missed."""
+    (#150): a Listing missing from a Scan may only have been missed. So is a candidate an
+    identical Listing new in the Scan after explains, if that Scan is seen (`_missed`),
+    so these change when it is."""
 
     candidates: list[Disappearance]
     partial_sales: list[tuple[str, int, int, int]]
@@ -259,14 +270,26 @@ def _ends_of_windows(
     windows: list[ObservationWindow],
     seen: Sequence[Listing],
     cache: FairValueCache,
+    read_before: int | None,
 ) -> dict[ObservationWindow, _EndsOfWindow]:
-    """Each window's `_EndsOfWindow`, from the cache when it kept them, and kept there."""
-    fields = (config.time_left_max_seconds,)
-    found = {w: cache.kept_for_window(conn, market, w.start, w.end, fields) for w in windows}
+    """Each window's `_EndsOfWindow`, from the cache when it kept them, and kept there.
+    The Scan after a window counts only before `read_before` (None: any)."""
+    after = dict(pairwise(scan_times(conn, market)))
+    next_scan = {
+        w: n
+        for w in windows
+        if (n := after.get(w.end)) is not None and (read_before is None or n < read_before)
+    }
+    fields = {w: (config.time_left_max_seconds, next_scan.get(w)) for w in windows}
+    found = {w: cache.kept_for_window(conn, market, w.start, w.end, fields[w]) for w in windows}
     result = {w: ends for w, ends in found.items() if isinstance(ends, _EndsOfWindow)}
     missing = {w.start: w for w in windows if w not in result}
     if not missing:
         return result
+    back: dict[int, list[Listing]] = defaultdict(list)
+    times = [next_scan[w] for w in missing.values() if w in next_scan]
+    for listing in listings_first_seen_in(conn, market, times):
+        back[listing.first_seen].append(listing)
     dropped = dropped_item_ids(conn, market)
     left_out = {
         w: dropped.get(w.start, frozenset()) | dropped.get(w.end, frozenset())
@@ -288,8 +311,10 @@ def _ends_of_windows(
         if w is not None and item_id_of(p.item_key) not in left_out[w]:
             sales[p.seen_at].append((p.item_key, p.seen_at, p.unit_buyout, p.units_sold))
     for w in missing.values():
-        result[w] = _EndsOfWindow(candidates[w], sales[w.end])
-        cache.keep_for_window(market, w.start, w.end, fields, result[w])
+        missed = _missed(candidates[w], back[next_scan[w]] if w in next_scan else [])
+        kept = [d for d in candidates[w] if id(d) not in missed]
+        result[w] = _EndsOfWindow(kept, sales[w.end])
+        cache.keep_for_window(market, w.start, w.end, fields[w], result[w])
     return result
 
 
@@ -300,6 +325,8 @@ class _WindowEvidence:
     coincidences: list[Disappearance]
     # Own Disappearances the rule calls Probable Sales before any Outcome drops them.
     own_probable_sales: list[Disappearance]
+    # The Sale Events before own Purchases took their units out (#152).
+    sale_events_with_own_purchases: list[SaleEvent]
 
 
 @dataclass(frozen=True)
@@ -336,11 +363,13 @@ def _window_evidence(
     ends: _EndsOfWindow,
     new: _NewListings,
     unsold: "_UnsoldOwn",
+    bought: "_OwnPurchases",
     cache: FairValueCache,
 ) -> _WindowEvidence:
     """One Observation Window's Sale Events, Reposts and coincidences, once a pass. Own
-    Probable Sales in `unsold` are just gone, not sales. They are taken out after pairing,
-    so Reposts pair as they would with them in."""
+    Probable Sales in `unsold` are just gone, not sales, and the units own Purchases in
+    `bought` took weren't other players' demand. Both are taken out after pairing, so
+    Reposts pair as they would with them in."""
     key = (
         window,
         unsold.read_before,
@@ -369,22 +398,62 @@ def _window_evidence(
 
     probable_sales = [d for d in pairing.sales if priced_like_a_sale(d)]
     dropped = unsold.taken_from(probable_sales)
-    # (Item Key, window end, unit buyout, units) of every Partial Sale and Probable Sale.
-    sales = ends.partial_sales + [
-        (d.item_key, d.gone_at, d.unit_buyout, d.quantity)
+    # Own Purchases come out before the price check, so a dear one still takes its own
+    # Listing, and never take the player's own Listings.
+    others = [d for d in pairing.sales if not d.own]
+    left = _units_left(
+        [(k, u, n) for k, _, u, n in ends.partial_sales]
+        + [(d.item_key, d.unit_buyout, d.quantity) for d in others],
+        bought.in_gap.get(window.start, []),
+    )
+    partials = len(ends.partial_sales)
+    others_left = dict(zip(map(id, others), left[partials:], strict=True))
+    # (Item Key, window end, unit buyout, units, units own Purchases left) of every
+    # Partial Sale and Probable Sale.
+    sales = [
+        (k, at, u, n, n_left)
+        for (k, at, u, n), n_left in zip(ends.partial_sales, left[:partials], strict=True)
+    ] + [
+        (d.item_key, d.gone_at, d.unit_buyout, d.quantity, others_left.get(id(d), d.quantity))
         for d in probable_sales
         if id(d) not in dropped
     ]
+    sale_events = _sale_events([(k, at, u, n_left) for k, at, u, _, n_left in sales if n_left])
+    with_own_purchases = sale_events
+    if window.start in bought.in_gap:
+        with_own_purchases = _sale_events([(k, at, u, n) for k, at, u, n, _ in sales])
     evidence = _WindowEvidence(
-        sale_events=_sale_events(sales),
+        sale_events=sale_events,
         reposts=pairing.reposts,
         coincidences=[
             d for d in pairing.coincidences if priced_like_a_sale(d) and id(d) not in dropped
         ],
         own_probable_sales=[d for d in probable_sales if d.own],
+        sale_events_with_own_purchases=with_own_purchases,
     )
     new.evidence[key] = evidence
     return evidence
+
+
+def _missed(candidates: list[Disappearance], back: list[Listing]) -> set[int]:
+    """The ids of the `candidates` a Listing new in the Scan after they went missing
+    explains, each new one at most one: same Item Key, unit buyout and quantity, and no
+    more time left, as `back` stood in that Scan (`listings_first_seen_in`). The Scan they
+    were missing from only missed them (#150)."""
+    time_lefts: dict[tuple[str, int, int], list[int]] = defaultdict(list)
+    for listing in back:
+        time_lefts[(listing.item_key, listing.unit_buyout, listing.quantity)].append(
+            listing.time_left
+        )
+    for found in time_lefts.values():
+        found.sort(reverse=True)
+    missed = set()
+    for d in sorted(candidates, key=lambda d: d.time_left):
+        found = time_lefts.get((d.item_key, d.unit_buyout, d.quantity))
+        if found and found[-1] <= d.time_left:
+            found.pop()
+            missed.add(id(d))
+    return missed
 
 
 # (Item Key, unit buyout, quantity, last seen, gone at): identical own Disappearances
@@ -455,6 +524,71 @@ def _unsold_own(
     return unsold
 
 
+@dataclass(frozen=True)
+class _OwnPurchases:
+    """This pass's own Purchases read before `read_before` (None: any), by the start of
+    the gap between Scans they fell in. Mail read later changes it, so it is only good
+    for the pass."""
+
+    read_before: int | None
+    in_gap: dict[int, list[Purchase]]
+
+
+def _own_purchases(
+    conn: sqlite3.Connection, market: Market, cache: FairValueCache, read_before: int | None
+) -> _OwnPurchases:
+    """The Market's `_OwnPurchases`, worked out once a pass (again for another `read_before`)."""
+    key = (_OwnPurchases, market)
+    bought = cache.this_pass.get(key)
+    if not isinstance(bought, _OwnPurchases) or bought.read_before != read_before:
+        times = scan_times(conn, market)
+        in_gap: dict[int, list[Purchase]] = defaultdict(list)
+        for p in purchases(conn, market):
+            after = bisect_right(times, happened_at(p))
+            if (read_before is None or p.first_seen < read_before) and 0 < after < len(times):
+                in_gap[times[after - 1]].append(p)
+        bought = _OwnPurchases(read_before, in_gap)
+        cache.this_pass[key] = bought
+    return bought
+
+
+def _units_left(gone: list[tuple[str, int, int]], bought: list[Purchase]) -> list[int]:
+    """How many units of each of `gone`, (Item Key, unit buyout, units) seen to go in one
+    gap between Scans, the player didn't buy themselves. A Purchase takes a stack at its
+    unit price with room for its count, if one went; failing that (a sweep across
+    Listings), up to its count of its Item Key's units, cheapest first, while what they
+    cost stays within what it paid. One of a Listing no Scan saw takes nothing when every
+    unit seen costs more; one dearer than a unit another player bought takes that unit."""
+    left = [units for _, _, units in gone]
+    cheapest_first = sorted(range(len(gone)), key=lambda i: gone[i][1])
+    for p in bought:
+        stack = next(
+            (
+                i
+                for i in cheapest_first
+                if gone[i][0] == p.item_key
+                and gone[i][1] * p.count == p.price
+                and left[i] >= p.count
+            ),
+            None,
+        )
+        if stack is not None:
+            left[stack] -= p.count
+            continue
+        units = cost = 0
+        for i in cheapest_first:
+            item_key, unit_buyout, _ = gone[i]
+            if item_key != p.item_key or left[i] == 0:
+                continue
+            take = min(left[i], p.count - units, (p.price - cost) // unit_buyout)
+            if take <= 0:
+                break
+            left[i] -= take
+            units += take
+            cost += take * unit_buyout
+    return left
+
+
 def _sale_events(sales: list[tuple[str, int, int, int]]) -> list[SaleEvent]:
     """One Sale Event per Item Key per Observation Window, oldest first. A buyer takes
     units cheapest-first across price points, so one sweep shows up as many sales."""
@@ -496,9 +630,10 @@ def sale_records(
 ) -> list[SaleRecord]:
     """Every Sale Record of the Market, by the Scan it was seen sold in: other players'
     Partial Sales in any gap, and their Disappearances in a gap of at most 12 h whose
-    time-left bucket rules out expiry and no Repost explains. Each is priced at most the
-    Probable Sale multiple of the Fair Value in the Scan before it (none there, or 0: no cap).
-    `fair_value_cache` as in `sell_rate_evidence`."""
+    time-left bucket rules out expiry and no Repost or Listing back in the Scan after
+    explains (#150), less the units own Purchases took (#152). Each is priced at most the
+    Probable Sale multiple of the Fair Value in the Scan before it (none there, or 0: no
+    cap). `fair_value_cache` as in `sell_rate_evidence`."""
     cache = FairValueCache() if fair_value_cache is None else fair_value_cache
     seen = cache.listings(conn, market)
     after = dict(pairwise(scan_times(conn, market)))
@@ -516,11 +651,18 @@ def sale_records(
             and _gone_like_a_sale(listing, gone_at, dropped, config)
         ):
             candidates[gone_at].append(_disappearance(listing, gone_at, config))
-    records = [
-        SaleRecord(d.item_key, d.unit_buyout, d.quantity, d.last_seen, d.gone_at)
-        for gone_at, ds in candidates.items()
-        for d in _pair_reposts(ds, new_in[gone_at]).sales
-    ]
+    back: dict[int, list[Listing]] = defaultdict(list)
+    for listing in listings_first_seen_in(
+        conn, market, [after[t] for t in candidates if t in after]
+    ):
+        back[listing.first_seen].append(listing)
+    records = []
+    for gone_at, ds in candidates.items():
+        missed = _missed(ds, back[after[gone_at]] if gone_at in after else [])
+        records += [
+            SaleRecord(d.item_key, d.unit_buyout, d.quantity, d.last_seen, d.gone_at)
+            for d in _pair_reposts([d for d in ds if id(d) not in missed], new_in[gone_at]).sales
+        ]
     records += [
         SaleRecord(p.item_key, p.unit_buyout, p.units_sold, before[p.seen_at], p.seen_at)
         for p in partial_sales(conn, market)
@@ -528,6 +670,7 @@ def sale_records(
         and p.seen_at in before
         and not _left_out(p.item_key, before[p.seen_at], p.seen_at, dropped)
     ]
+    records = _less_own_purchases(records, _own_purchases(conn, market, cache, None))
 
     def priced_like_a_sale(r: SaleRecord) -> bool:
         fair_value = cache.fair_values(conn, market, config, r.last_seen).get(r.item_key)
@@ -537,6 +680,20 @@ def sale_records(
         )
 
     return sorted((r for r in records if priced_like_a_sale(r)), key=lambda r: r.seen_at)
+
+
+def _less_own_purchases(records: list[SaleRecord], bought: _OwnPurchases) -> list[SaleRecord]:
+    """`records` less the units the player bought themselves in each gap (#152)."""
+    in_gap: dict[int, list[SaleRecord]] = defaultdict(list)
+    for r in records:
+        in_gap[r.last_seen].append(r)
+    result = []
+    for last_seen, rs in in_gap.items():
+        left = _units_left(
+            [(r.item_key, r.unit_buyout, r.units) for r in rs], bought.in_gap.get(last_seen, [])
+        )
+        result += [replace(r, units=n) for r, n in zip(rs, left, strict=True) if n]
+    return result
 
 
 def _gone_like_a_sale(
@@ -594,6 +751,50 @@ def own_outcomes(
             used.add(match)
             result.append((listing, mails[match]))
     return result
+
+
+@dataclass(frozen=True)
+class OwnPurchasesTaken:
+    """What own Purchases took out of the Sale Events of all the Market's Observation
+    Windows (#152): how many Sale Events there'd be without them, how many they took
+    whole or cut short, and the units they took by Item Key, with its name."""
+
+    sale_events: int
+    gone: int
+    cut_short: int
+    units: dict[str, int]
+    names: dict[str, str]
+
+
+def own_purchases_taken(
+    conn: sqlite3.Connection,
+    market: Market,
+    config: Config,
+    fair_value_cache: FairValueCache | None = None,
+) -> OwnPurchasesTaken:
+    """The Market's `OwnPurchasesTaken`, by all the mail read so far. `fair_value_cache` as in
+    `sell_rate_evidence`."""
+    cache = FairValueCache() if fair_value_cache is None else fair_value_cache
+    windows = observation_windows(conn, market, config)
+    evidence = _evidence_of_windows(
+        conn, market, config, windows, cache.listings(conn, market), cache, None
+    )
+    sale_events = gone = cut_short = 0
+    units: Counter[str] = Counter()
+    for w in evidence:
+        left = {(e.item_key, e.seen_at): e.units for e in w.sale_events}
+        for e in w.sale_events_with_own_purchases:
+            sale_events += 1
+            taken = e.units - left.get((e.item_key, e.seen_at), 0)
+            if taken == 0:
+                continue
+            if taken == e.units:
+                gone += 1
+            else:
+                cut_short += 1
+            units[e.item_key] += taken
+    names = {p.item_key: p.item_name for p in purchases(conn, market)}
+    return OwnPurchasesTaken(sale_events, gone, cut_short, dict(units), names)
 
 
 @dataclass(frozen=True)

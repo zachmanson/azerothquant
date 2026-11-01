@@ -1688,6 +1688,33 @@ def listings_last_seen_in(
     return _listings_where(conn, f"l.last_seen_scan_id IN ({marks})", tuple(scan_ids))
 
 
+def listings_first_seen_in(
+    conn: sqlite3.Connection, market: Market, times: Sequence[int]
+) -> list[Listing]:
+    """The Market's Listings first seen in a Scan at any of `times`, with the quantity and
+    time-left bucket they had there, not as of their last Scan: their Partial Sales put
+    back, and their bucket before its first drop."""
+    if not times:
+        return []
+    marks = ", ".join("?" * len(times))
+    rows = conn.execute(
+        "SELECT l.item_key, l.unit_buyout, l.own,"
+        " l.quantity + COALESCE("
+        "(SELECT SUM(p.units_sold) FROM partial_sale p WHERE p.listing_id = l.id), 0),"
+        " COALESCE("
+        "(SELECT MAX(d.time_left_before) FROM time_left_drop d WHERE d.listing_id = l.id),"
+        " l.time_left),"
+        " first.requested_at, last.requested_at, l.item_name"
+        " FROM listing l"
+        " JOIN market m ON m.id = l.market_id"
+        " JOIN scan first ON first.id = l.first_seen_scan_id"
+        " JOIN scan last ON last.id = l.last_seen_scan_id"
+        f" WHERE {_MARKET_FILTER} AND first.requested_at IN ({marks}) ORDER BY l.id",
+        (*_market_params(market), *times),
+    )
+    return [Listing(k, u, bool(o), q, t, f, la, n) for k, u, o, q, t, f, la, n in rows]
+
+
 def item_keys_turned_own_in(conn: sqlite3.Connection, scan_ids: Sequence[int]) -> set[str]:
     """The Item Keys with a Listing first seen as another player's that turned own in any
     of the Scans `scan_ids`."""

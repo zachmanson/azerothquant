@@ -83,7 +83,7 @@ from brain.history import (
 )
 from brain.instance_lock import instance_lock
 from brain.lots import happened_at, start_of
-from brain.observation import Calibration
+from brain.observation import Calibration, OwnPurchasesTaken
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
 from brain.predictions import PredictionsError, load_predictions
@@ -626,6 +626,7 @@ def _render_backtest(m: MarketBacktest, start_gold: int, low: float, high: float
         + _gap_line(m, low, high)
         + _calibration_line("Grader", "sold", m.grader_calibration)
         + _calibration_line("Sell Rate", "Probable Sales", m.sell_rate_calibration)
+        + _own_purchases_line(m.own_purchases)
         + "Flips to Disenchant not simulated.\n"
     )
 
@@ -676,6 +677,20 @@ def _calibration_line(rule: str, calls: str, c: Calibration) -> str:
         f"{rule} checked on own Listings: of {c.matched} it calls {calls} that a mail matched, "
         f"{c.sold / c.matched:.0%} really sold; it caught {caught} of the {c.sold_mails} "
         "Sold mails.\n"
+    )
+
+
+def _own_purchases_line(o: OwnPurchasesTaken) -> str:
+    """What own Purchases took out of Sell Rate, with the 3 Item Keys they took most of (#152)."""
+    head = "Own Purchases left out of Sell Rate:"
+    if not o.units:
+        return f"{head} none of {o.sale_events} Sale Events.\n"
+    most = sorted(o.units.items(), key=lambda kv: (-kv[1], o.names.get(kv[0], ""), kv[0]))[:3]
+    return (
+        f"{head} {sum(o.units.values())} units, {o.gone} of {o.sale_events} Sale Events gone"
+        f" and {o.cut_short} cut short; most: "
+        + ", ".join(f"{_item_label(o.names.get(k), k)} {n}" for k, n in most)
+        + ".\n"
     )
 
 
