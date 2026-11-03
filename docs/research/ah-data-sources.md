@@ -183,3 +183,49 @@ Three questions re-checked four days before Live: TSM, Blizzard's API, and Booty
 ### How this was sourced
 
 Read in full: TSM's public-data page and its Wago listing, Blizzard's docs JSON (three pages), the Blizzard API forum threads through the forum's JSON, the third-party API notes page, Booty Bay Broker's robots.txt, llms.txt and rss.xml, and the CurseForge Companion zip (from the CDN; the file list came from api.cfwidget.com, a third-party mirror of CurseForge). Blocked: bootybaybroker.com page routes (Cloudflare 403) and curseforge.com pages (403). Not possible: confirming the Forever API namespace, since no Battle.net client credentials were used. Snippet only: the TSM third-party guides, Booty Bay Broker's Terms, and the other Forever addons. The desktop Companion is not installed on this PC (no BootyBayBroker folder in `_forever_\Interface\AddOns`), so its local file could not be looked at.
+
+## 2026-11-03 refresh
+
+Checked because TSM was said to have shipped Forever support today.
+
+### Verdict
+
+**TSM: announced, not shipped, and no Forever data yet.** TSM announced Forever support on Nov 1, not today. It is an addon beta (4.15) for Premium users, with the full release planned for Forever's launch on Nov 4, plus a new desktop app. Nothing in the announcement mentions Forever price data, and there is still no Forever game type in TSM's public data. All Forever CSV paths still return 404. For us: nothing usable yet. No region `soldPerDay`, `saleRate` or `avgSalePrice` prior exists for Forever, so our own Sale Events are still the only Sell Rate source. Re-check the CSV paths a few days after Nov 4.
+
+### 1. What TSM announced
+
+- Blog post "TSM 4.15 brings WoW: Forever Support, plus New Desktop app", published 2026-11-01 23:52 UTC (edited 2026-11-02 00:03 UTC), by gumdrops. https://blog.tradeskillmaster.com/tsm-4-15-brings-wow-forever-support-plus-new-desktop-app/ (read in full, through the blog's RSS feed https://blog.tradeskillmaster.com/feed/)
+- Its words: "version 4.15 of the TradeSkillMaster addon is now available in the latest beta test to bring support to WoW: Forever". "We can confirm that the major 4.15 update does support WoW: Forever and you'll be able to use it from launch day on November 4th!" Same URL.
+- Who gets it now: "TSM 4.15 will be in beta starting today, and planned to be fully released to coincide with the Forever launch. TSM Premium users will be able to access the beta immediately". Same URL.
+- New desktop app for Windows, Mac and Linux. The old app "couldn't keep up with the way Blizzard was introducing new game version, different types of realms, and different levels of support for Auction House price data." It "will update itself automatically to the new version as we continue to roll it out before the launch of WoW: Forever." Same URL.
+- New price sources in 4.15: `DBNumAuctions` ("the number of auctions of a given item as of the last price snap shot") and `DBAltMarket`, `DBAltRecent`, `DBAltHistorical`, `DBAltMinBuyout`, `DBAltNumAuctions` for an alternative market realm. Same URL. Nothing new on sales.
+- The post does not say where Forever prices will come from, or whether Forever will get AuctionDB realm data, region data or public CSVs at all.
+- So "shipped today" is not right. The release is beta-only and Premium-only until the planned Nov 4 release. The public release is not out yet. TSM's Wago listing is still on v4.14.78, with `supported_forever_patch` and `supported_forever_patches` still null. https://addons.wago.io/addons/tradeskillmaster (checked 2026-11-03)
+- TSM's home page shows only the same post. The help center search for "forever" found nothing. https://tradeskillmaster.com/, https://support.tradeskillmaster.com/en_US
+- The Discord announcement (linked from the post as the #app channel, https://discord.gg/xJuSFWy5Jg) and TSM's social posts were not read.
+
+### 2. Public CSV probes (2026-11-03)
+
+- The public-data page still defines only three game types: `gameTypes.retail`, `gameTypes.classic`, `gameTypes.classicProgression`. The word "Forever" is not on the page. https://tradeskillmaster.com/public-data
+- These all return 404: `forever/us/region/items.csv`, `forever/eu/region/items.csv`, `forever/us/region/commodities.csv`, `classic-forever/us/region/items.csv`, `wow-forever/us/region/items.csv`, all under https://public-data.tradeskillmaster.com/. The Classic region file still returns 200 as a control. https://public-data.tradeskillmaster.com/classic/us/region/items.csv
+- No headers or sample rows to record, since no Forever file exists.
+
+### 3. Where Forever data would come from
+
+- TSM realm prices come from Blizzard's AH API (see §3 above). Blizzard's API docs still say nothing about Forever. "Forever" and "CAMWOW" appear in none of the Classic namespaces guide, the Classic Game Data APIs page or the Retail Game Data APIs page. https://community.developer.battle.net/api/pages/content/documentation/world-of-warcraft-classic/guides/namespaces.json, https://community.developer.battle.net/api/pages/content/documentation/world-of-warcraft-classic/game-data-apis.json, https://community.developer.battle.net/api/pages/content/documentation/world-of-warcraft/game-data-apis.json
+- The third-party API notes, last checked 2026-10-31 22:45 UTC, still show `dynamic-forever` connected realms, `/connected-realm/{id}/auctions` (also `auctions/index` and the Classic AH ids 2, 6 and 7) and `/auctions/commodities` all returning 404. "Auctions hang off connected realms, so the auction house won't be there until they do." https://mhuijskens.com/WoWForever/Api/ (read 2026-11-03). I could not check this myself without credentials.
+- So there is no Blizzard auction feed for Forever yet that TSM could pull. Whether TSM will use user scans instead isn't stated anywhere I could read. The post's line about "different levels of support for Auction House price data" hints that the new app handles flavors with partial or no API data, but it doesn't say how.
+- Region sale data (`saleRate`, `soldPerDay`, `avgSalePrice`) is built from TSM users' Accounting uploads (see §3). For Forever that needs players running 4.15 and the new app after launch, so it can't exist before Nov 4 and will start thin.
+
+### 4. Usable for us?
+
+- **Public CSV (brain, no key):** not yet. No Forever game type, all paths 404.
+- **AppHelper `AppData.lua`:** not yet, and maybe changed. It is written by the desktop app, which is being replaced. The new app's file format isn't documented in anything I read.
+- **In-game `TSM_API.GetCustomPriceValue`:** only with TSM 4.15 on Forever, which is Premium beta today and planned for everyone on Nov 4. It would only return prices TSM has data for. No Forever data source is confirmed.
+- **Markets covered:** unknown. Nothing says whether Forever prices would be per realm and faction (our Market grain) or per ruleset, or region wide only.
+- **Terms and limits:** unchanged from §3. The CSVs are "static and public with no API key, sign-in, or rate limits" when they exist. https://tradeskillmaster.com/public-data
+- Per ADR-0015 a TSM region number would only ever be a prior that our own Sale Events override. That hasn't changed.
+
+### How this was sourced
+
+Read in full: TSM's Nov 1 blog post (from the RSS feed), the public-data page's game types, and the third-party API notes. Checked by status code: five Forever CSV paths and the Classic control. Checked by text search: TSM's home page, help center, Wago listing, and Blizzard's three docs JSON pages. Web searches for TSM Forever data sources found nothing newer than the blog post. Not read: TSM's Discord and social posts, and the 4.15 beta itself (Premium only).
