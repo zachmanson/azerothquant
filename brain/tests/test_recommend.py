@@ -944,6 +944,205 @@ def test_the_market_says_which_characters_hold_each_item_key(db):
     }
 
 
+# --- Risky rows with too few Sale Events (#224, ADR-0043) ---
+
+BOE = "item:4827::::::::20:1490"
+BOE_KEY = "4827"
+BOE_LINK = "|cff1eff00|Hitem:4827::::::::20:1490:::::::::|h[Wizard's Belt]|h|r"
+# The Live default of 3 Sale Events for a Flip, which every Item Key here falls short of.
+LIVE_MINIMUM = replace(CAPPED, flip_min_sale_events=3)
+
+
+def unsold(*latest, earlier=None, money=50 * GOLD, held=0, config=LIVE_MINIMUM, db=None):
+    """Two Scans an hour apart in which nothing sold: `earlier` Listings (the `latest`
+    ones by default), then the `latest`. Vendor Price 10c, so a posting's Deposit is the
+    1s minimum."""
+    bags = [item(link=BOE_LINK, count=held)] if held else []
+    return run(
+        db,
+        [scan(T0, *(earlier or latest)), scan(T0 + HOUR, *latest)],
+        [character_read(*bags, money=money, vendor_prices={4827: 10, 2589: 10})],
+        config=config,
+    )[MARKET]
+
+
+def test_a_cheap_unit_under_a_sticker_price_with_no_sales_is_a_risky_row_posted_under_it(db):
+    # 4827 at the 2026-11-07 Live Scan: 1 at 16s, the next at 70g, never seen sold. The
+    # post price has no cap: posted 1c under the 70g, the 16s comes back 662399.05c after
+    # the 5% cut and the 5s effort of buying and of posting a unit that doesn't stack.
+    # Unsold it loses the 16s less its 10c Vendor Price, plus a 1s Deposit.
+    m = unsold(row(BOE, unit=1600), row(BOE, unit=700000), db=db)
+
+    [flip] = m.shopping_list
+    assert (
+        flip.item_key,
+        flip.action,
+        flip.quantity,
+        flip.price,
+        flip.post_at,
+        flip.risky,
+        flip.sales_seen,
+        flip.unsold_loss,
+        flip.next_listing,
+    ) == (BOE_KEY, Action.SELL, 1, 1600, 699999, True, 0, 1690, 700000)
+    assert flip.profit == pytest.approx(662399.05)
+    # With no Sell Rate there's no wait to state: the Addon shows "?" (and Lua can't hold
+    # an infinite one).
+    assert flip.days is None
+
+
+def one_sold_over_a_wall(db, config=LIVE_MINIMUM):
+    """1 at 70s under a wall of 20 at 1g, posted at 99s 99c, after one at 1g 5s sold:
+    with the wall, a Fair Value near 1g lets it count as a Probable Sale, 1 Sale Event
+    at or above the post price."""
+    wall = [row(BOE, unit=10000) for _ in range(20)]
+    return unsold(
+        row(BOE, unit=7000),
+        *wall,
+        earlier=[row(BOE, unit=7000), *wall, row(BOE, unit=10500)],
+        config=config,
+        db=db,
+    )
+
+
+def test_a_risky_row_for_too_few_sale_events_counts_the_ones_at_its_post_price(db):
+    [flip] = one_sold_over_a_wall(db).shopping_list
+    assert (flip.post_at, flip.risky, flip.sales_seen, flip.sale_events) == (9999, True, 1, 1)
+
+
+def test_a_flip_to_sell_with_enough_sale_events_is_no_risky_row(db):
+    # As above with the minimum at 1: an ordinary Flip to Sell.
+    [flip] = one_sold_over_a_wall(db, replace(LIVE_MINIMUM, flip_min_sale_events=1)).shopping_list
+    assert (flip.post_at, flip.risky, flip.sales_seen) == (9999, False, None)
+
+
+def stickers(*nexts):
+    """A 16s unit of each of 4827, 4828, ... under the next one at each of `nexts`."""
+    return [
+        listing
+        for n, next_at in enumerate(nexts)
+        for listing in (
+            row(f"item:{4827 + n}::::::::20:1490", unit=1600),
+            row(f"item:{4827 + n}::::::::20:1490", unit=next_at),
+        )
+    ]
+
+
+def test_risky_rows_for_too_few_sale_events_keep_the_most_profitable_up_to_their_cap(db):
+    m = unsold(
+        *stickers(300000, 700000, 500000),
+        config=replace(LIVE_MINIMUM, risky_no_sales_rows=2),
+        db=db,
+    )
+
+    assert [(r.item_key, r.risky) for r in m.shopping_list] == [("4828", True), ("4829", True)]
+
+
+def test_a_risky_row_for_too_few_sale_events_takes_no_place_from_the_rows_kept(db):
+    # One row kept: the 3 Linen at 1g under a 3g wall that sold in 3 Sale Events still make
+    # it, though the 4827 makes more.
+    m = run(
+        db,
+        selling_two_linen_an_hour(
+            row(quantity=3, unit=10000), *stickers(700000), unit=30000, sale_events=3
+        ),
+        [character_read(money=50 * GOLD, vendor_prices={2589: 10, 4827: 10})],
+        config=replace(LIVE_MINIMUM, shopping_list_rows=1),
+    )[MARKET]
+
+    assert [(r.item_key, r.quantity, r.risky) for r in m.shopping_list] == [
+        (BOE_KEY, 1, True),
+        (LINEN_KEY, 3, False),
+    ]
+
+
+def test_a_risky_row_for_too_few_sale_events_buys_no_more_than_risky_max_units(db):
+    # 6 at 16s under the 70g: the 5 kept would post under the sixth, at 16s less 1c, which
+    # clears no margin. So nothing, where 5 would be bought with the limit at 6.
+    sixteens = [row(BOE, unit=1600) for _ in range(6)]
+
+    def bought(units):
+        config = replace(LIVE_MINIMUM, risky_max_units=units)
+        return [
+            (r.quantity, r.post_at)
+            for r in unsold(*sixteens, row(BOE, unit=700000), config=config, db=db).shopping_list
+        ]
+
+    assert bought(5) == []
+    assert bought(6) == [(6, 699999)]
+
+
+def test_the_room_drops_a_risky_row_for_too_few_sale_events(db):
+    # As in the Risky row test above: 2g 80s of room, under the 3g unit's cost.
+    unsold(row(BOE, unit=30000), row(BOE, unit=700000), db=db)
+
+    m = recommend_market(db, LIVE_MINIMUM, MARKET, [], T0 + HOUR, gold=100_000, tied_up=80_000)
+    more_room = recommend_market(db, LIVE_MINIMUM, MARKET, [], T0 + HOUR, gold=100_000, tied_up=0)
+
+    assert m.shopping_list == []
+    assert [r.item_key for r in more_room.shopping_list] == [BOE_KEY]
+
+
+@pytest.mark.parametrize("knob", ["risky_no_sales_rows", "risky_max_units"])
+def test_risky_rows_for_too_few_sale_events_are_off_with_no_rows_or_units(db, knob):
+    config = replace(LIVE_MINIMUM, **{knob: 0})
+    assert (
+        unsold(row(BOE, unit=1600), row(BOE, unit=700000), config=config, db=db).shopping_list == []
+    )
+
+
+def test_a_held_unit_with_no_sales_sells_risky_under_the_next_listing(db):
+    # The 4827 bought: posted 1c under the 70g, it brings 664999.05c after the cut, over
+    # its 10c Vendor Price. Without a Sale Event it was "no data".
+    m = unsold(row(BOE, unit=700000), held=1, db=db)
+
+    assert m.holdings == [
+        Row(
+            BOE_KEY,
+            Action.SELL,
+            1,
+            price=699999,
+            profit=pytest.approx(664999.05),
+            margin=pytest.approx(664989.05),
+            sale_events=0,
+            risky=True,
+            sales_seen=0,
+            next_listing=700000,
+        )
+    ]
+
+
+def test_held_units_with_too_few_sales_sell_risky_where_they_would_vendor(db):
+    # 1 Sale Event over a 1 h window, against a 1000 h Sell Rate Prior: no room within the
+    # Sale Horizon, so the 2 held would be Vendored. Under the minimum of 3, both post at
+    # the price a Flip would, risky.
+    config = replace(LIVE_MINIMUM, sell_rate_prior_hours_holdings=1000)
+    wall = [row(BOE, unit=10000) for _ in range(20)]
+    m = unsold(*wall, earlier=[*wall, row(BOE, unit=10500)], held=2, config=config, db=db)
+
+    [held] = m.holdings
+    assert (held.action, held.quantity, held.price, held.risky, held.sales_seen) == (
+        Action.SELL,
+        2,
+        9999,
+        True,
+        1,
+    )
+
+
+def test_a_held_unit_with_no_sales_that_vendors_for_more_stays_no_data(db):
+    m = unsold(row(BOE, unit=5), held=1, db=db)
+
+    assert [(r.action, r.risky) for r in m.holdings] == [(None, False)]
+
+
+def test_without_the_risk_caps_there_are_no_risky_rows_for_too_few_sale_events(db):
+    config = replace(LIVE_MINIMUM, risk_caps=False)
+    assert (
+        unsold(row(BOE, unit=1600), row(BOE, unit=700000), config=config, db=db).shopping_list == []
+    )
+
+
 # --- Sibling suffixes (#58, ADR-0022) ---
 
 MONKEY = "item:9768::::::::20:1490::1:1:12743"
@@ -5106,6 +5305,22 @@ def test_why_not_an_item_key_with_too_few_sale_events_says_how_many_of_how_many(
     assert (linen.failed, linen.sale_events, linen.min_sale_events) == (Check.SALE_EVENTS, 2, 3)
 
 
+@pytest.mark.parametrize("rows, failed, shown", [(10, None, True), (0, Check.SALE_EVENTS, False)])
+def test_why_not_an_item_key_shown_as_risky_for_too_few_sale_events_says_so(
+    db, rows, failed, shown
+):
+    # #224: the 4827 under its sticker price isn't failed at Sale Events while it's shown.
+    _, why = why_not(
+        db,
+        [scan(T0 + n * HOUR, row(BOE, unit=1600), row(BOE, unit=700000)) for n in range(2)],
+        [character_read(money=50 * GOLD, vendor_prices={4827: 10})],
+        config=replace(LIVE_MINIMUM, risky_no_sales_rows=rows),
+    )
+
+    boe = why[BOE_KEY]
+    assert (boe.failed, boe.risky_no_sales, boe.sale_events) == (failed, shown, 0)
+
+
 def test_why_not_an_item_key_whose_room_the_held_units_fill_says_how_many_of_how_many(db):
     # #67: 6 sell within the 3 h Sale Horizon at 999, once the 500s are bought, and 6 are
     # held.
@@ -5683,3 +5898,23 @@ def test_a_purchase_a_risky_row_named_starts_a_lot_and_grades_keep_it_risky(db, 
     assert (lot.item_key, lot.units, lot.cost) == (LINEN_KEY, 5, 60000)
     shown = load_frozen(config.grades_path, MARKET).shown[T0 + HOUR]
     assert shown[LINEN_KEY].risky
+
+
+def test_a_purchase_a_risky_row_for_too_few_sale_events_named_starts_a_lot(db, tmp_path):
+    # #224, ADR-0043: the 4827 bought for 16s after its Scan starts a Lot, and grades.toml
+    # keeps the row it showed as a Risky row for too few Sale Events.
+    config = replace(LIVE_MINIMUM, grades_path=tmp_path / "grades.toml")
+    run(
+        db,
+        [scan(T0 + n * HOUR, row(BOE, unit=1600), row(BOE, unit=700000)) for n in range(2)],
+        [character_read(money=50 * GOLD, vendor_prices={4827: 10})],
+        config=config,
+        mailbox_reads=[
+            won(T0 + 13 * HOUR + 10 * MINUTE, 1, 1600, link=BOE_LINK, name="Wizard's Belt")
+        ],
+    )
+
+    [lot] = market_lots(db, config, MARKET, [])
+    assert (lot.item_key, lot.units, lot.cost) == (BOE_KEY, 1, 1600)
+    shown = load_frozen(config.grades_path, MARKET).shown[T0 + HOUR]
+    assert (shown[BOE_KEY].risky, shown[BOE_KEY].no_sales) == (True, True)

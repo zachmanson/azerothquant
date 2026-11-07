@@ -74,6 +74,10 @@ _HEADER = (
     "-- shrank has capped, its units by the gold alone, and cappedBy, the cap that shrank\n"
     '-- it ("room" or "loss"). A Flip to Sell the loss cap dropped that comes back whole as\n'
     "-- a Risky row has risky = true and unsoldLoss, what it loses if none of it sells.\n"
+    "-- A Risky row for a Flip to Sell with too few Sale Events, or for held units of\n"
+    "-- one, has salesSeen too: the Sale Events seen at its post price (0, 1 or 2), and\n"
+    "-- nextListing, the other player's Listing it posts under. The held units' row has\n"
+    "-- no unsoldLoss.\n"
     "-- A Flip to Sell or Flip to Vendor row has listings (bought),\n"
     "-- posts (stacks posted) and days (until its last unit sells; nil on a Flip to\n"
     "-- Vendor, which sells now). A\n"
@@ -282,6 +286,8 @@ _ROW_KEYS = {
     "days": "days",
     "capped": "capped",
     "capped_by": "cappedBy",
+    "sales_seen": "salesSeen",
+    "next_listing": "nextListing",
 }
 
 

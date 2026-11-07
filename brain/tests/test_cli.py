@@ -1911,6 +1911,19 @@ def test_recommend_why_not_an_item_key_on_the_shopping_list_shows_its_row(tmp_pa
     assert "2589: made the list\n  Sell 2 up to 7s 00c: " in text
 
 
+def test_recommend_why_not_a_flip_shown_as_risky_for_too_few_sale_events_says_so(tmp_path):
+    # #224: the Linen Flip above has 1 Sale Event, 2 short of the default 3, so it's shown
+    # as a Risky row instead of failed at them, with the risk caps on.
+    config = dataclasses.replace(
+        _three_linen_held(tmp_path), flip_min_sale_events=3, risk_caps=True
+    )
+    text = run_recommend(config, why_not="2589")
+
+    assert "2589: shown as Risky (no sales)\n  Sell 2 up to 7s 00c: " in text
+    lines = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines()]
+    assert lines[3:5] == [["Sale Events", "fail", "1/3 Sale Events"], ["Room", "-"]]
+
+
 def test_recommend_why_not_names_a_flip_under_the_minimum_profit(tmp_path):
     # #197: the Linen Flip above makes 3s 48c, under a 5s Minimum Profit.
     config = dataclasses.replace(_three_linen_held(tmp_path), row_min_profit_copper=500)

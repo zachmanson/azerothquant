@@ -151,6 +151,8 @@ DEFAULT_RISKY_MAX_UNITS = 5
 # A longer Risky row may lose at most this share of the Stake if none of it sells (#200,
 # ADR-0041). Back to the grilled 25% until 10 Risky Flips have Flip Grades (#211).
 DEFAULT_RISKY_MAX_LOSS_SHARE = 0.25
+# The most Risky rows for too few Sale Events (#224, ADR-0043). 0 turns them off.
+DEFAULT_RISKY_NO_SALES_ROWS = 10
 
 
 DEFAULT_HISTORY_FILE = "history.sqlite"
@@ -220,6 +222,8 @@ class Config:
     # The most a Risky row of more than `risky_max_units` may lose unsold, as a share of
     # the Stake (#200, ADR-0041).
     risky_max_loss_share: float = DEFAULT_RISKY_MAX_LOSS_SHARE
+    # The most Risky rows for Flips to Sell with too few Sale Events (#224, ADR-0043).
+    risky_no_sales_rows: int = DEFAULT_RISKY_NO_SALES_ROWS
     # Hours of no sales added to the Observation Windows before Sell Rate becomes a
     # quantity, for Holdings and for Flips.
     sell_rate_prior_hours_holdings: float = DEFAULT_SELL_RATE_PRIOR_HOURS_HOLDINGS
@@ -603,6 +607,12 @@ def load_config(path: Path) -> Config:
     risky_units = _parse_whole(
         path, raw.get("risky_max_units", DEFAULT_RISKY_MAX_UNITS), "risky_max_units", 0
     )
+    risky_no_sales_rows = _parse_whole(
+        path,
+        raw.get("risky_no_sales_rows", DEFAULT_RISKY_NO_SALES_ROWS),
+        "risky_no_sales_rows",
+        0,
+    )
     risky_loss_share = _parse_number(
         path,
         raw.get("risky_max_loss_share", DEFAULT_RISKY_MAX_LOSS_SHARE),
@@ -667,6 +677,7 @@ def load_config(path: Path) -> Config:
         flip_unsold_loss_share=unsold_loss_share,
         flip_tied_up_share=tied_up_share,
         risky_max_units=risky_units,
+        risky_no_sales_rows=risky_no_sales_rows,
         risky_max_loss_share=risky_loss_share,
         sell_rate_prior_hours_holdings=prior_holdings,
         sell_rate_prior_hours_flips=prior_flips,

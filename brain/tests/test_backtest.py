@@ -777,3 +777,18 @@ def test_a_risky_row_is_never_taken_nor_counted_in_the_rows_kept():
     shopping, _ = options_taken(m, flip_rows=2)
 
     assert shopping == [bolt, linen]
+
+
+def test_a_risky_row_for_too_few_sale_events_is_never_taken_nor_counted():
+    # #224, ADR-0043: as above, for a Risky row a Flip to Sell under the minimum of Sale
+    # Events gets.
+    boe = Row(
+        "4827", Action.SELL, 1, price=1600, profit=662399, cost=1600, risky=True, sales_seen=0
+    )
+    bolt = Row("2996", Action.SELL, 3, price=10, profit=200, cost=3000)
+    linen = Row("2589", Action.SELL, 1, price=10, profit=100, cost=1000)
+    m = MarketRecommendations(MARKET, T0, 10000, shopping_list=[boe, bolt, linen])
+
+    shopping, _ = options_taken(m, flip_rows=2)
+
+    assert shopping == [bolt, linen]

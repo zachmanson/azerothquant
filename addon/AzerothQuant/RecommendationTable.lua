@@ -291,6 +291,10 @@ end
 -- A Flip's clicks and wait (#98), e.g. "12 Listings + 3 posts, sells in ~2.5 days". A Flip
 -- to Vendor posts nothing and has no wait.
 local function clicksLine(r)
+  -- Too few sales seen to tell when it sells (#224).
+  if r.salesSeen then
+    return plural(r.listings, "Listing") .. " + " .. plural(r.posts, "post") .. ", sells in ?"
+  end
   if not r.days then
     return plural(r.listings, "Listing") .. ", vendor now"
   end
@@ -377,6 +381,10 @@ local function holdingCells(r, name, nameOf)
   local profit = r.action == "Hold" and "unknown" or money(r.profit)
   local note = r.prediction and ("under " .. r.prediction) or (r.uses and craftNote(r))
     or (r.mats and ("on " .. r.character)) or RecommendationTable.note(r, nameOf) or ""
+  -- Held units of an item with too few sales seen are posted at the player's risk (#224).
+  if r.risky then
+    name = RecommendationTable.RISKY .. " " .. name
+  end
   return { name, r.action, tostring(r.quantity), money(r.price), profit, roiCell(r), note }
 end
 
@@ -420,6 +428,9 @@ local function flipCells(r, name)
   end
   local perClick, perDay, roi = measures(r)
   local day = perDay == math.huge and "now" or money(perDay)
+  if r.salesSeen then
+    day = "?" -- too few sales seen to tell when it sells (#224)
+  end
   table.insert(cells, 7, money(perClick))
   table.insert(cells, 8, day)
   table.insert(cells, 9, sharePercent(roi))
@@ -428,6 +439,9 @@ end
 
 local function flipKeys(r, name, cells)
   local perClick, perDay, roi = measures(r)
+  if r.salesSeen then
+    perDay = nil -- "?" sorts last, as any key not known
+  end
   return {
     name:lower(), cells[2]:lower(), r.quantity, r.price, r.postAt, r.profit, perClick, perDay, roi, r.cost,
     cells[11]:lower(),
@@ -584,8 +598,27 @@ local function cappedLine(r, caps)
     .. " (" .. percent(caps.lossCap / caps.stake) .. " of what you're trading with)"
 end
 
+-- A Risky row for too few sales (#224, ADR-0043): how few were seen, the next Listing it
+-- posts under, and on the Shopping List what it loses if it never sells. Held units have
+-- no such loss.
+local function noSalesLine(r)
+  local seen = r.salesSeen == 0 and "nobody's been seen buying this yet"
+    or ("only " .. plural(r.salesSeen, "sale") .. " seen")
+  local line = "Risky: " .. seen .. "."
+  if r.nextListing then
+    line = line .. " Next one's listed at " .. Money.format(r.nextListing) .. "."
+  end
+  if r.unsoldLoss then
+    line = line .. " If it never sells you lose " .. Money.format(r.unsoldLoss) .. "."
+  end
+  return line
+end
+
 -- A Risky row's risk (#194, ADR-0037), in plain words, or nil if it isn't one.
 local function riskyLine(r)
+  if r.risky and r.salesSeen then
+    return noSalesLine(r)
+  end
   if not (r.risky and r.unsoldLoss) then
     return nil
   end
@@ -772,7 +805,7 @@ local function section(title, columns, rows, cells, keys, default, nameOf, holde
     else
       local rowCells = cells(r, name, nameOf)
       if inBags and inBags(r.itemKey) then
-        rowCells[1] = RecommendationTable.BAG .. " " .. name
+        rowCells[1] = RecommendationTable.BAG .. " " .. rowCells[1]
       end
       local rowKeys = keys(r, name, rowCells)
       local note = noteAt and rowCells[noteAt] or nil

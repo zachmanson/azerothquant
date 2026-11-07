@@ -1208,7 +1208,10 @@ def _item_label(name: str | None, item_key: str) -> str:
 def _render_checks(w: WhyNot, m: MarketRecommendations) -> str:
     """Each Check of `w` in order, passed, failed or not reached ("-"), with its numbers,
     and its Shopping List rows if it made the list."""
-    verdict = "made the list" if w.failed is None else w.failed.value
+    if w.risky_no_sales:
+        verdict = "shown as Risky (no sales)"  # #224, ADR-0043
+    else:
+        verdict = "made the list" if w.failed is None else w.failed.value
     lines = [[check.value, *_check(w, check)] for check in Check]
     listed = [
         r
@@ -1226,7 +1229,9 @@ def _check(w: WhyNot, check: Check) -> tuple[str, str]:
     """Whether `w` passed `check` ("pass", "fail", or "-" if it never got that far) and
     the numbers behind it."""
     order = list(Check)
-    if w.failed is not None and order.index(check) > order.index(w.failed):
+    # A Risky row for too few Sale Events stops at them: the rest aren't its checks (#224).
+    last = Check.SALE_EVENTS if w.risky_no_sales else w.failed
+    if last is not None and order.index(check) > order.index(last):
         return "-", ""
     match check:
         case Check.SALE_EVENTS:
@@ -1406,11 +1411,13 @@ def _measures(row: Row) -> list[str]:
     if row.listings is None or row.disenchant is not None:
         return ["", "", ""]
     day = per_day(row)
-    return [
-        _money(per_click(row)),
-        "now" if day == math.inf else _money(day),
-        _percent(return_on_cost(row)),
-    ]
+    if row.sales_seen is not None:
+        per_day_text = "?"  # too few Sale Events to say when it sells (#224)
+    elif day == math.inf:
+        per_day_text = "now"
+    else:
+        per_day_text = _money(day)
+    return [_money(per_click(row)), per_day_text, _percent(return_on_cost(row))]
 
 
 def _roi(row: Row, held: int) -> str:

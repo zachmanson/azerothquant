@@ -94,6 +94,14 @@
 # risky_max_units = 5
 # risky_max_loss_share = 0.25
 
+# Optional: a Flip to Sell with fewer Sale Events than flip_min_sale_events still shows,
+# as a Risky row, if it passes everything else and buys no more than risky_max_units
+# units. It posts under the next Listing, however high, and its details say how few sales
+# were seen and what you'd lose if it never sold. Held units of such an item show a Risky
+# Sell row too. At most this many show, the most profit first; 0 turns them off. Default
+# to 10. Must come before the first [[installs]].
+# risky_no_sales_rows = 10
+
 # Optional: the Sell Rate Prior, how much `brain recommend` discounts thin Sell Rate
 # evidence. Before Sell Rate becomes a quantity, it's worked out as if this many more hours
 # of Observation Windows had been watched with no sales, so one sale in a short window

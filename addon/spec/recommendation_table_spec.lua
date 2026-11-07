@@ -1178,6 +1178,70 @@ describe("a Risky row", function()
   end)
 end)
 
+-- A Flip to Sell with too few Sale Events, or held units of one (#224, ADR-0043): tagged
+-- Risky, and its details say how few sales were seen, where the next one is listed and,
+-- on the Shopping List, what it loses if it never sells. No wait can be told.
+describe("a Risky row for too few sales", function()
+  local function noSales(seen)
+    return entry({
+      gold = 500000,
+      stake = 500000,
+      shoppingList = {
+        { itemKey = "4827", action = "Sell", quantity = 1, price = 1600, postAt = 650000.0, profit = 615900.0, cost = 1600, listings = 1, posts = 1, risky = true, salesSeen = seen, unsoldLoss = 1690, nextListing = 700000 },
+      },
+      holdings = {
+        { itemKey = "4827", action = "Sell", quantity = 1, price = 699999, profit = 664999.05, saleEvents = seen, risky = true, salesSeen = seen, nextListing = 700000 },
+      },
+    })
+  end
+
+  it("says nobody's been seen buying it, the next Listing and what it loses", function()
+    local row = build(noSales(0)).sections[2].rows[1]
+
+    assert.are.equal(
+      "Risky: nobody's been seen buying this yet. Next one's listed at 70g. If it never sells you lose 16s 90c.",
+      row.details[1]
+    )
+  end)
+
+  it("says how few sales were seen", function()
+    local row = build(noSales(2)).sections[2].rows[1]
+
+    assert.are.equal(
+      "Risky: only 2 sales seen. Next one's listed at 70g. If it never sells you lose 16s 90c.",
+      row.details[1]
+    )
+    assert.are.equal(
+      "Risky: only 1 sale seen. Next one's listed at 70g. If it never sells you lose 16s 90c.",
+      build(noSales(1)).sections[2].rows[1].details[1]
+    )
+  end)
+
+  it("can't tell its wait: ? for when it sells and for Per day", function()
+    local row = build(noSales(0), AS_OF, names).sections[2].rows[1]
+
+    assert.are.equal(RecommendationTable.RISKY .. " item:4827", row.cells[1])
+    assert.are.equal("?", row.cells[8])
+    assert.are.equal("1 Listing + 1 post, sells in ?", row.details[2])
+  end)
+
+  it("tags held units Risky, their details with no loss", function()
+    local row = build(noSales(0), AS_OF, names).sections[1].rows[1]
+
+    assert.are.equal(RecommendationTable.RISKY .. " item:4827", row.cells[1])
+    assert.are.equal("Risky: nobody's been seen buying this yet. Next one's listed at 70g.", row.details[1])
+  end)
+
+  it("keeps the tag beside the bag marker when the logged-in Character holds them", function()
+    local recs = noSales(0)
+    recs[REALM][FACTION].held = { ["4827"] = { { character = "Kash-Patel", bags = 1, bank = 0, bound = 0 } } }
+
+    local row = build(recs, AS_OF, names, "Kash-Patel").sections[1].rows[1]
+
+    assert.are.equal(RecommendationTable.BAG .. " " .. RecommendationTable.RISKY .. " item:4827", row.cells[1])
+  end)
+end)
+
 -- A selected row (#77) is found again after a redraw by its Item Key and action.
 describe("selecting a Recommendation Table row", function()
   it("finds the row with the same Item Key and action after a redraw", function()

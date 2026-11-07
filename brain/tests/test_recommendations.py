@@ -927,6 +927,34 @@ def test_a_risky_row_carries_the_flag_and_its_unsold_loss_and_a_normal_row_neith
     assert "risky" not in lua_normal and "unsoldLoss" not in lua_normal
 
 
+def test_a_risky_row_for_too_few_sale_events_carries_the_sales_seen():
+    # #224, ADR-0043: salesSeen, 0 included, tells the Addon why it's risky. A held unit's
+    # Risky row has no Unsold Loss to state.
+    flip = Row(
+        "4827",
+        Action.SELL,
+        1,
+        price=1600,
+        profit=662399.05,
+        cost=1600,
+        risky=True,
+        unsold_loss=1690.0,
+        sales_seen=0,
+        next_listing=700000,
+    )
+    held = Row("4827", Action.SELL, 1, price=699999, profit=664999.05, risky=True, sales_seen=2)
+    m = MarketRecommendations(MARKET, 1790000000, 600000, holdings=[held], shopping_list=[flip])
+
+    data = parse_savedvariables(render({}, markets=[m]))[GLOBAL_NAME]
+
+    lua_m = data["recommendations"]["Quel'Thalas"]["Horde"]
+    [lua_flip], [lua_held] = lua_m["shoppingList"], lua_m["holdings"]
+    assert (lua_flip["risky"], lua_flip["salesSeen"], lua_flip["unsoldLoss"]) == (True, 0, 1690)
+    assert lua_flip["nextListing"] == 700000
+    assert (lua_held["risky"], lua_held["salesSeen"]) == (True, 2)
+    assert "unsoldLoss" not in lua_held
+
+
 def test_a_market_without_risk_caps_has_no_room_or_loss_cap():
     m = MarketRecommendations(MARKET, 1790000000, 600000, stake=600000)
 

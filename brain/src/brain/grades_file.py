@@ -27,6 +27,10 @@ class GradesError(Exception):
     """grades.toml is malformed."""
 
 
+# The risky entry of a shown row that was a Risky row for too few Sale Events (#224).
+NO_SALES = "noSales"
+
+
 @dataclass(frozen=True)
 class Grade:
     """A Prediction's realized result, fixed at its grading moment (ADR-0006): its sold
@@ -61,6 +65,8 @@ class Named:
     sale_horizon: int  # seconds, in force then
     # A Risky row's (#194, ADR-0037), so its Flip Grades can be split out from the rest.
     risky: bool = False
+    # A Risky row for too few Sale Events (#224, ADR-0043), written risky = "noSales".
+    no_sales: bool = False
 
 
 @dataclass(frozen=True)
@@ -275,7 +281,7 @@ def _named(row: dict, sale_horizon: int) -> Named:
         float(_typed(row["profit"], int | float)),
         None if days is None else float(_typed(days, int | float)),
         sale_horizon,
-        _flag(row.get("risky", False)),
+        *_risky(row.get("risky", False)),
     )
 
 
@@ -309,7 +315,7 @@ def freeze_shown(
         f"{{ item_key = {_string(n.item_key)}, units = {n.units}, dearest = {n.dearest}, "
         f"post_at = {float(n.post_at)!r}, profit = {float(n.profit)!r}"
         + ("" if n.days is None else f", days = {float(n.days)!r}")
-        + (", risky = true" if n.risky else "")
+        + _risky_entry(n)
         + " }"
         for n in named
     )
@@ -421,6 +427,24 @@ def _typed[T](value: object, kind: type[T]) -> T:
     if not isinstance(value, kind) or isinstance(value, bool):
         raise TypeError(f"{value!r} is not {kind}")
     return value
+
+
+def _risky_entry(n: Named) -> str:
+    """A shown row's risky entry, written only for a Risky row: "noSales" for one for too
+    few Sale Events (#224), else true."""
+    if n.no_sales:
+        return f", risky = {_string(NO_SALES)}"
+    if n.risky:
+        return ", risky = true"
+    return ""
+
+
+def _risky(value: object) -> tuple[bool, bool]:
+    """A shown row's `risky` and `no_sales` from its risky entry: true, or "noSales" for a
+    Risky row for too few Sale Events (#224)."""
+    if value == NO_SALES:
+        return True, True
+    return _flag(value), False
 
 
 def _flag(value: object) -> bool:

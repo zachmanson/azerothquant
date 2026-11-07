@@ -246,6 +246,8 @@ class WhyNot:
     cheap_since: int | None = None
     # The Scans with no cheaper Listing the stretch was kept through (#139), oldest first.
     cheap_breaks: tuple[int, ...] = ()
+    # Shown as a Risky row for too few Sale Events (#224, ADR-0043), so not failed at them.
+    risky_no_sales: bool = False
 
 
 class BlockReason(StrEnum):
@@ -377,6 +379,11 @@ class Row:
     # A Flip to Sell's Unsold Loss (ADR-0034): what it loses if none of it sells. Not
     # compared, so rows are checked on it apart.
     unsold_loss: float | None = field(default=None, compare=False)
+    # A Risky row's Sale Events when it's one for too few of them (#224, ADR-0043): a Flip
+    # to Sell under `flip_min_sale_events`, or held units of such an Item Key. None else.
+    sales_seen: int | None = None
+    # Its next other player's Listing, the one it posts just under, which the Addon names.
+    next_listing: int | None = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +397,8 @@ class _RiskCaps:
     # row (#194, ADR-0037), and the most Unsold Loss a longer one may have (ADR-0041).
     risky_units: int = 0
     risky_loss: float = 0.0
+    # The most Risky rows for too few Sale Events (#224, ADR-0043).
+    no_sales_rows: int = 0
 
     def fit(self, cost: float, unsold_loss: float) -> bool:
         return cost <= self.room and unsold_loss <= self.loss
@@ -481,6 +490,8 @@ class _SellRun:
     # or under the Recent Price, and buying, after the held units, no more than seen sold
     # at or above its post price, each Sale Event counted at most the typical sale size.
     long_risky: bool = False
+    # The next other player's Listing once it's bought, for a no-sales run (#224) only.
+    next_listing: int | None = None
 
     @property
     def cost(self) -> int:
@@ -514,6 +525,10 @@ class _FlipToSell:
     # long Risky row comes from (ADR-0041); empty if they're `runs`. With them, `runs`
     # may be empty: the cutoff left no run but a Risky one.
     long_runs: tuple[_SellRun, ...] = ()
+    # The runs of no more than `risky_max_units` units, with too few Sale Events at their
+    # post price for a Flip, that a Risky row for it comes from (#224, ADR-0043). Only an
+    # Item Key with no other run has them.
+    no_sales_runs: tuple[_SellRun, ...] = ()
 
     @property
     def whole(self) -> _SellRun:
@@ -934,7 +949,7 @@ def recommend_market(
         [
             _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
             for item_key, holding in left.items()
-            for row in valuer.rows(item_key, holding)
+            for row in valuer.shown_rows(item_key, holding)
         ]
         + disenchanted
         + crafting.rows
@@ -981,7 +996,17 @@ def recommend_market(
         buy_under=_buy_unders(conn, config, market, now, valuer, plans, fair_value_cache)
         if buy_under
         else [],
-        why_not=_why_not(valuer, cleared, dropped, spend, min_profit, set(under), names, config)
+        why_not=_why_not(
+            valuer,
+            cleared,
+            dropped,
+            spend,
+            min_profit,
+            set(under),
+            names,
+            config,
+            {r.item_key for r in shopping if r.sales_seen is not None},
+        )
         if why_not
         else [],
         beta_ratios=ratios,
@@ -1030,6 +1055,7 @@ def _risk_caps(gold: float, tied_up: float, config: Config) -> _RiskCaps:
         room=max(0.0, config.flip_tied_up_share * stake - tied_up),
         risky_units=config.risky_max_units,
         risky_loss=config.risky_max_loss_share * stake,
+        no_sales_rows=config.risky_no_sales_rows,
     )
 
 
@@ -1131,11 +1157,14 @@ def _why_not(
     under: set[str],
     names: Mapping[str, str],
     config: Config,
+    no_sales: set[str],
 ) -> list[WhyNot]:
     """`recommend`'s `why_not` from the Valuer the Flips were sized on, the buys that
     `cleared` the Flip margin, the itemIDs the Scan `dropped` rows of, whose buys aren't
     options (#156), what each option may `spend` and the `min_profit` it must make (#197),
-    for the Item Keys not `under` a Prediction, with the item `names` known (#108)."""
+    for the Item Keys not `under` a Prediction, with the item `names` known (#108). The
+    Item Keys the Shopping List shows as Risky rows for too few Sale Events, `no_sales`,
+    aren't failed at them (#224)."""
     buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
     flips = _flip_options(buys, spend)
     best: dict[str, Row] = {}
@@ -1190,7 +1219,7 @@ def _why_not(
         elif _vendors_at_a_profit(out, cheapest[0], valuer.effort(item_key)):
             failed = Check.MARGIN  # a vendor needs no Sale Events or room (#191)
         elif sale_events < config.flip_min_sale_events:
-            failed = Check.SALE_EVENTS
+            failed = None if item_key in no_sales else Check.SALE_EVENTS
         elif room < held + needs:
             failed = Check.ROOM
         else:
@@ -1219,6 +1248,7 @@ def _why_not(
                 name=names.get(item_key),
                 cheap_since=stretch.since,
                 cheap_breaks=stretch.breaks,
+                risky_no_sales=item_key in no_sales,
             )
         )
     return result
@@ -1946,6 +1976,7 @@ def rework(
             r.days,
             config.sale_horizon_seconds,
             r.risky,
+            no_sales=r.sales_seen is not None,
         )
         for r in m.shopping_list
         if r.action is Action.SELL
@@ -2495,10 +2526,13 @@ class _Valuer:
     ) -> list[_VendorBuy | _FlipToSell]:
         """`_flips` of an Item Key in this Scan, behind `held` units, posted by `post_by`.
         Its Flip to Sell carries the `long_runs` a long Risky row may come from, with the
-        cutoff skipped under the Recent Price (ADR-0041), when they're not its runs."""
+        cutoff skipped under the Recent Price (ADR-0041), when they're not its runs. An
+        Item Key with no run at all may have a Flip to Sell with only `no_sales_runs`: up
+        to `risky_max_units` units with too few Sale Events at their post price, as the
+        cutoff counts them (#224, ADR-0043)."""
         cheap, recent = self.cheap(item_key), self.recent_price(item_key)
 
-        def flips(cheap: _Cheap) -> list[_VendorBuy | _FlipToSell]:
+        def flips(cheap: _Cheap, no_sales: int = 0) -> list[_VendorBuy | _FlipToSell]:
             return _flips(
                 item_key,
                 self.others[item_key],
@@ -2515,24 +2549,37 @@ class _Valuer:
                 post_by,
                 cheap,
                 recent,
+                no_sales,
             )
 
         buys = flips(cheap)
-        if post_by is not None or recent is None or cheap.recent is not None or not cheap.lows:
+        if post_by is not None:
             return buys
-        long_runs = tuple(
-            run
-            for buy in flips(replace(cheap, recent=recent))
-            if isinstance(buy, _FlipToSell)
-            for run in buy.runs
-            if run.long_risky
+        if recent is not None and cheap.recent is None and cheap.lows:
+            long_runs = _runs(flips(replace(cheap, recent=recent)), lambda run: run.long_risky)
+            if long_runs:
+                flip = next((b for b in buys if isinstance(b, _FlipToSell)), None)
+                if flip is None:
+                    buys = [*buys, _FlipToSell(item_key, (), self.stack(item_key), long_runs)]
+                else:
+                    buys = [replace(b, long_runs=long_runs) if b is flip else b for b in buys]
+        # A Risky row for too few Sale Events only for an Item Key with no other run.
+        if not self.no_sales_on() or any(isinstance(b, _FlipToSell) for b in buys):
+            return buys
+        least = self._config.flip_min_sale_events
+        runs = _runs(
+            flips(cheap, no_sales=self._config.risky_max_units),
+            lambda run: run.sale_events < least,
         )
-        if not long_runs:
+        if not runs:
             return buys
-        flip = next((b for b in buys if isinstance(b, _FlipToSell)), None)
-        if flip is None:
-            return [*buys, _FlipToSell(item_key, (), self.stack(item_key), long_runs)]
-        return [replace(b, long_runs=long_runs) if b is flip else b for b in buys]
+        return [*buys, _FlipToSell(item_key, (), self.stack(item_key), no_sales_runs=runs)]
+
+    def no_sales_on(self) -> bool:
+        """Whether Flips to Sell and held units with too few Sale Events get Risky rows
+        (#224, ADR-0043): only with the risk caps on, and neither cap at 0."""
+        c = self._config
+        return c.risk_caps and c.risky_no_sales_rows > 0 and c.risky_max_units > 0
 
     def stack(self, item_key: str) -> float:
         """The units of an Item Key a Flip posts per stack (#98): its usual Sale Event
@@ -2639,6 +2686,36 @@ class _Valuer:
             self.cut,
             Action.WAIT if waiting else Action.SELL,
         )
+
+    def shown_rows(self, item_key: str, holding: Holding) -> list[Row]:
+        """`rows` as the Holdings tab shows them: with held units of an Item Key with too
+        few Sale Events for a Flip posted as a Risky row (`_risky_held`, #224, ADR-0043).
+        Only shown: what held units are `worth`, which the Stake, Disenchant and Craft
+        value them by, stays at `rows`."""
+        rows = self.rows(item_key, holding)
+        risky = self._risky_holding(item_key)
+        if risky is None:
+            return rows
+        vendor, queue = self.vendor.get(item_id_of(item_key)), self.queue(item_key, flips=False)
+        return _risky_held(rows, _bound(holding), risky, vendor, queue, self.cut)
+
+    def _risky_holding(self, item_key: str) -> "_RiskyHeld | None":
+        """How held units of an Item Key with too few Sale Events for a Flip post as a
+        Risky row (#224, ADR-0043): where a Flip to Sell would post, its Sale Events
+        counted as a Flip counts them. None for an Item Key with enough of them, without
+        another player's Listing to post under, or with those Risky rows off."""
+        if not self.no_sales_on():
+            return None
+        post_at = self.flip_post_at(item_key)
+        flipped = self.flipped.get(item_key, [])
+        next_listing = cheapest_without(self.others.get(item_key, []), flipped)
+        if post_at is None or next_listing is None:
+            return None
+        demand = _demand_at(self.rates.get(item_key), post_at, cheap=self.cheap(item_key))
+        events = demand.sale_events if demand else 0
+        if events >= self._config.flip_min_sale_events:
+            return None
+        return _RiskyHeld(post_at, events, next_listing)
 
     def holdings_room(self, item_key: str) -> int:
         """The held units of an Item Key that sell within the Sale Horizon, at its
@@ -2903,6 +2980,70 @@ def _holding_rows(
             )
         )
     return rows
+
+
+@dataclass(frozen=True)
+class _RiskyHeld:
+    """Where held units of an Item Key with too few Sale Events post as a Risky row
+    (#224, ADR-0043): at `post_at`, under the `next_listing`, with `sales_seen` Sale
+    Events at or above it."""
+
+    post_at: float
+    sales_seen: int
+    next_listing: int
+
+
+def _risky_held(
+    rows: list[Row],
+    bound: int,
+    risky: _RiskyHeld,
+    vendor_price: int | None,
+    queue: _Queue,
+    cut: float,
+) -> list[Row]:
+    """An Item Key's Holdings `rows` with the unbound units they Vendor or have no data
+    for posted as a Risky row instead (#224, ADR-0043), while they beat the Vendor Price
+    less the deposits they're expected to lose behind the ones already Selling: Holdings
+    mustn't Vendor what a Risky row just bought. The `bound` units, always in the Vendor
+    row, can't Sell."""
+    idle = [r for r in rows if r.action is None or r.action is Action.VENDOR]
+    ahead = sum(r.quantity for r in rows if r not in idle)
+    free = sum(r.quantity for r in idle) - bound
+    sell_price = risky.post_at * (1 - cut)
+    selling = units_selling(sell_price, free, lambda i: queue.lost(ahead + i), vendor_price or 0)
+    if not selling:
+        return rows
+    profit = selling * sell_price - queue.lost_by(ahead, selling)
+    out = [
+        Row(
+            rows[0].item_key,
+            Action.SELL,
+            selling,
+            price=risky.post_at,
+            profit=profit,
+            margin=None if vendor_price is None else profit / selling - vendor_price,
+            sale_events=risky.sales_seen,
+            risky=True,
+            sales_seen=risky.sales_seen,
+            next_listing=risky.next_listing,
+        )
+    ]
+    left = selling  # the units still to take out of the idle rows
+    for r in rows:
+        if r not in idle:
+            out.append(r)
+            continue
+        unbound = r.quantity - bound if r.action is Action.VENDOR else r.quantity
+        taken = min(left, unbound)
+        left -= taken
+        quantity = r.quantity - taken
+        if not taken:
+            out.append(r)
+        elif quantity:
+            # A Vendor row left with only its bound units, priced as before.
+            profit = None if r.profit is None else quantity * vendor_price
+            out.append(replace(r, quantity=quantity, profit=profit))
+    return out
 
 
 def units_selling(
@@ -4030,6 +4171,7 @@ def _flips(
     post_by: Callable[[int | None], float | None] | None = None,
     cheap: _Cheap | None = None,
     recent: int | None = None,
+    no_sales: int = 0,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
@@ -4054,7 +4196,8 @@ def _flips(
     room limit and no minimum of Sale Events (`_Valuer.clearing_run`, ADR-0038). With the
     `cheap` Listings, a run counts the demand at its post price only since the ones it
     buys showed up (#132). With the `recent` Price, each run says whether it may be a long
-    Risky row (`_SellRun.long_risky`).
+    Risky row (`_SellRun.long_risky`). With `no_sales`, the room is that many units
+    whatever the Sale Events, for a Risky row for too few of them (#224, ADR-0043).
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -4072,7 +4215,9 @@ def _flips(
                 bought,
                 _undercut(after[i + 1], own, config, merchant_cost),
                 _undercut(unit, own, config, merchant_cost),
-                lambda price: _room_at(
+                (lambda price: no_sales)
+                if no_sales
+                else lambda price: _room_at(
                     rate, price, held, config, config.days_to_sell_or_horizon_seconds, cheap=cheap
                 ),
             )
@@ -4103,7 +4248,10 @@ def _flips(
                 and post_at <= recent
                 and held + bought <= rate.units_sold_at_or_above(post_at)
             )
-            runs.append(_SellRun(prefix, post_at, profit, days, events, unsold, long_risky))
+            next_listing = cheapest_without(offers, prefix) if no_sales else None
+            runs.append(
+                _SellRun(prefix, post_at, profit, days, events, unsold, long_risky, next_listing)
+            )
         if take < quantity:
             break  # the rest of this Listing is left, so no longer run buys past it
     buys: list[_VendorBuy | _FlipToSell] = []
@@ -4120,6 +4268,15 @@ def _flips(
             if (net := vendor_price - effort - unit) > 0 and net >= _flip_margin(unit, config)
         ]
     return buys
+
+
+def _runs(
+    buys: list[_VendorBuy | _FlipToSell], keep: Callable[[_SellRun], bool]
+) -> tuple[_SellRun, ...]:
+    """The runs of the Flips to Sell among `buys` that `keep` keeps."""
+    return tuple(
+        run for buy in buys if isinstance(buy, _FlipToSell) for run in buy.runs if keep(run)
+    )
 
 
 def _hold_buys(
@@ -4611,6 +4768,7 @@ def _option(
                 posts=math.ceil(run.quantity / buy.stack - 1e-9),
                 days=run.days,
                 unsold_loss=run.unsold_loss,
+                next_listing=run.next_listing,
             )
             continue
         affords = min(gold, room) // buy.unit_buyout
@@ -4705,13 +4863,38 @@ def _options(
     disenchanted = sorted(
         (r for r in disenchants if r.profit >= min_profit.of(r)), key=lambda r: -r.profit
     )
+    no_sales = sorted(
+        (r for r in _no_sales_options(buys, gold, caps) if r.profit >= min_profit.of(r)),
+        key=lambda r: -r.profit,
+    )
     # One list again, most profit first: the Backtest takes the options in that order.
     return sorted(
         [r for r, rank in zip(flips, ranks, strict=True) if rank <= flip_rows]
         + crafted[:craft_rows]
-        + disenchanted[:disenchant_rows],
+        + disenchanted[:disenchant_rows]
+        + no_sales[: caps.no_sales_rows],
         key=lambda r: -r.profit,
     )
+
+
+def _no_sales_options(
+    buys: list[_VendorBuy | _FlipToSell], gold: float, caps: _RiskCaps
+) -> list[Row]:
+    """Each Risky row for too few Sale Events (#224, ADR-0043): an Item Key's best
+    `no_sales_runs` run within the gold and the room, with no Unsold Loss cap."""
+    if not caps.no_sales_rows:
+        return []
+    rows = []
+    for buy in buys:
+        if not isinstance(buy, _FlipToSell) or not buy.no_sales_runs:
+            continue
+        flip = replace(buy, runs=buy.no_sales_runs, long_runs=(), no_sales_runs=())
+        # Too few Sale Events to say when it sells: no wait, which the Addon shows as "?".
+        rows += [
+            replace(r, risky=True, sales_seen=r.sale_events, days=None)
+            for r in _option([flip], [], gold, replace(caps, loss=math.inf))
+        ]
+    return rows
 
 
 def _flip_options(

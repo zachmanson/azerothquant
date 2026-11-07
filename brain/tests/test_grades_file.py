@@ -69,6 +69,18 @@ def test_frozen_flip_entries_come_back_as_written(tmp_path):
     }
 
 
+def test_a_risky_row_for_too_few_sale_events_is_frozen_as_no_sales(tmp_path):
+    # #224, ADR-0043: written risky = "noSales", so its Flip Grades split from the Risky
+    # rows over the loss cap (risky = true).
+    path = tmp_path / "grades.toml"
+    boe = Named("4827", 1, 1600, 699999.0, 662399.05, None, 10_800, risky=True, no_sales=True)
+    ore = Named("2770", 3, 40, 80.5, 60.0, None, 10_800, risky=True)
+    freeze_shown(path, MARKET, 1_790_003_600, 10_800, [boe, ore])
+
+    assert 'risky = "noSales"' in path.read_text(encoding="utf-8")
+    assert load_frozen(path, MARKET).shown == {1_790_003_600: {"4827": boe, "2770": ore}}
+
+
 def test_frozen_flip_to_craft_entries_come_back_as_written(tmp_path):
     # #114: what two Scans named to craft, one of them nothing, and a Flip to Craft's Grade.
     path = tmp_path / "grades.toml"
