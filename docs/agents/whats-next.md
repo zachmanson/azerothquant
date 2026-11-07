@@ -1,3 +1,7 @@
+2026-11-07 (later 203): #224 grilled and specced (issue comment), relabeled ready-for-agent. No code. Short version: Flips to Sell under `flip_min_sale_events` that pass everything else become Risky rows (`risky = "noSales"` in grades.toml, `salesSeen` in Lua). Post price has no cap. Same sizing as ADR-0037 (room still applies, <= 5 units). Own cap `risky_no_sales_rows` = 10, ranked by profit. Held units get a Holdings Sell row instead of Vendor. Out of the Backtest. Write ADR-0043.
+
+Next: build #224 per the spec comment (`/tdd`). Gotcha: the Holdings part touches `_sell_way` (`recommend.py:1632`), which every way-valuation uses; limit the change to no-sales Item Keys so normal Sell values don't move.
+
 2026-11-07 (later 202): Empty Live Shopping List diagnosed, no code. 7,294 of 7,508 Item Keys stop at Sale Events (<3, only ~52 h of Live windows); the 214 that reach the margin all sit ~13.6% short (= priced at market: post x 0.95 / 1.1). `--why-not` sorts margin failures first, so it hid the Sale Events wall. `flip_min_sale_events = 1` gives just one +15s Flip. But 557 Item Keys (mostly random-enchant BoE gear, 0 Sale Events) have a post_at that beats the ask by >10%: `_sell_way` gives no Sell value without room (`recommend.py:1641`). User wants those as Risky rows: filed #224 (needs-triage, grill first: price sanity vs sticker-price next Listings, row count, spend cap).
 
 Next: grill #224 (`/grilling`), then spec it.
