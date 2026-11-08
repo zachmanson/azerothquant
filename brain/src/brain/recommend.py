@@ -819,6 +819,7 @@ def recommend_market(
     loot_alert: bool = True,
     gold: int | None = None,
     tied_up: float | None = None,
+    taken: frozenset[int] = frozenset(),
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a past Scan,
@@ -829,7 +830,8 @@ def recommend_market(
     (#54), and valuing every Item Key in a Scan adds up over a Backtest. A `gold` replaces
     the Characters' gold and the Budget: a Backtest's simulated gold (#167). A `tied_up`
     replaces the own Listings up at cost in the Stake (ADR-0034): a Backtest's unsold
-    units, since the Scans show the real player's posts."""
+    units, since the Scans show the real player's posts. The Listing ids `taken` are left
+    out of the Scan: those a Backtest bought, still up in the real market (#212)."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -855,6 +857,7 @@ def recommend_market(
         seen,
         fair_value_cache=fair_value_cache,
         skills_as_of=as_of,
+        taken=taken,
     )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
@@ -2139,14 +2142,16 @@ def _valuer(
     seen: Sequence[Listing] | None = None,
     fair_value_cache: FairValueCache | None = None,
     skills_as_of: int | None = None,
+    taken: frozenset[int] = frozenset(),
 ) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
     """The Market's Valuer as of its Scan requested at `at` (none without one), and the
     Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
     Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
     which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
     `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
-    the latest, or as of `skills_as_of` (#103)."""
-    valuer = _valuer_at(conn, config, market, at, seen, fair_value_cache, skills_as_of)
+    the latest, or as of `skills_as_of` (#103). The Listing ids `taken` are left out of
+    the Scan: a Backtest's bought ones (#212)."""
+    valuer = _valuer_at(conn, config, market, at, seen, fair_value_cache, skills_as_of, taken)
     return valuer.flips(under, unbound)
 
 
@@ -2158,6 +2163,7 @@ def _valuer_at(
     seen: Sequence[Listing] | None = None,
     fair_value_cache: FairValueCache | None = None,
     skills_as_of: int | None = None,
+    taken: frozenset[int] = frozenset(),
 ) -> "_Valuer":
     """`_valuer` before the Flips: what they're worked out on."""
     # With a cache, its Listings: what it keeps below is worked out from them (#143).
@@ -2168,7 +2174,13 @@ def _valuer_at(
         seen = listings(conn, market)
     scanned = at is not None
     supply = (
-        _scan_only(cache, conn, market, ("supply_at", at), lambda: supply_at(conn, market, at))
+        _scan_only(
+            cache,
+            conn,
+            market,
+            ("supply_at", at, taken),
+            lambda: supply_at(conn, market, at, exclude=taken),
+        )
         if scanned
         else {}
     )
@@ -2177,8 +2189,8 @@ def _valuer_at(
             cache,
             conn,
             market,
-            ("others_at", at),
-            lambda: supply_at(conn, market, at, others_only=True),
+            ("others_at", at, taken),
+            lambda: supply_at(conn, market, at, others_only=True, exclude=taken),
         )
         if scanned
         else {}

@@ -13,6 +13,10 @@ Holdings price then (its own without one) while that price after the cut, less t
 Deposits it's expected to lose waiting its turn, beats the Vendor Price, up to what sells
 within the Sale Horizon; the rest are vendored. Every policy exits this way. Between a
 posting running out and that Scan the units aren't on the AH. All amounts are copper.
+
+The Scans are the real market, where nobody bought what a policy did, so the Listings a
+policy bought are left out of what it sees at later Scans (#212). Only the buying side
+leaves them out: the Sale Records, Fair Value history and the market mark are as seen.
 """
 
 import math
@@ -23,7 +27,14 @@ from dataclasses import dataclass, field, replace
 
 from brain.config import Config
 from brain.fair_value import FairValueCache
-from brain.history import Market, character_markets, scan_times, supply_at, vendor_prices
+from brain.history import (
+    Market,
+    character_markets,
+    listings_at,
+    scan_times,
+    supply_at,
+    vendor_prices,
+)
 from brain.observation import (
     Calibration,
     OwnPurchasesTaken,
@@ -99,24 +110,32 @@ class Buy:
     post_at: float  # per unit, before the cut
     back: float = 0.0  # gold back at once, from units vendored as bought
     way: Action | None = None  # a Buy Under's way out, for its P&L by way (#173)
+    # The units it took from other players' Listings, by Item Key, cheapest first (#212)
+    took: tuple[tuple[str, int], ...] = ()
 
 
-# (Scan time, gold, Item Keys with units still posted, what the units still posted cost)
-# -> what it buys at that Scan.
-BuyPolicy = Callable[[int, float, frozenset[str], float], Sequence[Buy]]
+# (Scan time, gold, Item Keys with units still posted, what the units still posted cost,
+# the Listing ids already bought) -> what it buys at that Scan.
+BuyPolicy = Callable[[int, float, frozenset[str], float, frozenset[int]], Sequence[Buy]]
+
+# A Listing in a Scan: (Listing id, Item Key, unit buyout, quantity).
+ScanListing = tuple[int, str, int, int]
 
 
 @dataclass(frozen=True)
 class Terms:
     """What the Market charges and pays: its cut, a Deposit per unit posted for 24 h, the
     Vendor Price, other players' cheapest unit buyout of an Item Key in a Scan (None
-    when they have none up), and the Brain's Holdings advice for an Item Key at a Scan."""
+    when they have none up), the Brain's Holdings advice for an Item Key at a Scan, and
+    other players' Listings in a Scan."""
 
     cut: float
     deposit: Callable[[str], float]
     vendor: Callable[[str], int]
     cheapest_ask: Callable[[str, int], int | None]
     holdings: Callable[[str, int], HoldingsAdvice]
+    # Other players' Listings in the Scan at a time, which a Buy's `took` is bought from
+    listings: Callable[[int], Sequence[ScanListing]] = lambda at: ()
 
 
 @dataclass
@@ -208,12 +227,13 @@ def simulate(
     units it believes `grade_share`. It buys nothing after `last_buy`, and never an Item
     Key it still has units posted in: the Scans don't show our simulated posts."""
     sim = Simulation(gold=start_gold)
+    taken: set[int] = set()
     for previous, at in zip([None, *times], times, strict=False):
         if previous is not None:
             _fill(sim, [r for r in records if previous < r.seen_at <= at], terms, grade_share)
         _expire(sim, at, terms)
         if last_buy is None or at <= last_buy:
-            _buy(sim, at, policy, terms)
+            _buy(sim, at, policy, terms, taken)
         sim.curve.append((sim.gold, sim.gold + _tied_up(sim)))
     if times:
         _expire(sim, times[-1], terms, end=True)
@@ -225,17 +245,40 @@ def _tied_up(sim: Simulation) -> float:
     return sum(t.cost * t.left / t.units for t in sim.trades if t.units and not t.closed)
 
 
-def _buy(sim: Simulation, at: int, policy: BuyPolicy, terms: Terms) -> None:
+def _buy(sim: Simulation, at: int, policy: BuyPolicy, terms: Terms, taken: set[int]) -> None:
+    """Book what `policy` buys at the Scan at `at`, and add the Listings it took to
+    `taken`."""
     posted = frozenset(t.item_key for t in sim.trades if not t.closed)
-    for buy in policy(at, sim.gold, posted, _tied_up(sim)):
+    for buy in policy(at, sim.gold, posted, _tied_up(sim), frozenset(taken)):
         if buy.item_key in posted:
             continue
+        taken |= _listings_taken(buy.took, terms.listings(at), taken)
         trade = Trade(
             buy.item_key, buy.units, buy.cost, buy.post_at, at, proceeds=buy.back, way=buy.way
         )
         trade.closed = not buy.units
         sim.gold += buy.back - buy.cost
         sim.trades.append(trade)
+
+
+def _listings_taken(
+    took: Sequence[tuple[str, int]], listings: Sequence[ScanListing], taken: set[int]
+) -> set[int]:
+    """The Listings, not `taken` already, that buying `took` empties: an Item Key's
+    cheapest first, whole, until its units are covered."""
+    result: set[int] = set()
+    for item_key, units in took:
+        up = sorted(
+            (unit, listing_id, quantity)
+            for listing_id, key, unit, quantity in listings
+            if key == item_key and listing_id not in taken and listing_id not in result
+        )
+        for _, listing_id, quantity in up:
+            if units <= 0:
+                break
+            result.add(listing_id)
+            units -= quantity
+    return result
 
 
 def _fill(sim: Simulation, records: Sequence[SaleRecord], terms: Terms, grade_share: float) -> None:
@@ -403,6 +446,7 @@ def _terms(
         vendor=lambda item_key: vendor.get(item_id_of(item_key), 0),
         cheapest_ask=cheapest_ask,
         holdings=holdings_advice(conn, config, market, cache),
+        listings=lambda at: listings_at(conn, market, at, others_only=True),
     )
 
 
@@ -440,22 +484,27 @@ def _buy_under_policy(
     and Disenchant ways are left out: their outputs and mats aren't simulated."""
     standing: list[BuyUnder] = []
 
-    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
-        offers = supply_at(conn, market, at, others_only=True)
+    def policy(
+        at: int, gold: float, posted: frozenset[str], tied_up: float, taken: frozenset[int]
+    ) -> list[Buy]:
+        offers = supply_at(conn, market, at, others_only=True, exclude=taken)
         buys = []
         for b in standing:
             if b.item_key is None or b.item_key in posted:
                 continue
             if b.way not in (Action.SELL, Action.VENDOR):
                 continue
-            taken = take_under(b, offers.get(b.item_key, []), config, gold, checked)
-            if taken is None:
+            under = take_under(b, offers.get(b.item_key, []), config, gold, checked)
+            if under is None:
                 continue
-            if taken.post_at is None:
-                back = taken.units * terms.vendor(b.item_key)
-                buys.append(Buy(b.item_key, 0, taken.cost, 0, back=back, way=b.way))
+            took = ((b.item_key, under.units),)
+            if under.post_at is None:
+                back = under.units * terms.vendor(b.item_key)
+                buys.append(Buy(b.item_key, 0, under.cost, 0, back=back, way=b.way, took=took))
             else:
-                buys.append(Buy(b.item_key, taken.units, taken.cost, taken.post_at, way=b.way))
+                buys.append(
+                    Buy(b.item_key, under.units, under.cost, under.post_at, way=b.way, took=took)
+                )
             gold -= buys[-1].cost - buys[-1].back
         cache.start_pass()
         m = recommend_market(
@@ -468,6 +517,7 @@ def _buy_under_policy(
             fair_value_cache=cache,
             paid=False,
             loot_alert=False,
+            taken=taken,
         )
         standing[:] = m.buy_under
         return buys
@@ -482,10 +532,13 @@ def _auctionator_policy(conn: sqlite3.Connection, market: Market, terms: Terms) 
     Up to a fifth of the Stake and a stack each, most profit first while the gold lasts, in whole
     Listings, smallest first: the last Item Key gets the ones the gold left still buys."""
 
-    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
+    def policy(
+        at: int, gold: float, posted: frozenset[str], tied_up: float, taken: frozenset[int]
+    ) -> list[Buy]:
         cap = AUCTIONATOR_STAKE_SHARE * (gold + tied_up)
         options = []
-        for item_key, offers in supply_at(conn, market, at, others_only=True).items():
+        offers_at = supply_at(conn, market, at, others_only=True, exclude=taken)
+        for item_key, offers in offers_at.items():
             if item_key in posted:
                 continue
             cheapest = min(unit for unit, _ in offers)
@@ -504,7 +557,10 @@ def _auctionator_policy(conn: sqlite3.Connection, market: Market, terms: Terms) 
         for option in sorted(options, key=lambda o: -o.margin * o.units(cap)):
             units = option.units(min(cap, gold))
             if units:
-                buys.append(Buy(option.item_key, units, units * option.ask, option.post_at))
+                took = ((option.item_key, units),)
+                buys.append(
+                    Buy(option.item_key, units, units * option.ask, option.post_at, took=took)
+                )
                 gold -= buys[-1].cost
         return buys
 
@@ -545,7 +601,9 @@ def _brain_policy(
     and Stake (the gold plus the units still posted at cost, ADR-0034): the options a
     player would take (`options_taken`), while the gold and the room last."""
 
-    def policy(at: int, gold: float, posted: frozenset[str], tied_up: float) -> list[Buy]:
+    def policy(
+        at: int, gold: float, posted: frozenset[str], tied_up: float, taken: frozenset[int]
+    ) -> list[Buy]:
         cache.start_pass()
         m = recommend_market(
             conn,
@@ -560,6 +618,7 @@ def _brain_policy(
             loot_alert=False,
             gold=int(gold),
             tied_up=tied_up,
+            taken=taken,
         )
         m = replace(m, shopping_list=[r for r in m.shopping_list if r.disenchant is None])
         shopping, _ = options_taken(m, config.shopping_list_rows)
@@ -568,14 +627,24 @@ def _brain_policy(
             if r.cost is None or r.cost > gold or r.item_key in posted:
                 continue
             vendor = terms.vendor(r.item_key)
+            took = ((r.item_key, r.quantity),)
             if r.action is Action.SELL:
-                buys.append(Buy(r.item_key, r.quantity, r.cost, r.post_at))
+                buys.append(Buy(r.item_key, r.quantity, r.cost, r.post_at, took=took))
             elif r.action is Action.VENDOR:
-                buys.append(Buy(r.item_key, 0, r.cost, 0, back=r.quantity * vendor))
+                buys.append(Buy(r.item_key, 0, r.cost, 0, back=r.quantity * vendor, took=took))
             elif r.action is Action.CRAFT and r.made is not None:
                 rest = r.made.units - r.made.selling
+                reagents = tuple((b.item_key, b.quantity) for b in r.buys if not b.merchant)
+                post_at = r.made.post_at or 0
                 buys.append(
-                    Buy(r.item_key, r.made.selling, r.cost, r.made.post_at or 0, back=rest * vendor)
+                    Buy(
+                        r.item_key,
+                        r.made.selling,
+                        r.cost,
+                        post_at,
+                        back=rest * vendor,
+                        took=reagents,
+                    )
                 )
             else:
                 continue

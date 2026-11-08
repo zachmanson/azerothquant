@@ -46,7 +46,7 @@ TERMS = Terms(
 
 def scripted(buys_at):
     """A policy that buys what `buys_at` names at each Scan, whatever its gold."""
-    return lambda at, gold, posted, tied_up: buys_at.get(at, [])
+    return lambda at, gold, posted, tied_up, taken: buys_at.get(at, [])
 
 
 def record(at, unit=100, units=1, item_key=LINEN, last_seen=None):
@@ -181,7 +181,7 @@ def test_nothing_is_bought_after_the_last_buy():
 def test_an_item_key_still_posted_is_not_bought_again_and_the_policy_is_told():
     told = []
 
-    def policy(at, gold, posted, tied_up):
+    def policy(at, gold, posted, tied_up, taken):
         told.append(posted)
         return (
             [Buy(LINEN, 1, 50, 100), Buy(SILK, 1, 50, 100)]
@@ -199,7 +199,7 @@ def test_the_policy_is_told_what_its_units_still_unsold_cost():
     # #170: the Stake's own Listings up at cost. 1 of the 4 Linen bought for 400 sold.
     told = []
 
-    def policy(at, gold, posted, tied_up):
+    def policy(at, gold, posted, tied_up, taken):
         told.append(tied_up)
         return [Buy(LINEN, 4, 400, 100)] if at == T0 else []
 
@@ -792,3 +792,81 @@ def test_a_risky_row_for_too_few_sale_events_is_never_taken_nor_counted():
     shopping, _ = options_taken(m, flip_rows=2)
 
     assert shopping == [bolt, linen]
+
+
+# --- a bought Listing is gone from later Scans (#212) ---
+
+
+def test_the_brain_buys_a_listing_still_up_in_later_scans_only_once(db):
+    # A Linen Listing at 1s, under its 10s Vendor Price, stays up for 3 Scans: the Scans
+    # are the real market, where nobody bought it, but the simulated player did at the
+    # first, so it's gone for them after (the audit's 11288 wands, #212).
+    scans = [history_scan(T0 + h * HOUR, history_row(quantity=1, unit=100)) for h in range(3)]
+    import_scans(db, scans, Era.BETA, CONFIG)
+    read = {**SELLER_READ, "vendorPrices": {"2589": 1000}}
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(db, CONFIG, [], start_gold=10_000, no_buys_in_last_seconds=0)
+
+    assert [(t.item_key, t.cost, t.proceeds) for t in result.runs["brain"].trades] == [
+        (LINEN, 100, 1000)
+    ]
+
+
+def test_a_listing_new_in_a_later_scan_is_still_bought(db):
+    # As above, and a second Linen Listing at 1s turns up at T0 + 1 h: only the first is
+    # left out, so the Brain buys the new one then.
+    scans = [
+        history_scan(T0, history_row(quantity=1, unit=100)),
+        history_scan(
+            T0 + HOUR, history_row(quantity=1, unit=100), history_row(quantity=1, unit=100)
+        ),
+        history_scan(
+            T0 + 2 * HOUR, history_row(quantity=1, unit=100), history_row(quantity=1, unit=100)
+        ),
+    ]
+    import_scans(db, scans, Era.BETA, CONFIG)
+    read = {**SELLER_READ, "vendorPrices": {"2589": 1000}}
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(db, CONFIG, [], start_gold=10_000, no_buys_in_last_seconds=0)
+
+    trades = result.runs["brain"].trades
+    assert [(t.cost, t.posted_at) for t in trades] == [(100, T0), (100, T0 + HOUR)]
+
+
+def test_auctionator_buys_a_listing_still_up_in_later_scans_only_once(db):
+    # The 1 Linen at 2s under the 10s stays up for 3 Scans: bought at the first only. Ours
+    # sells in the next hour (2 of the 10s go), so it isn't still posted to block a rebuy.
+    scans = [
+        history_scan(
+            T0 + h * HOUR,
+            history_row(quantity=20 - 2 * h, unit=1000),
+            history_row(quantity=1, unit=200),
+        )
+        for h in range(3)
+    ]
+
+    assert auctionator_trades(db, scans) == [(LINEN, 1, 200, 999)]
+
+
+@pytest.mark.parametrize("policy", ["buyunder", "buyunder_unchecked"])
+def test_a_buy_under_takes_a_listing_still_up_in_later_scans_only_once(db, policy):
+    # The 3 Ore at 5s under their 10s Vendor Price stay up from T0 + 2 h to T0 + 4 h: the
+    # Buy Under for them takes them at T0 + 2 h only.
+    ore = {"itemString": ORE_ITEM, "quantity": 3, "buyout": 1500, "timeLeft": 4}
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(T0 + HOUR, {**ore, "quantity": 1, "buyout": 500}),
+        *(history_scan(T0 + h * HOUR, ore) for h in (2, 3, 4)),
+    ]
+    read = {**SELLER_READ, "vendorPrices": {"2589": 10, "2770": 1000}}
+    import_scans(db, scans, Era.BETA, CONFIG)
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(
+        db, CONFIG, [], policies=(policy,), start_gold=10_000, no_buys_in_last_seconds=0
+    )
+
+    trades = result.runs[policy].trades
+    assert [(t.item_key, t.cost, t.posted_at) for t in trades] == [("2770", 1500, T0 + 2 * HOUR)]

@@ -1762,14 +1762,31 @@ def partial_sales(conn: sqlite3.Connection, market: Market) -> list[PartialSale]
 
 
 def supply_at(
-    conn: sqlite3.Connection, market: Market, at: int, others_only: bool = False
+    conn: sqlite3.Connection,
+    market: Market,
+    at: int,
+    others_only: bool = False,
+    exclude: frozenset[int] = frozenset(),
 ) -> dict[str, list[tuple[int, int]]]:
     """The Market's Scan requested at `at`, as (unit buyout, quantity) per Item Key, or
-    only other players' Listings in it with `others_only`. A Listing's quantity is stored
-    as of its last-seen Scan, so the Partial Sales seen after `at` are added back to get
-    what it held then."""
+    only other players' Listings in it with `others_only`, leaving out the Listing ids in
+    `exclude` (a Backtest's bought ones, #212)."""
+    result: dict[str, list[tuple[int, int]]] = {}
+    for listing_id, item_key, unit_buyout, quantity in listings_at(conn, market, at, others_only):
+        if listing_id not in exclude:
+            result.setdefault(item_key, []).append((unit_buyout, quantity))
+    return result
+
+
+def listings_at(
+    conn: sqlite3.Connection, market: Market, at: int, others_only: bool = False
+) -> list[tuple[int, str, int, int]]:
+    """The Listings in the Market's Scan requested at `at` (only other players' with
+    `others_only`), as (Listing id, Item Key, unit buyout, quantity), by id. A Listing's
+    quantity is stored as of its last-seen Scan, so the Partial Sales seen after `at` are
+    added back to get what it held then."""
     rows = conn.execute(
-        "SELECT l.item_key, l.unit_buyout, l.quantity + COALESCE(("
+        "SELECT l.id, l.item_key, l.unit_buyout, l.quantity + COALESCE(("
         "   SELECT SUM(p.units_sold) FROM partial_sale p JOIN scan ps ON ps.id = p.scan_id"
         "   WHERE p.listing_id = l.id AND ps.requested_at > ?), 0)"
         " FROM listing l"
@@ -1781,10 +1798,7 @@ def supply_at(
         + " ORDER BY l.id",
         (at, *_market_params(market), at, at),
     )
-    result: dict[str, list[tuple[int, int]]] = {}
-    for item_key, unit_buyout, quantity in rows:
-        result.setdefault(item_key, []).append((unit_buyout, quantity))
-    return result
+    return list(rows)
 
 
 def latest_scan_times(conn: sqlite3.Connection, era: Era) -> dict[Market, int]:
