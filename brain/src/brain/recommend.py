@@ -945,11 +945,14 @@ def recommend_market(
     )
     crafted = crafting.counts
     disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
+    # Paid as `_with_roi` shows it: over every held unit, the Disenchanted ones too.
+    covered = _covered({k: _units(h) for k, h in held.items()}, paid_lots)
+    paid_by_key = {item_key: _paid(c) for item_key, c in covered.items()}
     rows = (
         [
             _with_note(row, f"incl. {crafted[item_key]} crafted" if crafted[item_key] else "")
             for item_key, holding in left.items()
-            for row in valuer.shown_rows(item_key, holding)
+            for row in valuer.shown_rows(item_key, holding, paid_by_key.get(item_key))
         ]
         + disenchanted
         + crafting.rows
@@ -2566,11 +2569,8 @@ class _Valuer:
         # A Risky row for too few Sale Events only for an Item Key with no other run.
         if not self.no_sales_on() or any(isinstance(b, _FlipToSell) for b in buys):
             return buys
-        least = self._config.flip_min_sale_events
-        runs = _runs(
-            flips(cheap, no_sales=self._config.risky_max_units),
-            lambda run: run.sale_events < least,
-        )
+        # `_flips` keeps only the runs with too few Sale Events then.
+        runs = _runs(flips(cheap, no_sales=self._config.risky_max_units), lambda run: True)
         if not runs:
             return buys
         return [*buys, _FlipToSell(item_key, (), self.stack(item_key), no_sales_runs=runs)]
@@ -2687,23 +2687,25 @@ class _Valuer:
             Action.WAIT if waiting else Action.SELL,
         )
 
-    def shown_rows(self, item_key: str, holding: Holding) -> list[Row]:
+    def shown_rows(self, item_key: str, holding: Holding, paid: float | None) -> list[Row]:
         """`rows` as the Holdings tab shows them: with held units of an Item Key with too
         few Sale Events for a Flip posted as a Risky row (`_risky_held`, #224, ADR-0043).
         Only shown: what held units are `worth`, which the Stake, Disenchant and Craft
         value them by, stays at `rows`."""
         rows = self.rows(item_key, holding)
-        risky = self._risky_holding(item_key)
+        risky = self._risky_holding(item_key, paid)
         if risky is None:
             return rows
         vendor, queue = self.vendor.get(item_id_of(item_key)), self.queue(item_key, flips=False)
         return _risky_held(rows, _bound(holding), risky, vendor, queue, self.cut)
 
-    def _risky_holding(self, item_key: str) -> "_RiskyHeld | None":
+    def _risky_holding(self, item_key: str, paid: float | None) -> "_RiskyHeld | None":
         """How held units of an Item Key with too few Sale Events for a Flip post as a
         Risky row (#224, ADR-0043): where a Flip to Sell would post, its Sale Events
-        counted as a Flip counts them. None for an Item Key with enough of them, without
-        another player's Listing to post under, or with those Risky rows off."""
+        counted as a Flip counts them, but at most the markup over what they were `paid`
+        on average, if known (#225), as a Risky Flip is capped. None for an Item Key with
+        enough of them, without another player's Listing to post under, or with those
+        Risky rows off."""
         if not self.no_sales_on():
             return None
         post_at = self.flip_post_at(item_key)
@@ -2711,11 +2713,16 @@ class _Valuer:
         next_listing = cheapest_without(self.others.get(item_key, []), flipped)
         if post_at is None or next_listing is None:
             return None
-        demand = _demand_at(self.rates.get(item_key), post_at, cheap=self.cheap(item_key))
-        events = demand.sale_events if demand else 0
-        if events >= self._config.flip_min_sale_events:
+
+        def events_at(price: float) -> int:
+            demand = _demand_at(self.rates.get(item_key), price, cheap=self.cheap(item_key))
+            return demand.sale_events if demand else 0
+
+        if events_at(post_at) >= self._config.flip_min_sale_events:
             return None
-        return _RiskyHeld(post_at, events, next_listing)
+        if paid is not None:
+            post_at = min(post_at, _markup_cap(paid, self._config))
+        return _RiskyHeld(post_at, events_at(post_at), next_listing)
 
     def holdings_room(self, item_key: str) -> int:
         """The held units of an Item Key that sell within the Sale Horizon, at its
@@ -4118,26 +4125,37 @@ def held_units(rows: Sequence[Row]) -> Counter[str]:
     return held
 
 
-def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Config) -> list[Row]:
-    """`rows` with each Sell and Vendor row's Paid and ROI (#50). An Item Key's held units
-    are costed by its newest open Lots not tied to a Prediction (ADR-0007): open
-    units beyond the held ones are taken to be the oldest, gone without a Sold Outcome."""
-    held = held_units(rows)
-    # By Item Key, what the held units the Lots cover cost in all, and how many they are.
+def _covered(held: Mapping[str, int], market_lots: list[Lot]) -> dict[str, tuple[float, int]]:
+    """By Item Key, what the `held` units its newest open Lots not tied to a Prediction
+    cover cost in all, and how many they are (ADR-0007)."""
     covered: dict[str, tuple[float, int]] = {}
     for lot in reversed(market_lots):  # newest first
         cost, units = covered.get(lot.item_key, (0.0, 0))
-        uncovered = held[lot.item_key] - units
+        uncovered = held.get(lot.item_key, 0) - units
         if lot.prediction is not None or not lot.open_units or uncovered <= 0:
             continue
         taken = min(uncovered, lot.open_units)
         covered[lot.item_key] = (cost + taken * lot.cost / lot.units, units + taken)
+    return covered
+
+
+def _paid(covered: tuple[float, int]) -> float:
+    """What a unit a `_covered` entry covers cost on average: its Paid."""
+    cost, units = covered
+    return cost / units
+
+
+def _with_roi(rows: list[Row], market_lots: list[Lot], cut: float, config: Config) -> list[Row]:
+    """`rows` with each Sell and Vendor row's Paid and ROI (#50). An Item Key's held units
+    are costed by its newest open Lots not tied to a Prediction (ADR-0007): open
+    units beyond the held ones are taken to be the oldest, gone without a Sold Outcome."""
+    covered = _covered(held_units(rows), market_lots)
     result = []
     for r in rows:
         roi = None
         if r.item_key in covered and r.action in PRICED_AS_A_POST + (Action.VENDOR,) and r.price:
-            cost, units = covered[r.item_key]
-            paid = cost / units
+            units = covered[r.item_key][1]
+            paid = _paid(covered[r.item_key])
             net = r.price * (1 - cut) if r.action in PRICED_AS_A_POST else r.price
             roi = (net - paid) / paid if paid else None
         if roi is None:
@@ -4227,13 +4245,21 @@ def _flips(
             break
         prefix = [*prefix, (unit, take)]
         bought += take
+        too_few = True
+        if no_sales:
+            # Too few Sale Events is judged under the next Listing, where a Flip would post.
+            # That Listing may be a sticker price nobody pays, so the run posts at most the
+            # markup over its cost (#225), which may count more of them, but stays Risky.
+            seen = _demand_at(rate, post_at, cheap=cheap)
+            too_few = (seen.sale_events if seen else 0) < config.flip_min_sale_events
+            post_at = min(post_at, _markup_cap(sum(u * n for u, n in prefix) / bought, config))
         demand = _demand_at(rate, post_at, cheap=cheap)
         at_price = _flip_queue(queue, demand, config)
         resale = post_at * (1 - cut)
         # Offers are cheapest first and the last unit waits longest, so if the dearest unit
         # clears the margin after its deposits, all do.
         lost = at_price.lost(held + bought - 1)
-        if _resells(resale, unit, vendor_price, effort, lost, config):
+        if too_few and _resells(resale, unit, vendor_price, effort, lost, config):
             profit = sum((resale - 2 * effort - u) * n for u, n in prefix)
             profit -= at_price.lost_by(held, bought)
             # With no Sell Rate at the price, there's nothing to wait by.
@@ -4268,6 +4294,12 @@ def _flips(
             if (net := vendor_price - effort - unit) > 0 and net >= _flip_margin(unit, config)
         ]
     return buys
+
+
+def _markup_cap(unit_cost: float, config: Config) -> float:
+    """The most a Risky row for too few Sale Events posts a unit at, given what a unit
+    cost on average (#225)."""
+    return config.risky_no_sales_markup * unit_cost
 
 
 def _runs(

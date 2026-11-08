@@ -29,3 +29,11 @@ A sticker price (70g on a 16s item) can't be capped well without Sale Events: th
 - No conflict with ADR-0042: this adds a row the Backtest never takes and tunes nothing.
 - How these rows do is judged by their Flip Grades, split out by `risky = "noSales"`.
 - A held unit with no sales may still be Disenchanted, since Disenchant compares against its unchanged worth.
+
+## Amendment: the post price is capped at a markup over cost (#225)
+
+Live proved the "no cap" call wrong. On 2026-11-07 all 10 of these rows posted at 5x to 437x their buy price under a never-sold sticker (6413: buy 2g 38s, post 80g, +372g claimed). The loss bound held, but the claimed profit was fiction and ranked the rows. The player: "there's a line between hey this is a little risky and just something terrible like this."
+
+- A Risky row for too few Sale Events posts at the lower of its usual price (under the next Listing) and `risky_no_sales_markup` (3) times its run's average unit cost. Profit, the Flip margin and the Minimum Profit all use that price, so a cheap item capped low (4827: 16s, now posted at 48s) can fall out on the Minimum Profit. The row is never dropped for being over the cap.
+- Its held units' Risky Sell row in Holdings is capped the same way on their Paid (ADR-0007's average cost of the newest open Lots), when there is one. Units with no Paid (looted, say) keep the uncapped price: there's no cost to anchor to, and the worst case on held units is a Deposit, not gold spent.
+- The markup is a sanity line, not a price estimate. The cost is the only number these items have that someone actually accepted. `nextListing` still names the sticker, so the player sees the room above the capped price.

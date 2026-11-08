@@ -306,6 +306,7 @@ def test_decision_engine_knobs_default_to_the_designed_values(tmp_path):
     assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.03, 0.6)
     assert config.risky_max_units == 5
     assert config.risky_no_sales_rows == 10
+    assert config.risky_no_sales_markup == 3
     assert config.disenchant_check_min_results == 20
     assert config.buy_under_min_sightings == 1
     assert config.buy_under_window_days == 7
@@ -347,6 +348,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         "flip_tied_up_share = 0.5\n"
         "risky_max_units = 0\n"
         "risky_no_sales_rows = 3\n"
+        "risky_no_sales_markup = 2.5\n"
         "disenchant_check_min_results = 50\n"
         "buy_under_min_sightings = 3\n"
         "buy_under_window_days = 14\n"
@@ -386,6 +388,7 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
     assert (config.flip_unsold_loss_share, config.flip_tied_up_share) == (0.04, 0.5)
     assert config.risky_max_units == 0  # no Risky rows
     assert config.risky_no_sales_rows == 3
+    assert config.risky_no_sales_markup == 2.5
     assert config.disenchant_check_min_results == 50
     assert (config.buy_under_min_sightings, config.buy_under_window_days) == (3, 14)
     assert config.beta_column_days == 0
@@ -472,6 +475,8 @@ def test_decision_engine_knobs_can_be_set(tmp_path):
         ("risky_no_sales_rows", "-1"),
         ("risky_no_sales_rows", "2.5"),
         ("risky_no_sales_rows", "true"),
+        ("risky_no_sales_markup", "0.5"),  # under cost
+        ("risky_no_sales_markup", "true"),
         ("suffix_pool_weight", "true"),
         ("non_stacking_effort_copper", "0.5"),  # whole copper
         ("non_stacking_effort_copper", "true"),
