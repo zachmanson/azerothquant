@@ -369,6 +369,9 @@ class Row:
     listings: int | None = field(default=None, compare=False)
     posts: int | None = field(default=None, compare=False)
     days: float | None = field(default=None, compare=False)
+    # The Listings a Flip to Sell or Flip to Vendor buys, as (unit buyout, units) each, for
+    # the Backtest to leave out of later Scans (#212). Plumbing, like `made`.
+    bought: tuple[tuple[int, int], ...] = field(default=(), compare=False)
     # A Shopping List option the risk caps shrank (ADR-0034): its units sized by the gold
     # alone, and which cap shrank it: "room" if the room alone would, else "loss".
     capped: int | None = None
@@ -1363,12 +1366,14 @@ def _buy_unders(
 
 @dataclass(frozen=True)
 class TakenUnder:
-    """What a Buy Under takes of the Listings up: the units, what they cost, and the price
-    a Sell way posts them at (None for any other way)."""
+    """What a Buy Under takes of the Listings up: the units, what they cost, the price a
+    Sell way posts them at (None for any other way), and what it takes of each Listing as
+    (unit buyout, units), for the Backtest (#212)."""
 
     units: int
     cost: int
     post_at: int | None
+    listings: tuple[tuple[int, int], ...] = ()
 
 
 def take_under(
@@ -1398,12 +1403,12 @@ def take_under(
     if not units:
         return None
     if buy.post_at is None:
-        return TakenUnder(units, cost, None)
+        return TakenUnder(units, cost, None, tuple(taken))
     left = cheapest_without(offers, taken)
     if checked and left is not None and left < buy.post_at:
         return None
     post_at = buy.post_at if left is None else min(buy.post_at, left - config.post_undercut_copper)
-    return TakenUnder(units, cost, post_at)
+    return TakenUnder(units, cost, post_at, tuple(taken))
 
 
 def _nothing_held(valuer: "_Valuer", plans: list["_Plan"], config: Config) -> "_Sources":
@@ -4813,6 +4818,7 @@ def _option(
                 days=run.days,
                 unsold_loss=run.unsold_loss,
                 next_listing=run.next_listing,
+                bought=tuple(run.units),
             )
             continue
         affords = min(gold, room) // buy.unit_buyout
@@ -4835,6 +4841,7 @@ def _option(
                 cost=cost,
                 listings=1,
                 posts=0,
+                bought=((buy.unit_buyout, buy.quantity),),
             )
         else:
             r = rows[key]
@@ -4845,6 +4852,7 @@ def _option(
                 profit=r.profit + profit,
                 cost=r.cost + cost,
                 listings=r.listings + 1,
+                bought=(*r.bought, (buy.unit_buyout, buy.quantity)),
             )
     return list(rows.values())
 

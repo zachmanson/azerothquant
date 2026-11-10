@@ -850,6 +850,31 @@ def test_auctionator_buys_a_listing_still_up_in_later_scans_only_once(db):
     assert auctionator_trades(db, scans) == [(LINEN, 1, 200, 999)]
 
 
+def test_the_brain_leaves_out_the_listing_it_vendored_not_another_at_the_same_price(db):
+    # 3 Linen and 1 Linen at 1s, under the 10s Vendor Price. With 1s of gold the Brain buys
+    # 1 unit at T0, of the smaller Listing (cheapest first, smallest first at a price), so
+    # the 3 are still up for it at T0 + 1 h, when the 10s back pays for them.
+    scans = [
+        history_scan(
+            T0 + h * HOUR,
+            history_row(quantity=3, unit=100),
+            history_row(quantity=1, unit=100),
+        )
+        for h in range(2)
+    ]
+    import_scans(db, scans, Era.BETA, CONFIG)
+    read = {**SELLER_READ, "vendorPrices": {"2589": 1000}}
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(db, CONFIG, [], start_gold=100, no_buys_in_last_seconds=0)
+
+    trades = result.runs["brain"].trades
+    assert [(t.cost, t.proceeds, t.posted_at) for t in trades] == [
+        (100, 1000, T0),
+        (300, 3000, T0 + HOUR),
+    ]
+
+
 @pytest.mark.parametrize("policy", ["buyunder", "buyunder_unchecked"])
 def test_a_buy_under_takes_a_listing_still_up_in_later_scans_only_once(db, policy):
     # The 3 Ore at 5s under their 10s Vendor Price stay up from T0 + 2 h to T0 + 4 h: the
@@ -870,3 +895,59 @@ def test_a_buy_under_takes_a_listing_still_up_in_later_scans_only_once(db, polic
 
     trades = result.runs[policy].trades
     assert [(t.item_key, t.cost, t.posted_at) for t in trades] == [("2770", 1500, T0 + 2 * HOUR)]
+
+
+def test_auctionator_leaves_out_the_listing_it_bought_not_another_at_the_same_ask(db):
+    # At the 2s ask: 2 Linen and 1 Linen. Auctionator buys whole Listings smallest first
+    # while a fifth of its 25s lasts, so only the 1 at T0, and the 2 are still up for it
+    # at T0 + 1 h, once its unit has sold (2 of the 100 at 10s go each hour) and paid for them.
+    scans = [
+        history_scan(
+            T0 + h * HOUR,
+            history_row(quantity=100 - 2 * h, unit=1000),
+            history_row(quantity=2, unit=200),
+            history_row(quantity=1, unit=200),
+        )
+        for h in range(2)
+    ]
+
+    assert auctionator_trades(db, scans, start_gold=2500) == [
+        (LINEN, 1, 200, 999),
+        (LINEN, 2, 400, 999),
+    ]
+
+
+@pytest.mark.parametrize("policy", ["buyunder", "buyunder_unchecked"])
+def test_a_buy_under_leaves_out_the_listing_it_took_part_of_not_another_at_the_same_price(
+    db, policy
+):
+    # Ore has a Vendor way at T0 + 1 h (a 20s Vendor Price). At T0 + 2 h, 3 Ore and 2 Ore
+    # are up at 5s: with 5s of gold the Buy Under takes 1 unit of the 2 (cheapest first,
+    # smallest first at a price), which leaves that Listing out whole. Vendored at once, it
+    # pays for the 3 at T0 + 3 h.
+    ore = {"itemString": ORE_ITEM, "timeLeft": 4}
+    scans = [
+        history_scan(T0, history_row(quantity=20, unit=1000)),
+        history_scan(T0 + HOUR, {**ore, "quantity": 1, "buyout": 500}),
+        *(
+            history_scan(
+                T0 + h * HOUR,
+                {**ore, "quantity": 3, "buyout": 1500},
+                {**ore, "quantity": 2, "buyout": 1000},
+            )
+            for h in (2, 3)
+        ),
+    ]
+    read = {**SELLER_READ, "vendorPrices": {"2589": 10, "2770": 2000}}
+    import_scans(db, scans, Era.BETA, CONFIG)
+    import_character_reads(db, [read], Era.BETA, CONFIG)
+
+    [result] = backtest(
+        db, CONFIG, [], policies=(policy,), start_gold=500, no_buys_in_last_seconds=0
+    )
+
+    trades = result.runs[policy].trades
+    assert [(t.cost, t.proceeds, t.posted_at) for t in trades] == [
+        (500, 2000, T0 + 2 * HOUR),
+        (1500, 6000, T0 + 3 * HOUR),
+    ]
