@@ -5,7 +5,7 @@ A personal Auction House trading system for World of Warcraft: Forever. An in-ga
 ## Components
 
 **Addon**:
-The in-game half. It records market and personal data and shows the Recommendation Table. It acts only on the row the player selected, one protected action per click (post or cancel), and never buys, bids or takes mail (ADR-0016). Cancel waits on #134.
+The in-game half. It records market and personal data and shows the Recommendation Table. It takes one protected action per click: a post for the row the player selected (ADR-0016), or a cancel of the next Undercut own Listing (ADR-0044). It never buys, bids or takes mail.
 _Avoid_: bot, automation
 
 **Brain**:
@@ -79,6 +79,10 @@ A drop in a Listing's quantity between two Scans. It is always a sale, since can
 **Repost**:
 A Disappearance that could not have expired, explained by a new Listing in the same Observation Window with the same Item Key and quantity, at the same or a lower unit buyout, own or not (a Pooled Scan shows nothing as own): most likely a seller cancelling to undercut or relist. Whenever such a pairing exists it is taken, so a Repost is never counted as a sale. The two Listings stay separate.
 _Avoid_: relist, undercut (those are why a Repost happens, not the event)
+
+**Undercut**:
+An own Listing that another player's Listing of the same Item Key will sell ahead of: one priced lower, or one at the same price, since at one price the Auction House sells the newest first. The Addon checks this live at the Auction House, not from a Scan. Another player at exactly the own Listing's price is taken to have posted after it, because the player posts under the cheapest other Listing. Undercut says nothing about whether cancelling is worth its Deposit (ADR-0044).
+_Avoid_: outbid, beaten
 
 **Coincidence Rate**:
 The share of real sales that Repost pairing wrongly calls Reposts, because an unrelated new Listing happened to fit. It is measured on the player's own Disappearances that an Outcome shows were Sold, and it depends on how busy the Market is, not on who the seller is.
@@ -254,7 +258,7 @@ The best Action for one Candidate Item, with quantity, price ceiling, the full A
 _Avoid_: signal, tip
 
 **Recommendation Table**:
-The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts or cancels only the row the player selects, one click per action (ADR-0016). Only Post exists so far; Cancel waits on #134. It shows the Market of the Character's own faction, the only one the Brain recommends for. Its side pane shows the row under the mouse, or else the selected one: what to do with it, its Note and details, and any value the table is too narrow to show (#160).
+The Addon's in-game view of one Market's Recommendations (Holdings, Shopping List, with its Flips to Craft and Flips to Disenchant in their own tabs, Prediction buys, and the Buy Unders) as of the Scan the Brain last valued. It shows them, and posts only the row the player selects, one click per action (ADR-0016). Cancelling Undercut Listings isn't a row of the table: it has its own button (ADR-0044). It shows the Market of the Character's own faction, the only one the Brain recommends for. Its side pane shows the row under the mouse, or else the selected one: what to do with it, its Note and details, and any value the table is too narrow to show (#160).
 _Avoid_: UI, window, panel
 
 **Sale Horizon**:
