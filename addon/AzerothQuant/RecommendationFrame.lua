@@ -1107,10 +1107,12 @@ local OWNED_QUERY = { key = "owned", match = "owned", owned = true }
 -- cancelError the error the AH showed since that cancel.
 local cancelButton, cancelState
 local owned, checks, fresh, cancelling, cancelError
+-- Whether the player clicked Check undercuts at this AH visit: nothing is searched before.
+local checking
 
 -- Forgets the Cancel undercut checks (each AH visit starts afresh).
 local function resetCancel()
-  owned, checks, fresh, cancelling, cancelError = nil, {}, nil, nil, nil
+  owned, checks, fresh, cancelling, cancelError, checking = nil, {}, nil, nil, nil, false
 end
 resetCancel()
 
@@ -1372,8 +1374,11 @@ local function readOwned()
   return listings
 end
 
--- Queues a check of every owned Item Key not searched yet.
+-- Queues a check of every owned Item Key not searched yet, once the player asked for it.
 local function queueChecks()
+  if not checking then
+    return
+  end
   for _, listing in ipairs(owned or {}) do
     if not checks[listing.key] then
       queueSearch(listing.itemKey.itemID, listing.itemKey)
@@ -1395,7 +1400,7 @@ function refreshCancel()
     cancelState = nil
     return
   end
-  cancelState = CancelButton.state(owned, checks, { pending = cancelling ~= nil, fresh = fresh })
+  cancelState = CancelButton.state(owned, checks, { idle = not checking, pending = cancelling ~= nil, fresh = fresh })
   cancelButton:SetText(cancelState.label)
   cancelButton:SetWidth(math.max(90, cancelButton:GetTextWidth() + 30))
   cancelButton:SetEnabled(cancelState.enabled)
@@ -1413,9 +1418,17 @@ function refreshCancel()
   end
 end
 
--- Cancels the next Undercut Listing, only when clicked (ADR-0044): one call per click, on
--- the target CancelButton named, with no row selected.
+-- Starts the check when the button reads Check undercuts; otherwise cancels the next
+-- Undercut Listing, only when clicked (ADR-0044): one call per click, on the target
+-- CancelButton named, with no row selected.
 local function onCancelClick(self)
+  if cancelState and cancelState.check then
+    checking = true
+    SearchQueue.push(queue, OWNED_QUERY)
+    pumpSearches()
+    refreshCancel()
+    return
+  end
   local call = cancelState and cancelState.call
   if not call then
     return
@@ -1638,11 +1651,9 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
       openedByAuctionHouse = true
     end
     show(true)
-    -- Cancel undercut checks the Character's own Listings afresh at each visit.
+    -- Cancel undercut starts afresh at each visit, and checks only once the player asks.
     resetCancel()
     SearchQueue.clear(queue)
-    SearchQueue.push(queue, OWNED_QUERY)
-    pumpSearches()
     refreshCancel()
   elseif event == "AUCTION_HOUSE_CLOSED" then
     -- Close what the AH opened; leave it if the player opened it with /aq recs.

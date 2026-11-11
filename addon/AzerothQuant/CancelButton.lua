@@ -71,10 +71,21 @@ end
 -- listings are the logged-in Character's active Listings (nil until the AH lists them) as
 -- { auctionID, key, name, unitPrice, quantity }, key naming the Item Key searched. checks
 -- maps a key to its search's results (as undercut takes them), nil until they land.
--- ctx is { pending (a cancel waits for the AH to confirm it), fresh (after a cancel, the
--- set of keys searched since; nil before any cancel) }.
--- Returns { enabled, label, reason, tip, target, call, recheck (the key to search again) }.
+-- ctx is { idle (the player hasn't asked for a check at this AH visit yet), pending (a
+-- cancel waits for the AH to confirm it), fresh (after a cancel, the set of keys searched
+-- since; nil before any cancel) }.
+-- Returns { enabled, label, reason, tip, target, call, check (a click starts the check),
+-- recheck (the key to search again) }.
 function CancelButton.state(listings, checks, ctx)
+  -- Checking is a search per owned Item Key, so it waits for the player to ask.
+  if ctx.idle then
+    return {
+      enabled = true,
+      label = "Check undercuts",
+      reason = "Searches the Auction House for each item you have up, to find the ones undercut.",
+      check = true,
+    }
+  end
   if ctx.pending then
     return { enabled = false, label = "Cancelling...", reason = "Waiting for the Auction House to confirm the cancel." }
   end

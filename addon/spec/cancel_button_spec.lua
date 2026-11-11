@@ -38,6 +38,18 @@ local function other(unitPrice)
 end
 
 describe("CancelButton.state", function()
+  it("offers Check undercuts, with no cancel, until the player asks for a check", function()
+    -- Even with the owned list already read (Blizzard's own Auctions tab asks for it).
+    for _, listings in ipairs({ { nil }, { { HIDE } } }) do
+      local state = CancelButton.state(listings[1], { hide = other(420) }, { idle = true })
+
+      assert.is_true(state.enabled)
+      assert.are.equal("Check undercuts", state.label)
+      assert.is_true(state.check)
+      assert.is_nil(state.call)
+    end
+  end)
+
   it("is disabled while the Auction House hasn't listed the Character's own auctions yet", function()
     local state = CancelButton.state(nil, {}, {})
 
