@@ -7,7 +7,7 @@ It has two halves:
 - **The Addon**, in game. It scans the Auction House, reads your bags, bank and AH mail, and shows the Recommendation Table.
 - **The Brain**, a small Windows app that runs in the background. It keeps the full price history, works out how fast each item really sells, and sends the answers back to the Addon.
 
-You always do the buying and selling yourself. The Addon never buys, bids or takes mail. It only posts the row you clicked, one click per post.
+You always do the buying and selling yourself. The Addon never buys, bids or takes mail. It only posts the row you clicked, one click per post, and cancels one of your undercut Listings per click of its Cancel undercut button.
 
 ## Features
 

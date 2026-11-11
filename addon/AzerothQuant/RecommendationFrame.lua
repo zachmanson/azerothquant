@@ -15,7 +15,9 @@
 -- per click, made only in onPostClick (spec/protected_calls_spec.lua). On a Shopping List,
 -- Prediction buy or single-item Buy Under row not yet in the bags, the Search button takes
 -- its slot (#39): a click searches the AH for the row's Item Key and a line under it shows
--- the cheapest Listing.
+-- the cheapest Listing. Under them, the Cancel undercut button (#177, ADR-0044) cancels the
+-- Character's next Undercut Listing, one CancelAuction per click, only in onCancelClick.
+-- Every AH search goes through one throttle-respecting queue (SearchQueue.lua).
 -- Selecting a Craft row opens its Craft Chain panel on the left (#77). A right-click on a
 -- buy-side row toggles its Bought mark (#97), saved per Market in AzerothQuantDB.bought:
 -- it greys out and the Budget fold runs on the gold left.
@@ -34,6 +36,8 @@ local Scanner = ns.Scanner
 local Chat = ns.Chat
 local PostButton = ns.PostButton
 local SearchButton = ns.SearchButton
+local CancelButton = ns.CancelButton
+local SearchQueue = ns.SearchQueue
 local Character = ns.Character
 local TooltipLines = ns.TooltipLines
 local NextStep = ns.NextStep
@@ -123,7 +127,7 @@ local function contentWidth()
   return frame:GetWidth() - CONTENT_INSET
 end
 
-local redraw, refreshPost, drawPane
+local redraw, refreshPost, refreshCancel, drawPane
 
 -- A plain hover text (Tips.lua, #163): a gold title when there is one, then the text and
 -- a grey footnote.
@@ -1089,10 +1093,34 @@ local pending -- true while a post waits for the AH to confirm it
 -- unrelated UI error ended the wait, so the same units can't be posted twice.
 local lastPost
 local postError -- { id, text }: why the last post of that row failed, for the tooltip
--- { id, itemID, queryKey, itemKey, results, lowest }: the last search sent, for Post's undercut
+-- { id, key, itemKey, results, lowest }: the selected row's last search, for Post's undercut
 -- line or Search's live line. itemKey is set only by Search (#39); results are nil until
 -- they land.
 local search
+-- Every AH search and the owned-auctions query, one at a time as the throttle allows
+-- (#177). A request is { key, match, itemID, queryKey, itemKey } or OWNED_QUERY.
+local queue = SearchQueue.new()
+local OWNED_QUERY = { key = "owned", match = "owned", owned = true }
+-- The Cancel undercut button (#177, ADR-0044). owned is the Character's active Listings
+-- (nil until the AH lists them), checks each searched key's results, fresh the keys searched
+-- since the last cancel (nil before one), cancelling the target a cancel waits on and
+-- cancelError the error the AH showed since that cancel.
+local cancelButton, cancelState
+local owned, checks, fresh, cancelling, cancelError
+
+-- Forgets the Cancel undercut checks (each AH visit starts afresh).
+local function resetCancel()
+  owned, checks, fresh, cancelling, cancelError = nil, {}, nil, nil, nil
+end
+resetCancel()
+
+-- A key's search results landed: Cancel undercut's check of it, fresh since any cancel.
+local function recordCheck(key, results)
+  checks[key] = results
+  if fresh then
+    fresh[key] = true
+  end
+end
 local searchButton
 local searchState -- SearchButton.state for the selected row, or nil when the slot is Post's
 
@@ -1125,11 +1153,57 @@ local function isCommodity(location)
   return nil
 end
 
--- One search for the selected row. itemKey, given by Search, keeps only that Item Key's
--- Listings of gear (searchResults).
+-- A search key as a string, so the queue can tell two searches of it apart from others.
+local function keyString(queryKey)
+  return table.concat({
+    queryKey.itemID,
+    queryKey.itemLevel or 0,
+    queryKey.itemSuffix or 0,
+    queryKey.battlePetSpeciesID or 0,
+  }, ":")
+end
+
+-- Sends the queue's next request if the throttle takes it. A request whose results never
+-- landed is given up on: a check counts as no other Listing (even one searched before a
+-- cancel), so it can't cause a cancel, and the owned list is asked for again.
+local function pumpSearches()
+  if not ahOpen then
+    return
+  end
+  local request, lost = SearchQueue.next(queue, C_AuctionHouse.IsThrottledMessageSystemReady(), GetTime())
+  if lost and lost.owned then
+    SearchQueue.push(queue, OWNED_QUERY)
+    request = request or SearchQueue.next(queue, C_AuctionHouse.IsThrottledMessageSystemReady(), GetTime())
+  elseif lost then
+    Chat.debug("No search results for " .. lost.key .. "; taken as no other Listing.")
+    recordCheck(lost.key, {})
+    refreshCancel()
+  end
+  if not request then
+    return
+  end
+  if request.owned then
+    C_AuctionHouse.QueryOwnedAuctions({})
+  else
+    C_AuctionHouse.SendSearchQuery(request.queryKey, {}, false)
+  end
+  -- Wakes the queue when results never land (it's otherwise woken by events).
+  C_Timer.After(SearchQueue.STALE, pumpSearches)
+end
+
+-- Queues a search of queryKey. itemKey, given by Search, keeps only that Item Key's
+-- Listings of gear (searchResults). urgent puts it ahead of the Cancel undercut checks.
+local function queueSearch(itemID, queryKey, itemKey, urgent)
+  local key = keyString(queryKey) .. (itemKey and ("|" .. itemKey) or "")
+  SearchQueue.push(queue, { key = key, match = itemID, itemID = itemID, queryKey = queryKey, itemKey = itemKey }, urgent)
+  pumpSearches()
+  return key
+end
+
+-- One search for the selected row, ahead of the checks: the player is waiting on it.
 local function sendSearch(row, itemID, queryKey, itemKey)
-  search = { id = row.id, itemID = itemID, queryKey = queryKey, itemKey = itemKey }
-  C_AuctionHouse.SendSearchQuery(queryKey, {}, false)
+  search = { id = row.id, itemKey = itemKey }
+  search.key = queueSearch(itemID, queryKey, itemKey, true)
 end
 
 -- The search key for an item in the bags. Gear needs its full key (item level, suffix)
@@ -1157,22 +1231,22 @@ local function buyKey(itemKey)
   return itemID, C_AuctionHouse.MakeItemKey(itemID, getDetailedItemLevelInfo(itemString) or level)
 end
 
--- The search's results as PostButton.lowestOther and SearchButton.liveLine take them.
+-- A search request's results as PostButton.lowestOther and SearchButton.liveLine take them.
 -- commodity says which results landed (the event that fired).
-local function searchResults(commodity)
+local function searchResults(request, commodity)
   local results = {}
   if commodity then
-    for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(search.itemID) do
-      local r = C_AuctionHouse.GetCommoditySearchResultInfo(search.itemID, i)
+    for i = 1, C_AuctionHouse.GetNumCommoditySearchResults(request.itemID) do
+      local r = C_AuctionHouse.GetCommoditySearchResultInfo(request.itemID, i)
       if r then
         results[#results + 1] = { unitPrice = r.unitPrice, quantity = r.quantity, ownUnits = r.numOwnerItems }
       end
     end
   else
-    for i = 1, C_AuctionHouse.GetNumItemSearchResults(search.queryKey) do
-      local r = C_AuctionHouse.GetItemSearchResultInfo(search.queryKey, i)
+    for i = 1, C_AuctionHouse.GetNumItemSearchResults(request.queryKey) do
+      local r = C_AuctionHouse.GetItemSearchResultInfo(request.queryKey, i)
       -- A bid-only Listing has no buyout to undercut or buy at.
-      local wanted = r and (not search.itemKey or (r.itemLink and TooltipLines.itemKey(r.itemLink) == search.itemKey))
+      local wanted = r and (not request.itemKey or (r.itemLink and TooltipLines.itemKey(r.itemLink) == request.itemKey))
       if wanted and r.buyoutAmount and r.quantity > 0 then
         results[#results + 1] = {
           unitPrice = r.buyoutAmount / r.quantity,
@@ -1272,6 +1346,96 @@ local function onPostClick(self)
   end
   pending, lastPost, postError = true, { id = selectedRow.id, quantity = call.quantity }, nil
   refreshPost()
+end
+
+-- The Character's active Listings from the AH's owned list, as CancelButton takes them.
+-- buyoutAmount is taken as the unit price: gear Listings are one unit each, and the AH's
+-- own owned list shows a commodity's unit price (unchecked in game: see #177's check).
+local function readOwned()
+  local listings = {}
+  for i = 1, C_AuctionHouse.GetNumOwnedAuctions() do
+    local a = C_AuctionHouse.GetOwnedAuctionInfo(i)
+    -- status 0 is active (#81 probe); a sold one waits in the mail.
+    if a and a.status == 0 and a.buyoutAmount and a.itemKey then
+      local name = a.itemLink and a.itemLink:match("%[(.-)%]") or ("item " .. a.itemKey.itemID)
+      listings[#listings + 1] = {
+        auctionID = a.auctionID,
+        key = keyString(a.itemKey),
+        itemKey = a.itemKey,
+        name = name,
+        unitPrice = a.buyoutAmount,
+        quantity = a.quantity,
+      }
+      Chat.debug("Own Listing " .. a.auctionID .. ": " .. name .. " x" .. a.quantity .. ", buyoutAmount " .. a.buyoutAmount)
+    end
+  end
+  return listings
+end
+
+-- Queues a check of every owned Item Key not searched yet.
+local function queueChecks()
+  for _, listing in ipairs(owned or {}) do
+    if not checks[listing.key] then
+      queueSearch(listing.itemKey.itemID, listing.itemKey)
+    end
+  end
+end
+
+function refreshCancel()
+  if not cancelButton then
+    return
+  end
+  cancelButton:SetShown(ahOpen)
+  -- Post or Search sits above Cancel undercut while it shows.
+  pane.actions:ClearAllPoints()
+  local bottom = ahOpen and 32 or 4
+  pane.actions:SetPoint("BOTTOMLEFT", 10, bottom)
+  pane.actions:SetPoint("BOTTOMRIGHT", -10, bottom)
+  if not ahOpen then
+    cancelState = nil
+    return
+  end
+  cancelState = CancelButton.state(owned, checks, { pending = cancelling ~= nil, fresh = fresh })
+  cancelButton:SetText(cancelState.label)
+  cancelButton:SetWidth(math.max(90, cancelButton:GetTextWidth() + 30))
+  cancelButton:SetEnabled(cancelState.enabled)
+  -- After a cancel, the next target's Item Key is searched again before the next click.
+  if cancelState.recheck then
+    for _, listing in ipairs(owned) do
+      if listing.key == cancelState.recheck then
+        queueSearch(listing.itemKey.itemID, listing.itemKey)
+        break
+      end
+    end
+  end
+  if GameTooltip:IsOwned(cancelButton) then
+    cancelButton:GetScript("OnEnter")(cancelButton)
+  end
+end
+
+-- Cancels the next Undercut Listing, only when clicked (ADR-0044): one call per click, on
+-- the target CancelButton named, with no row selected.
+local function onCancelClick(self)
+  local call = cancelState and cancelState.call
+  if not call then
+    return
+  end
+  C_AuctionHouse.CancelAuction(call.auctionID)
+  cancelling = cancelState.target
+  refreshCancel()
+end
+
+local function createCancelButton()
+  cancelButton = CreateFrame("Button", nil, pane, "UIPanelButtonTemplate")
+  cancelButton:SetSize(90, 22)
+  cancelButton:SetPoint("BOTTOMLEFT", 10, 4)
+  cancelButton:SetScript("OnClick", onCancelClick)
+  cancelButton:SetMotionScriptsWhileDisabled(true)
+  cancelButton:SetScript("OnEnter", function(self)
+    showTip(self, nil, cancelState and (cancelState.tip or cancelState.reason) or Tips.CANCEL)
+  end)
+  cancelButton:SetScript("OnLeave", GameTooltip_Hide)
+  cancelButton:Hide()
 end
 
 -- Post and Search share one slot at the top of the pane's actions, with a line under it.
@@ -1402,6 +1566,7 @@ local function createFrame()
   createTabs()
   createPane()
   createPostButton()
+  createCancelButton()
 
   -- After the boxes exist (the frame:Hide() above would otherwise fire it first).
   -- A box left focused while hidden would swallow the next Enter meant for chat.
@@ -1449,8 +1614,11 @@ events:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
 events:RegisterEvent("UI_ERROR_MESSAGE")
 events:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
 events:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
--- Search waits for the AH to take another search (#39).
+-- The search queue waits for the AH to take another search (#39, #177).
 events:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+-- Cancel undercut: the owned list, and a cancel confirmed (#177).
+events:RegisterEvent("OWNED_AUCTIONS_UPDATED")
+events:RegisterEvent("AUCTION_CANCELED")
 pcall(events.RegisterEvent, events, "AUCTION_HOUSE_POST_ERROR") -- not on every client
 events:SetScript("OnEvent", function(_, event, arg1, arg2)
   if event == "ADDON_LOADED" then
@@ -1470,6 +1638,12 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
       openedByAuctionHouse = true
     end
     show(true)
+    -- Cancel undercut checks the Character's own Listings afresh at each visit.
+    resetCancel()
+    SearchQueue.clear(queue)
+    SearchQueue.push(queue, OWNED_QUERY)
+    pumpSearches()
+    refreshCancel()
   elseif event == "AUCTION_HOUSE_CLOSED" then
     -- Close what the AH opened; leave it if the player opened it with /aq recs.
     if openedByAuctionHouse and frame then
@@ -1477,7 +1651,10 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
     end
     openedByAuctionHouse = false
     ahOpen, pending, lastPost, postError, search = false, false, nil, nil, nil
+    resetCancel()
+    SearchQueue.clear(queue)
     refreshPost()
+    refreshCancel()
   elseif event == "GET_ITEM_INFO_RECEIVED" or event == "PLAYER_MONEY" then
     queueRedraw()
   elseif event == "BAG_UPDATE_DELAYED" then
@@ -1492,16 +1669,48 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
     local why = event == "UI_ERROR_MESSAGE" and tostring(arg2) or "the Auction House refused it."
     postError = { id = lastPost.id, text = "The post failed: " .. why }
     refreshPost()
+  elseif (event == "UI_ERROR_MESSAGE" or event == "AUCTION_CANCELED") and cancelling then
+    -- The error may not be the cancel's: the owned list read next tells whether the
+    -- Listing is still up (CancelButton.outcome).
+    if event == "UI_ERROR_MESSAGE" then
+      cancelError = tostring(arg2)
+    end
+    SearchQueue.push(queue, OWNED_QUERY)
+    pumpSearches()
   elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
     -- arg1 is the itemID (commodity) or the item key searched. Another item's results
     -- (Blizzard's own searches) aren't ours.
     local itemID = type(arg1) == "table" and arg1.itemID or arg1
-    if search and (itemID == nil or itemID == search.itemID) then
-      search.results = searchResults(event == "COMMODITY_SEARCH_RESULTS_UPDATED")
-      search.lowest = PostButton.lowestOther(search.results)
+    local request = SearchQueue.landed(queue, itemID)
+    if request then
+      local results = searchResults(request, event == "COMMODITY_SEARCH_RESULTS_UPDATED")
+      -- Any search of a key serves Cancel undercut's check of it too.
+      recordCheck(request.key, results)
+      if search and search.key == request.key then
+        search.results, search.lowest = results, PostButton.lowestOther(results)
+      end
       refreshPost()
+      refreshCancel()
+      pumpSearches()
     end
+  elseif event == "OWNED_AUCTIONS_UPDATED" and ahOpen then
+    SearchQueue.landed(queue, "owned")
+    owned = readOwned()
+    if cancelling then
+      local outcome = CancelButton.outcome(owned, cancelling, cancelError)
+      if outcome == "cancelled" then
+        Chat.say("Cancelled " .. CancelButton.describe(cancelling) .. ".")
+        cancelling, cancelError, fresh = nil, nil, {}
+      elseif outcome == "failed" then
+        Chat.say("The cancel failed: " .. cancelError)
+        cancelling, cancelError = nil, nil
+      end
+    end
+    queueChecks()
+    refreshCancel()
+    pumpSearches()
   elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+    pumpSearches()
     refreshPost()
   end
 end)

@@ -64,6 +64,7 @@ Tips.DAYS_TO_SELL = "The most days you'll wait for something you buy to sell. "
 -- The side pane's buttons, when nothing stops them (they say why when something does).
 Tips.POST = "Post the selected row on the Auction House at its Post at price."
 Tips.SEARCH = "Search the Auction House for the selected row's item."
+Tips.CANCEL = "Cancel your next Listing that another player's is at or under, biggest first."
 
 -- The rest of the frame.
 Tips.SORT = "Click to sort."

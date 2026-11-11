@@ -1,8 +1,9 @@
--- The Addon's guardrails on protected Auction House calls (ADR-0016, #81):
---   * it never buys, bids, or cancels (Cancel waits on #134), and never calls a Confirm
---     step, since one Post call posts on Forever;
+-- The Addon's guardrails on protected Auction House calls (ADR-0016, #81, ADR-0044):
+--   * it never buys or bids, and never calls a Confirm step, since one Post call posts on
+--     Forever;
 --   * PostItem and PostCommodity appear only inside `local function onPostClick` in
---     RecommendationFrame.lua, which is wired only as the Post button's OnClick, so a
+--     RecommendationFrame.lua, and CancelAuction only inside `local function
+--     onCancelClick`, at most once. Each is wired only as its button's OnClick, so a
 --     protected call is only ever made from a click, one per click.
 --
 -- Reads every file the .toc loads, so run busted from addon/ (CI does, with --directory).
@@ -13,11 +14,14 @@ local FORBIDDEN = {
   "ConfirmCommoditiesPurchase",
   "ConfirmPostItem",
   "ConfirmPostCommodity",
-  "CancelAuction",
 }
-local POSTS = { "PostItem", "PostCommodity" }
 local GLUE = "RecommendationFrame.lua"
-local HANDLER = "\nlocal function onPostClick%("
+-- Each protected call the Addon makes, the one click handler in the glue it may appear in,
+-- and whether that handler may make it more than once (Post's has one call per branch).
+local HANDLERS = {
+  { name = "onPostClick", calls = { "PostItem", "PostCommodity" } },
+  { name = "onCancelClick", calls = { "CancelAuction" }, once = true },
+}
 
 local function word(name)
   return "%f[%w_]" .. name .. "%f[^%w_]"
@@ -37,14 +41,15 @@ local function code(source)
   return (source:gsub("%-%-[^\n]*", ""))
 end
 
--- The glue without onPostClick's body, which runs to the first `end` at column 0.
-local function outsideHandler(source)
-  local start = source:find(HANDLER)
+-- The handler's body (to the first `end` at column 0) and the source without it.
+local function splitHandler(source, name)
+  local start = source:find("\nlocal function " .. name .. "%(")
   if not start then
-    return source
+    return "", source
   end
   local _, stop = source:find("\nend", start + 1, true)
-  return source:sub(1, start) .. source:sub((stop or #source) + 1)
+  stop = stop or #source
+  return source:sub(start, stop), source:sub(1, start) .. source:sub(stop + 1)
 end
 
 -- What breaks a guardrail in files ({ [file name] = source }), as one line each.
@@ -62,21 +67,30 @@ local function violations(files)
         out[#out + 1] = name .. " calls " .. call
       end
     end
-    local outside = name == GLUE and outsideHandler(source) or source
-    for _, call in ipairs(POSTS) do
-      if outside:find(word(call)) then
-        out[#out + 1] = name .. " calls " .. call .. " outside onPostClick"
+    for _, handler in ipairs(HANDLERS) do
+      local body, outside = "", source
+      if name == GLUE then
+        body, outside = splitHandler(source, handler.name)
       end
-    end
-    local refs = count(source, word("onPostClick"))
-    if name == GLUE then
-      local defined = count(source, HANDLER)
-      local wired = count(source, 'SetScript%("OnClick", onPostClick%)')
-      if defined ~= 1 or wired ~= 1 or refs ~= 2 then
-        out[#out + 1] = name .. " must define onPostClick once and use it only in one SetScript(\"OnClick\", onPostClick)"
+      for _, call in ipairs(handler.calls) do
+        if outside:find(word(call)) then
+          out[#out + 1] = name .. " calls " .. call .. " outside " .. handler.name
+        end
+        if handler.once and count(body, word(call)) > 1 then
+          out[#out + 1] = name .. " calls " .. call .. " more than once in " .. handler.name
+        end
       end
-    elseif refs > 0 then
-      out[#out + 1] = name .. " uses onPostClick"
+      local refs = count(source, word(handler.name))
+      if name == GLUE then
+        local defined = count(source, "\nlocal function " .. handler.name .. "%(")
+        local wired = count(source, 'SetScript%("OnClick", ' .. handler.name .. "%)")
+        if defined ~= 1 or wired ~= 1 or refs ~= 2 then
+          out[#out + 1] = name .. " must define " .. handler.name .. " once and use it only in one SetScript(\"OnClick\", "
+            .. handler.name .. ")"
+        end
+      elseif refs > 0 then
+        out[#out + 1] = name .. " uses " .. handler.name
+      end
     end
   end
   return out
@@ -96,11 +110,20 @@ local function addonFiles()
   return files
 end
 
+local CANCEL_SOURCE = table.concat({
+  "local function onCancelClick(self)",
+  "  C_AuctionHouse.CancelAuction(id)",
+  "end",
+  "cancelButton:SetScript(\"OnClick\", onCancelClick)",
+}, "\n")
+
+-- A glue file whose Post and Cancel undercut handlers each make their call.
 local HANDLER_SOURCE = table.concat({
   "local function onPostClick(self)",
   "  C_AuctionHouse.PostItem(self.location, 3, 1, nil, 100)",
   "end",
   "postButton:SetScript(\"OnClick\", onPostClick)",
+  CANCEL_SOURCE,
 }, "\n")
 
 describe("the protected-call guardrails", function()
@@ -121,15 +144,50 @@ describe("the protected-call guardrails", function()
     )
   end)
 
-  it("catch a buy, a bid, a cancel or a Confirm anywhere, even in the handler", function()
-    local source = "\nlocal function onPostClick(self)\n  C_AuctionHouse.CancelAuction(1)\n  C_AuctionHouse.ConfirmPostItem(l)\nend\n"
-      .. "postButton:SetScript(\"OnClick\", onPostClick)\nC_AuctionHouse.PlaceBid(1, 1)"
+  it("catch a buy, a bid or a Confirm anywhere, even in the handler", function()
+    local source = "\nlocal function onPostClick(self)\n  C_AuctionHouse.ConfirmPostItem(l)\nend\n"
+      .. "postButton:SetScript(\"OnClick\", onPostClick)\nC_AuctionHouse.PlaceBid(1, 1)\n" .. CANCEL_SOURCE
 
     assert.are.same({
       GLUE .. " calls PlaceBid",
       GLUE .. " calls ConfirmPostItem",
-      GLUE .. " calls CancelAuction",
     }, violations({ [GLUE] = source }))
+  end)
+
+  it("pass on a glue file that cancels only inside its Cancel undercut click handler", function()
+    assert.are.same({}, violations({ [GLUE] = "\n" .. HANDLER_SOURCE }))
+  end)
+
+  it("catch a cancel outside the Cancel undercut click handler, even in Post's", function()
+    local source = "\nlocal function onPostClick(self)\n  C_AuctionHouse.CancelAuction(1)\nend\n"
+      .. "postButton:SetScript(\"OnClick\", onPostClick)\n" .. CANCEL_SOURCE
+
+    assert.are.same({ GLUE .. " calls CancelAuction outside onCancelClick" }, violations({ [GLUE] = source }))
+  end)
+
+  it("catch a cancel in any other file", function()
+    assert.are.same(
+      { "Scanner.lua calls CancelAuction outside onCancelClick" },
+      violations({
+        [GLUE] = "\n" .. HANDLER_SOURCE,
+        ["Scanner.lua"] = "C_AuctionHouse.CancelAuction(1)",
+      })
+    )
+  end)
+
+  it("catch more than one cancel in the handler", function()
+    local twice = HANDLER_SOURCE:gsub("CancelAuction%(id%)", "CancelAuction(id)\n  C_AuctionHouse.CancelAuction(id2)")
+
+    assert.are.same(
+      { GLUE .. " calls CancelAuction more than once in onCancelClick" },
+      violations({ [GLUE] = "\n" .. twice })
+    )
+  end)
+
+  it("catch the Cancel undercut handler called from anywhere but its OnClick", function()
+    local source = "\n" .. HANDLER_SOURCE .. "\nC_Timer.After(1, function() onCancelClick(cancelButton) end)"
+
+    assert.are.equal(1, #violations({ [GLUE] = source }))
   end)
 
   it("catch the handler called from anywhere but its OnClick", function()
