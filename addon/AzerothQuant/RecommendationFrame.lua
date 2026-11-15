@@ -37,6 +37,7 @@ local Chat = ns.Chat
 local PostButton = ns.PostButton
 local SearchButton = ns.SearchButton
 local CancelButton = ns.CancelButton
+local WritButton = ns.WritButton
 local SearchQueue = ns.SearchQueue
 local Character = ns.Character
 local TooltipLines = ns.TooltipLines
@@ -127,7 +128,7 @@ local function contentWidth()
   return frame:GetWidth() - CONTENT_INSET
 end
 
-local redraw, refreshPost, refreshCancel, drawPane
+local redraw, refreshPost, refreshCancel, refreshWrit, drawPane
 
 -- A plain hover text (Tips.lua, #163): a gold title when there is one, then the text and
 -- a grey footnote.
@@ -1110,6 +1111,16 @@ local owned, checks, fresh, cancelling, cancelError
 -- Whether the player clicked Check undercuts at this AH visit: nothing is searched before.
 local checking
 
+-- The Writs button (a stopgap, WritButton.lua): each searched writ's results by its Item
+-- Key this AH visit, the keys searching now, and whether a writ post waits on the AH.
+local writButton, writState
+local writResults, writSearching, writPending
+
+local function resetWrits()
+  writResults, writSearching, writPending = {}, {}, false
+end
+resetWrits()
+
 -- Forgets the Cancel undercut checks (each AH visit starts afresh).
 local function resetCancel()
   owned, checks, fresh, cancelling, cancelError, checking = nil, {}, nil, nil, nil, false
@@ -1176,6 +1187,10 @@ local function pumpSearches()
   if lost and lost.owned then
     SearchQueue.push(queue, OWNED_QUERY)
     request = request or SearchQueue.next(queue, C_AuctionHouse.IsThrottledMessageSystemReady(), GetTime())
+  elseif lost and lost.writ then
+    -- A writ's search is sent again rather than taken as no other Listing.
+    writSearching[lost.writ] = nil
+    refreshWrit()
   elseif lost then
     Chat.debug("No search results for " .. lost.key .. "; taken as no other Listing.")
     recordCheck(lost.key, {})
@@ -1451,6 +1466,134 @@ local function createCancelButton()
   cancelButton:Hide()
 end
 
+-- The Sealed Writ to open, the Craftsman's Writs to post (one entry per Item Key, with its
+-- first unlocked slot), and the empty general bag slots, from this Character's bags.
+local function readWritBags()
+  local sealed, writs, byKey, free = nil, {}, {}, 0
+  for _, bag in ipairs(Character.bagIds()) do
+    local empty, family = C_Container.GetContainerNumFreeSlots(bag)
+    if family == 0 then
+      free = free + (empty or 0)
+    end
+    for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+      local info = C_Container.GetContainerItemInfo(bag, slot)
+      local name = info and info.hyperlink and info.hyperlink:match("%[(.-)%]")
+      local kind = WritButton.kind(name)
+      if kind == "sealed" then
+        sealed = sealed or { item = "item:" .. info.itemID, count = 0 }
+        sealed.count = sealed.count + info.stackCount
+      elseif kind == "writ" and not info.isBound then
+        local key = TooltipLines.itemKey(info.hyperlink)
+        local writ = byKey[key]
+        if not writ then
+          writ = { key = key, name = name, units = 0 }
+          byKey[key] = writ
+          writs[#writs + 1] = writ
+        end
+        writ.units = writ.units + info.stackCount
+        if not writ.location and not info.isLocked then
+          writ.location = ItemLocation:CreateFromBagAndSlot(bag, slot)
+        end
+      end
+    end
+  end
+  for _, writ in ipairs(writs) do
+    if writ.location then
+      writ.commodity = isCommodity(writ.location)
+    end
+    writ.results = writResults[writ.key]
+  end
+  return sealed, writs, free
+end
+
+function refreshWrit()
+  -- A secure button's attributes and visibility can't change in combat.
+  if not writButton or InCombatLockdown() then
+    return
+  end
+  local sealed, writs, free = nil, {}, 0
+  if ahOpen then
+    sealed, writs, free = readWritBags()
+  end
+  writState = WritButton.state({
+    ahOpen = ahOpen,
+    pending = writPending,
+    freeSlots = free,
+    durationHours = AzerothQuantRecommendations and AzerothQuantRecommendations.postDurationHours,
+    sealed = sealed,
+    writs = writs,
+  })
+  writButton:SetShown(writState.shown)
+  writButton:SetText(writState.label)
+  writButton:SetWidth(math.max(90, writButton:GetTextWidth() + 30))
+  writButton:SetEnabled(writState.enabled)
+  -- The click's secure action opens the Sealed Writ; with no type set it does nothing.
+  if writState.open then
+    writButton:SetAttribute("type", "item")
+    writButton:SetAttribute("item", writState.open)
+  else
+    writButton:SetAttribute("type", nil)
+  end
+  local key = writState.search
+  if key and not writSearching[key] then
+    for _, writ in ipairs(writs) do
+      if writ.key == key and writ.location then
+        local itemID, queryKey = bagKey(writ.location, writ.commodity)
+        writSearching[key] = true
+        SearchQueue.push(queue, {
+          key = keyString(queryKey) .. "|writ",
+          match = itemID,
+          itemID = itemID,
+          queryKey = queryKey,
+          writ = key,
+        }, true)
+        pumpSearches()
+        break
+      end
+    end
+  end
+  if GameTooltip:IsOwned(writButton) then
+    writButton:GetScript("OnEnter")(writButton)
+  end
+end
+
+-- Posts the writ WritButton named, after the secure action (if any) opened the next Sealed
+-- Writ. The button takes up and down clicks so the secure open fires whichever way
+-- ActionButtonUseKeyDown is set; the post is made on the up only, once per click.
+local function onWritClick(self, _, down)
+  local call = writState and writState.post
+  if down or not call then
+    return
+  end
+  local _, location = inBags(call.key)
+  if not location then
+    return
+  end
+  if call.kind == "commodity" then
+    C_AuctionHouse.PostCommodity(location, call.duration, call.quantity, call.price)
+  else
+    C_AuctionHouse.PostItem(location, call.duration, call.quantity, nil, call.price)
+  end
+  Chat.debug("Writ post: " .. call.name .. " x" .. call.quantity .. " @ " .. Money.format(call.price))
+  writPending = true
+  refreshWrit()
+end
+
+-- Sits under the frame, clear of the pane's Post and Cancel undercut buttons.
+local function createWritButton()
+  writButton = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
+  writButton:SetSize(90, 22)
+  writButton:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -4, -2)
+  writButton:RegisterForClicks("AnyUp", "AnyDown")
+  writButton:SetScript("PostClick", onWritClick)
+  writButton:SetMotionScriptsWhileDisabled(true)
+  writButton:SetScript("OnEnter", function(self)
+    showTip(self, "Writs", writState and writState.tip or WritButton.TIP)
+  end)
+  writButton:SetScript("OnLeave", GameTooltip_Hide)
+  writButton:Hide()
+end
+
 -- Post and Search share one slot at the top of the pane's actions, with a line under it.
 local function createPaneButton()
   local button = CreateFrame("Button", nil, pane.actions, "UIPanelButtonTemplate")
@@ -1580,6 +1723,7 @@ local function createFrame()
   createPane()
   createPostButton()
   createCancelButton()
+  createWritButton()
 
   -- After the boxes exist (the frame:Hide() above would otherwise fire it first).
   -- A box left focused while hidden would swallow the next Enter meant for chat.
@@ -1653,8 +1797,10 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
     show(true)
     -- Cancel undercut starts afresh at each visit, and checks only once the player asks.
     resetCancel()
+    resetWrits()
     SearchQueue.clear(queue)
     refreshCancel()
+    refreshWrit()
   elseif event == "AUCTION_HOUSE_CLOSED" then
     -- Close what the AH opened; leave it if the player opened it with /aq recs.
     if openedByAuctionHouse and frame then
@@ -1663,23 +1809,34 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
     openedByAuctionHouse = false
     ahOpen, pending, lastPost, postError, search = false, false, nil, nil, nil
     resetCancel()
+    resetWrits()
     SearchQueue.clear(queue)
     refreshPost()
     refreshCancel()
+    refreshWrit()
   elseif event == "GET_ITEM_INFO_RECEIVED" or event == "PLAYER_MONEY" then
     queueRedraw()
   elseif event == "BAG_UPDATE_DELAYED" then
     refreshPost()
+    refreshWrit()
   elseif event == "AUCTION_HOUSE_AUCTION_CREATED" and lastPost then
     posted[lastPost.id] = (posted[lastPost.id] or 0) + lastPost.quantity
     pending, lastPost, postError = false, nil, nil
     refreshPost()
+  elseif event == "AUCTION_HOUSE_AUCTION_CREATED" and writPending then
+    writPending = false
+    refreshWrit()
   elseif (event == "AUCTION_HOUSE_POST_ERROR" or event == "UI_ERROR_MESSAGE") and pending then
     pending = false
     -- UI_ERROR_MESSAGE carries (errorType, message).
     local why = event == "UI_ERROR_MESSAGE" and tostring(arg2) or "the Auction House refused it."
     postError = { id = lastPost.id, text = "The post failed: " .. why }
     refreshPost()
+  elseif (event == "AUCTION_HOUSE_POST_ERROR" or event == "UI_ERROR_MESSAGE") and writPending then
+    -- May be the open's error, not the post's: the bags read next show what's left.
+    writPending = false
+    Chat.say("Writs: " .. (event == "UI_ERROR_MESSAGE" and tostring(arg2) or "the Auction House refused the post."))
+    refreshWrit()
   elseif (event == "UI_ERROR_MESSAGE" or event == "AUCTION_CANCELED") and cancelling then
     -- The error may not be the cancel's: the owned list read next tells whether the
     -- Listing is still up (CancelButton.outcome).
@@ -1700,8 +1857,12 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
       if search and search.key == request.key then
         search.results, search.lowest = results, PostButton.lowestOther(results)
       end
+      if request.writ then
+        writResults[request.writ], writSearching[request.writ] = results, nil
+      end
       refreshPost()
       refreshCancel()
+      refreshWrit()
       pumpSearches()
     end
   elseif event == "OWNED_AUCTIONS_UPDATED" and ahOpen then

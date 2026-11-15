@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: AzerothQuant
-## Notes: Records Auction House data for the azerothquant Brain and shows its Recommendations. Never buys or bids; posts or cancels only when its Post or Cancel undercut button is clicked.
+## Notes: Records Auction House data for the azerothquant Brain and shows its Recommendations. Never buys or bids; posts or cancels only when its Post, Writs or Cancel undercut button is clicked.
 ## Version: 0.2.1
 ## SavedVariables: AzerothQuantDB
 
@@ -38,6 +38,7 @@ TooltipLines.lua
 BuyUnderMatch.lua
 LootAlert.lua
 PostButton.lua
+WritButton.lua
 SearchButton.lua
 SearchQueue.lua
 CancelButton.lua
