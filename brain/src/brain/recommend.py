@@ -93,6 +93,9 @@ from brain.sell_rate import (
     sell_rates,
 )
 
+# The faction a Neutral Auction House's Market goes by (Scan.lua's marketFaction).
+NEUTRAL = "Neutral"
+
 
 class Action(StrEnum):
     VENDOR = "Vendor"
@@ -808,6 +811,75 @@ def recommend(
     return result
 
 
+@dataclass(frozen=True)
+class BuyAt:
+    """Another Auction House a Shopping List buys at (a Neutral one, #231): its other
+    players' Listings in a Scan, and the itemIDs that Scan dropped rows of (#156)."""
+
+    others: dict[str, Supply]
+    dropped: frozenset[int]
+
+
+@dataclass(frozen=True)
+class NeutralList:
+    """A Shopping List for a Neutral Auction House (#231): Listings in the `neutral`
+    Market's Scan requested at `neutral_as_of` worth buying there to carry `home`, the
+    Market of the faction whose Characters would carry them. Every exit is valued at home,
+    as of `home.as_of`. Only `home`'s Shopping List and gold are filled: no Holdings,
+    Predictions or Buy Unders, which the home Market's own Recommendations have."""
+
+    neutral: Market
+    neutral_as_of: int
+    home: MarketRecommendations
+
+
+def neutral_lists(
+    conn: sqlite3.Connection,
+    config: Config,
+    predictions: Sequence[Prediction] = (),
+    fair_value_cache: FairValueCache | None = None,
+) -> list[NeutralList]:
+    """A Neutral list for every Market the player has Characters in whose realm's Neutral
+    Market has a Scan, each sized against the home Market's gold on its own (ADR-0017):
+    it's an alternative to the home Shopping List, not a share of it."""
+    result = []
+    for home in character_markets(conn):
+        neutral = Market(home.realm, NEUTRAL, home.era)
+        home_times, neutral_times = scan_times(conn, home), scan_times(conn, neutral)
+        if not home_times or not neutral_times:
+            continue
+        neutral_at = neutral_times[-1]
+        buy_at = BuyAt(
+            supply_at(conn, neutral, neutral_at, others_only=True),
+            dropped_at(conn, neutral, neutral_at),
+        )
+        full = recommend_market(
+            conn,
+            config,
+            home,
+            predictions,
+            home_times[-1],
+            buy_under=False,
+            fair_value_cache=fair_value_cache,
+            loot_alert=False,
+            buy_at=buy_at,
+        )
+        shopping_only = replace(
+            full,
+            holdings=[],
+            prediction_buys=[],
+            prediction_cost=0,
+            predictions=[],
+            grades=[],
+            pooled_return=None,
+            held={},
+            beta_ratios={},
+            scan_count=len(home_times),
+        )
+        result.append(NeutralList(neutral, neutral_at, shopping_only))
+    return result
+
+
 def recommend_market(
     conn: sqlite3.Connection,
     config: Config,
@@ -823,6 +895,7 @@ def recommend_market(
     gold: int | None = None,
     tied_up: float | None = None,
     taken: frozenset[int] = frozenset(),
+    buy_at: "BuyAt | None" = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a past Scan,
@@ -834,7 +907,9 @@ def recommend_market(
     the Characters' gold and the Budget: a Backtest's simulated gold (#167). A `tied_up`
     replaces the own Listings up at cost in the Stake (ADR-0034): a Backtest's unsold
     units, since the Scans show the real player's posts. The Listing ids `taken` are left
-    out of the Scan: those a Backtest bought, still up in the real market (#212)."""
+    out of the Scan: those a Backtest bought, still up in the real market (#212). With
+    `buy_at`, the Shopping List buys at another Auction House and values every exit
+    here (#231)."""
     characters = character_markets(conn).get(market, [])
     days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
     config = replace(config, days_to_sell_seconds=days_to_sell)
@@ -867,12 +942,20 @@ def recommend_market(
     plans = _plans(known_recipes(conn, market, as_of), now)
     crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
     held = crafting.after
-    # The crafts change what's held, so the Flips are sized again after them (#67).
-    valuer, cleared = valuer.flips(set(under), _unbound_units(held))
     # The Scan may have missed some Listings of an item it dropped rows of, so the cheapest
     # it saw may not be the cheapest up (#156).
     dropped = dropped_at(conn, market, now)
-    buys = [b for b in cleared if item_id_of(b.item_key) not in dropped]
+    # The crafts change what's held, so the Flips are sized again after them (#67).
+    unbound = _unbound_units(held)
+    if buy_at is None:
+        valuer, cleared = valuer.flips(set(under), unbound)
+        buying, buy_dropped = valuer, dropped
+    else:
+        # Only the buys are at the other house: held units are valued here, on `valuer`.
+        valuer = valuer.after({}, unbound)
+        buying, cleared = valuer.buying_at(buy_at.others).flips(set(under), unbound)
+        buy_dropped = dropped | buy_at.dropped
+    buys = [b for b in cleared if item_id_of(b.item_key) not in buy_dropped]
     if gold is None:
         gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
         budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
@@ -932,12 +1015,22 @@ def recommend_market(
 
     crafts = [
         _flips_to_craft(
-            plans, crafting, for_sale, merchant, valuer, outlet, set(under), spend, config, plan
+            plans,
+            crafting,
+            buying.others,
+            merchant,
+            buying,
+            outlet,
+            set(under),
+            spend,
+            config,
+            plan,
         )
         for plan in plans
+        # Its output sells here, so only this Scan's dropped rows count against it.
         if item_id_of(plan.output) not in dropped
     ]
-    disenchants = _flips_to_disenchant(valuer, plans, set(under), dropped, spend, config, risk)
+    disenchants = _flips_to_disenchant(buying, plans, set(under), buy_dropped, spend, config, risk)
     shopping = _options(
         buys,
         crafts,
@@ -2407,8 +2500,13 @@ class _Valuer:
         own_cheapest: dict[str, int | None] | None = None,
         recent_since: int | None = None,
         recent: dict[str, int | None] | None = None,
+        home_others: dict[str, Supply] | None = None,
     ):
         self.supply, self.others, self.flipped = supply, others, flipped
+        # The other players' Listings in `supply`, which a post is priced against: unless
+        # `others` are at another Auction House (`buying_at`, #231), `others` themselves.
+        self.home_others = others if home_others is None else home_others
+        self.elsewhere = home_others is not None
         self.listed = listed
         # When the Sale Events the Recent Price counts start, and the Recent Prices so
         # far, shared like `_own_cheapest`.
@@ -2452,6 +2550,32 @@ class _Valuer:
             self._own_cheapest,
             self.recent_since,
             self._recent,
+            self.home_others if self.elsewhere else None,
+        )
+
+    def buying_at(self, others: dict[str, Supply]) -> "_Valuer":
+        """This Valuer with the Flips buying `others`, another Auction House's other
+        players' Listings (a Neutral one, #231), and every exit still valued here: posts
+        are priced against this one's Listings, which buying there leaves as they are."""
+        return _Valuer(
+            self.supply,
+            others,
+            {},
+            self.rates,
+            self.vendor,
+            self.merchant,
+            self.cut,
+            self.non_stacking,
+            self.deposits,
+            self._config,
+            self.held,
+            self.disenchanting,
+            self._by_item,
+            self.listed,
+            self._own_cheapest,
+            self.recent_since,
+            self._recent,
+            self.home_others,
         )
 
     def cheap(self, item_key: str, flips: bool = True) -> _Cheap:
@@ -2527,7 +2651,7 @@ class _Valuer:
         clears once all of it is bought. It passes `_flips` the same undercut as its
         `post_by`, which lifts the room limit and the minimum of Sale Events, so the
         minimum is checked here."""
-        own = _cheapest(without(self.supply[item_key], self.others[item_key]))
+        own = _cheapest(without(self.supply[item_key], self.home_others[item_key]))
         merchant, config = self.merchant.get(item_key), self._config
 
         def undercut(cheapest: int | None) -> float | None:
@@ -2556,7 +2680,7 @@ class _Valuer:
             return _flips(
                 item_key,
                 self.others[item_key],
-                self.supply[item_key],
+                self.supply.get(item_key, []),
                 self.rates.get(item_key),
                 self.vendor.get(item_id_of(item_key)),
                 self.merchant.get(item_key),
@@ -2570,6 +2694,7 @@ class _Valuer:
                 cheap,
                 recent,
                 no_sales,
+                self.home_others.get(item_key, []) if self.elsewhere else None,
             )
 
         buys = flips(cheap)
@@ -2660,7 +2785,7 @@ class _Valuer:
         posting under them is dumping. None without such a run, or once this Valuer has
         bought some of the Item Key: the run is gone then, and `post_at` is already the
         price after it."""
-        if self.flipped.get(item_key) or not self.others.get(item_key):
+        if self.flipped.get(item_key) or not self.home_others.get(item_key):
             return None
         if item_key not in self._wait_at:
             run = self.clearing_run(item_key)
@@ -2672,8 +2797,9 @@ class _Valuer:
     def _post_at_or_under(
         self, item_key: str, cap: float | None, bought: Supply = ()
     ) -> float | None:
-        flipped = [*self.flipped.get(item_key, []), *bought]
-        others = self.others.get(item_key, [])
+        others = self.home_others.get(item_key, [])
+        # Units bought at another Auction House leave this one's Listings as they are.
+        flipped = [] if self.elsewhere else [*self.flipped.get(item_key, []), *bought]
         if item_key not in self._own_cheapest:
             self._own_cheapest[item_key] = cheapest_without(self.supply.get(item_key, []), others)
         return _undercut(
@@ -2727,7 +2853,7 @@ class _Valuer:
             return None
         post_at = self.flip_post_at(item_key)
         flipped = self.flipped.get(item_key, [])
-        next_listing = cheapest_without(self.others.get(item_key, []), flipped)
+        next_listing = cheapest_without(self.home_others.get(item_key, []), flipped)
         if post_at is None or next_listing is None:
             return None
 
@@ -2884,7 +3010,7 @@ def _merchant(conn: sqlite3.Connection, market: Market) -> dict[str, float]:
 
 
 def auction_cut(market: Market, config: Config) -> float:
-    return config.neutral_ah_cut if market.faction == "Neutral" else config.ah_cut
+    return config.neutral_ah_cut if market.faction == NEUTRAL else config.ah_cut
 
 
 def market_holdings(
@@ -4207,6 +4333,7 @@ def _flips(
     cheap: _Cheap | None = None,
     recent: int | None = None,
     no_sales: int = 0,
+    posted_against: Supply | None = None,
 ) -> list[_VendorBuy | _FlipToSell]:
     """What's worth buying of an Item Key, from other players' (unit buyout, quantity)
     offers, cheapest first. `supply` is every unit on sale, the player's own included.
@@ -4233,6 +4360,10 @@ def _flips(
     buys showed up (#132). With the `recent` Price, each run says whether it may be a long
     Risky row (`_SellRun.long_risky`). With `no_sales`, the room is that many units
     whatever the Sale Events, for a Risky row for too few of them (#224, ADR-0043).
+
+    With `posted_against`, the `offers` are at another Auction House (a Neutral one,
+    #231): buying them leaves `supply` as it is, so every run posts just under the
+    cheapest of `posted_against`, the other players' Listings in `supply`.
     """
     offers = sorted(offers)
     runs: list[_SellRun] = []
@@ -4240,8 +4371,14 @@ def _flips(
     # What `_post_at` works out for each run, without rebuilding the supply per run (#105):
     # the player's own Listings don't change, and the cheapest offer left is this one if
     # it's only partly bought, else the cheapest one after it.
-    own = _cheapest(without(supply, offers))
-    after = _cheapest_from(offers)
+    if posted_against is None:
+        own = _cheapest(without(supply, offers))
+        after = _cheapest_from(offers)
+        partly = [unit for unit, _ in offers]
+    else:
+        own = cheapest_without(supply, posted_against)
+        after = [cheapest_without(posted_against, [])] * (len(offers) + 1)
+        partly = after[1:]
     bought = 0
     for i, (unit, quantity) in enumerate(offers):
         if post_by is None:
@@ -4249,7 +4386,7 @@ def _flips(
                 quantity,
                 bought,
                 _undercut(after[i + 1], own, config, merchant_cost),
-                _undercut(unit, own, config, merchant_cost),
+                _undercut(partly[i], own, config, merchant_cost),
                 (lambda price: no_sales)
                 if no_sales
                 else lambda price: _room_at(
@@ -4291,7 +4428,9 @@ def _flips(
                 and post_at <= recent
                 and held + bought <= rate.units_sold_at_or_above(post_at)
             )
-            next_listing = cheapest_without(offers, prefix) if no_sales else None
+            # The rest of a Listing only partly bought is the next one up.
+            left = partly[i] if take < quantity else after[i + 1]
+            next_listing = left if no_sales else None
             runs.append(
                 _SellRun(prefix, post_at, profit, days, events, unsold, long_risky, next_listing)
             )

@@ -47,6 +47,7 @@ from brain.recommend import (
     DisenchantFlip,
     LootAlert,
     MarketRecommendations,
+    NeutralList,
     PredictionLine,
     PredictionSummary,
     ReagentBuy,
@@ -67,6 +68,9 @@ _HEADER = (
     "-- that Character was taken. The Addon deletes stored Mailbox Reads up to then.\n"
     "-- lastCharacterRead[realm][character] is the same for Character Reads.\n"
     "-- recommendations[realm][faction] is that Market's Recommendations, in copper.\n"
+    "-- neutral[realm][faction] is a Shopping List for the realm's Neutral Auction House:\n"
+    "-- Listings there worth carrying to that faction's, valued as of its asOf. neutralAsOf\n"
+    "-- is when the Neutral Scan it buys from was requested.\n"
     "-- budget is the Budget the Brain sized them within (nil for all the gold), and each\n"
     "-- shoppingList row is an option sized as if it were the only buy. stake is the gold\n"
     "-- plus the own Listings up at cost, room what an option may cost and lossCap the\n"
@@ -163,6 +167,7 @@ def render(
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
     problem: str | None = None,
     catching_up_since: int | None = None,
+    neutral: Sequence[NeutralList] = (),
 ) -> str:
     by_realm: dict[str, dict[str, int]] = {}
     for market, requested_at in last_imported.items():
@@ -179,6 +184,7 @@ def render(
             "lastMailboxRead": _by_realm(last_mailbox_read or {}),
             "lastCharacterRead": _by_realm(last_character_read or {}),
             "recommendations": _recommendations(markets, beta_priors or {}),
+            "neutral": _neutral(neutral),
             "disenchantExcluded": _disenchant_excluded(load_table()),
             "postDurationHours": post_duration_hours,
             "brain": brain,
@@ -191,37 +197,54 @@ def _recommendations(
 ) -> dict[str, dict[str, dict]]:
     by_realm: dict[str, dict[str, dict]] = {}
     for m in markets:
-        by_realm.setdefault(m.market.realm, {})[m.market.faction] = {
-            "asOf": m.as_of,
-            "gold": m.gold,
-            "stake": math.floor(m.stake),
-            "windowHours": m.window_hours,
-            "predictionCost": m.prediction_cost,
-            "holdings": [_row(r) for r in m.holdings],
-            "shoppingList": [_row(r) for r in m.shopping_list],
-            "predictionBuys": [_row(r) for r in m.prediction_buys],
-            "predictions": [_prediction(p) for p in m.predictions],
-            "held": {
-                item_key: [
-                    {"character": h.character, "bags": h.bags, "bank": h.bank, "bound": h.bound}
-                    for h in whose
-                ]
-                for item_key, whose in m.held.items()
-            },
-            "buyUnder": [_buy_under(b) for b in m.buy_under],
-            "lootAlert": _loot_alert(m.loot_alert),
-        }
-        if m.budget is not None:  # a Lua table can't hold nil
-            by_realm[m.market.realm][m.market.faction]["budget"] = m.budget
-        if m.room is not None:
-            by_realm[m.market.realm][m.market.faction]["room"] = math.floor(m.room)
-        if m.loss_cap is not None:
-            by_realm[m.market.realm][m.market.faction]["lossCap"] = math.floor(m.loss_cap)
-        if m.market.era is Era.LIVE and m.scan_count < YOUNG_MARKET_SCANS:
-            by_realm[m.market.realm][m.market.faction]["young"] = True
-        if m.market in beta_priors:
-            by_realm[m.market.realm][m.market.faction]["beta"] = _beta(beta_priors[m.market])
+        by_realm.setdefault(m.market.realm, {})[m.market.faction] = _entry(m, beta_priors)
     return by_realm
+
+
+def _neutral(lists: Sequence[NeutralList]) -> dict[str, dict[str, dict]]:
+    """The Neutral lists by realm and home faction (#231), each a home Market's entry
+    with only its Shopping List filled, plus when the Neutral Scan it buys from was."""
+    by_realm: dict[str, dict[str, dict]] = {}
+    for n in lists:
+        entry = _entry(n.home, {})
+        entry["neutralAsOf"] = n.neutral_as_of
+        by_realm.setdefault(n.home.market.realm, {})[n.home.market.faction] = entry
+    return by_realm
+
+
+def _entry(m: MarketRecommendations, beta_priors: Mapping[Market, BetaPrior]) -> dict:
+    """A Market's Recommendations as the Addon reads them."""
+    entry = {
+        "asOf": m.as_of,
+        "gold": m.gold,
+        "stake": math.floor(m.stake),
+        "windowHours": m.window_hours,
+        "predictionCost": m.prediction_cost,
+        "holdings": [_row(r) for r in m.holdings],
+        "shoppingList": [_row(r) for r in m.shopping_list],
+        "predictionBuys": [_row(r) for r in m.prediction_buys],
+        "predictions": [_prediction(p) for p in m.predictions],
+        "held": {
+            item_key: [
+                {"character": h.character, "bags": h.bags, "bank": h.bank, "bound": h.bound}
+                for h in whose
+            ]
+            for item_key, whose in m.held.items()
+        },
+        "buyUnder": [_buy_under(b) for b in m.buy_under],
+        "lootAlert": _loot_alert(m.loot_alert),
+    }
+    if m.budget is not None:  # a Lua table can't hold nil
+        entry["budget"] = m.budget
+    if m.room is not None:
+        entry["room"] = math.floor(m.room)
+    if m.loss_cap is not None:
+        entry["lossCap"] = math.floor(m.loss_cap)
+    if m.market.era is Era.LIVE and m.scan_count < YOUNG_MARKET_SCANS:
+        entry["young"] = True
+    if m.market in beta_priors:
+        entry["beta"] = _beta(beta_priors[m.market])
+    return entry
 
 
 def _prediction(p: PredictionSummary) -> dict[str, object]:
@@ -442,11 +465,12 @@ def write_recommendations(
     post_duration_hours: float = DEFAULT_POST_DURATION_HOURS,
     problem: str | None = None,
     catching_up_since: int | None = None,
+    neutral: Sequence[NeutralList] = (),
 ) -> Path | None:
     """Write the install's Recommendations.lua from the history and the Recommendations of
-    its Era's Markets, with their Beta Priors and the Brain's status (its version, the
-    problem to tell the player, if any, and when a long pull started, if one is running);
-    None if the Addon isn't installed there."""
+    its Era's Markets and Neutral lists, with their Beta Priors and the Brain's status
+    (its version, the problem to tell the player, if any, and when a long pull started,
+    if one is running); None if the Addon isn't installed there."""
     folder = addon_folder(install)
     if not folder.is_dir():
         return None
@@ -460,6 +484,7 @@ def write_recommendations(
         post_duration_hours,
         problem,
         catching_up_since,
+        [n for n in neutral if n.neutral.era is install.era],
     )
     # The Addon's own copy first: the Addon prunes by it, so a failed Data write mustn't
     # cost it.

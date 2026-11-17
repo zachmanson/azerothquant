@@ -22,6 +22,7 @@ from brain.recommend import (
     LootValue,
     MarketRecommendations,
     MatYield,
+    NeutralList,
     NodeKind,
     PredictionLine,
     PredictionSummary,
@@ -1018,3 +1019,33 @@ def test_a_market_carries_each_prediction_with_a_line_per_item_key():
     assert (with_buy["itemKey"], with_buy["held"], with_buy["buy"]["quantity"]) == ("2589", 3, 12)
     assert without == {"itemKey": "2592", "held": 0, "reason": "none listed"}
     assert lua_due["happened"] == "2026-12-01"
+
+
+def test_a_real_lua_reads_a_neutral_list_under_its_realm_and_home_faction(tmp_path, lua):
+    """#231: beside `recommendations`, so nothing walking a realm's factions meets it."""
+    file = tmp_path / FILE_NAME
+    neutral = Market(realm=MARKET.realm, faction="Neutral", era=MARKET.era)
+    home = MarketRecommendations(
+        market=MARKET,
+        as_of=1790000000,
+        gold=123456,
+        budget=100000,
+        shopping_list=[
+            Row(item_key="2589", action=Action.SELL, quantity=5, price=200.0, post_at=999.0)
+        ],
+    )
+    file.write_text(render({}, neutral=[NeutralList(neutral, 1790003600, home)]), encoding="utf-8")
+
+    out = _run_in_lua(
+        lua,
+        file,
+        'local m = r.neutral["Quel\'Thalas"].Horde '
+        "local s = m.shoppingList[1] "
+        "print(m.asOf, m.neutralAsOf, m.gold, m.budget, #m.holdings, next(r.recommendations)) "
+        "print(s.itemKey, s.action, s.quantity, s.price, s.postAt)",
+    )
+
+    assert out.splitlines() == [
+        "1790000000	1790003600	123456	100000	0	nil",
+        "2589	Sell	5	200	999",
+    ]

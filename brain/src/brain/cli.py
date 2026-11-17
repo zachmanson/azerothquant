@@ -86,7 +86,7 @@ from brain.lots import happened_at, start_of
 from brain.observation import Calibration, OwnPurchasesTaken
 from brain.pool import HttpPool, Pool, PoolAdmin, PoolError
 from brain.pool_sync import PoolSyncer, pull, push
-from brain.predictions import PredictionsError, load_predictions
+from brain.predictions import Prediction, PredictionsError, load_predictions
 from brain.realized import Realized, realized
 from brain.recommend import (
     Action,
@@ -94,12 +94,14 @@ from brain.recommend import (
     ChainNode,
     Check,
     MarketRecommendations,
+    NeutralList,
     NodeKind,
     PredictionSummary,
     Row,
     WhyNot,
     held_units,
     market_lots,
+    neutral_lists,
     per_click,
     per_day,
     recommend,
@@ -257,6 +259,21 @@ def _add_report(total: ImportReport, report: ImportReport) -> None:
             setattr(total, f.name, getattr(total, f.name) + getattr(report, f.name))
 
 
+def _neutral_lists(
+    conn: sqlite3.Connection,
+    config: Config,
+    predictions: Sequence[Prediction],
+    fair_value_cache: FairValueCache,
+) -> list[NeutralList]:
+    """The Neutral lists (#231), or none if working them out fails: logged, and the home
+    Recommendations are written without them."""
+    try:
+        return neutral_lists(conn, config, predictions, fair_value_cache)
+    except Exception:
+        log.exception("No Neutral lists written: working them out failed")
+        return []
+
+
 def _write_recommendations(
     conn: sqlite3.Connection,
     config: Config,
@@ -291,6 +308,8 @@ def _write_recommendations(
                 log.exception("No Recommendations written: the Decision Engine failed")
                 markets = []
                 problem = _join_problems(problem, NO_RECOMMENDATIONS)
+            # Apart, so a Neutral list failing never costs the home Recommendations (#231).
+            neutral = _neutral_lists(conn, config, predictions, fair_value_cache) if markets else []
             beta_priors = _beta_priors(conn, config, markets, fair_value_cache)
     finally:
         fair_value_cache.timings = None
@@ -305,6 +324,7 @@ def _write_recommendations(
                     config.post_duration_hours,
                     problem,
                     catching_up_since,
+                    neutral,
                 )
             except (OSError, sqlite3.Error) as e:
                 log.error("Couldn't write Recommendations for %s: %s", install.path, e)

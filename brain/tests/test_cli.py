@@ -2445,3 +2445,21 @@ def test_backtest_refuses_a_policy_it_does_not_know(policies, capsys):
     assert "pick from brain, relaxed, uncapped, buyunder, buyunder_unchecked, auctionator" in (
         capsys.readouterr().err
     )
+
+
+def test_a_failed_neutral_list_still_writes_the_home_recommendations(tmp_path, monkeypatch):
+    """#231: the Neutral lists are worked out apart, so their failing costs only them."""
+    install = tmp_path / "_classic_beta_"
+    file = install_with_savedvariables(install)
+    install_addon(install)
+    config = config_for(tmp_path, Install(install, Era.BETA))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("a Neutral list bug")
+
+    monkeypatch.setattr("brain.cli.neutral_lists", broken)
+    run_import(config, [file])
+
+    written = read_recommendations(install)
+    assert written["recommendations"]["Classic Beta PvP"]["Alliance"]["asOf"]
+    assert "problem" not in written["brain"]
