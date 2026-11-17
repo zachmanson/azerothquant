@@ -304,85 +304,85 @@ describe("Scan.build", function()
   end)
 end)
 
-describe("Scan.reread", function()
-  it("puts a dropped row back once its link reads", function()
-    -- #156: after the wait, the Addon reads the dropped rows' links again.
-    local rows = { row(), dropped(2589), row({ link = NATURE_PROT }) }
+describe("Scan.newReread", function()
+  it("re-reads only the rows of the item that just loaded, and puts them back", function()
+    -- #226: an item's rows are read again the moment it loads, before the client evicts it.
+    local rows = { row(), dropped(2589), dropped(4306), dropped(2589) }
+    local reread = Scan.newReread(rows)
+    local asked = {}
 
-    local reread, droppedCount = Scan.reread(rows, function(index)
-      return index == 1 and LINEN or nil
+    reread:itemLoaded(2589, function(index)
+      asked[#asked + 1] = index
+      return LINEN
     end)
     local scan = Scan.build(REQUEST, rows, "Kash")
 
-    assert.are.equal(1, reread)
-    assert.are.equal(1, droppedCount)
-    assert.are.equal(0, scan.droppedRows)
-    assert.are.same({}, scan.droppedItemIDs)
+    assert.are.same({ 1, 3 }, asked)
+    assert.are.equal(1, scan.droppedRows)
+    assert.are.same({ 4306 }, scan.droppedItemIDs)
     assert.are.equal("item:2589::::::::20:1490", others(scan)[2].itemString)
   end)
 
-  it("leaves the rows whose link still doesn't read dropped, and records their items", function()
-    -- Items the game hasn't loaded by the 15 s cap: the Brain's backstop handles those (#156).
-    local rows = { dropped(2589), dropped(4306), dropped(4306), row() }
-    local asked = {}
+  it("lists each dropped row's item once, to ask the game to load", function()
+    local noID = row()
+    noID.link = nil
+    local rows = { dropped(2589), row({ itemID = 2680 }), dropped(4306), dropped(2589), noID }
 
-    local reread, droppedCount = Scan.reread(rows, function(index)
-      asked[#asked + 1] = index
-      return index == 0 and LINEN or ""
+    local itemIDs = Scan.newReread(rows):itemIDs()
+
+    table.sort(itemIDs)
+    assert.are.same({ 2589, 4306 }, itemIDs)
+    assert.are.same({}, Scan.newReread({ row() }):itemIDs())
+  end)
+
+  it("says it's done once every item has reported, read or not", function()
+    -- The Scan saves then, without waiting out the cap. An item that loaded but whose rows
+    -- still don't read has nothing more to wait for either.
+    local rows = { dropped(2589), dropped(4306), dropped(4306) }
+    local reread = Scan.newReread(rows)
+    local function nothing()
+      return nil
+    end
+
+    assert.is_false(reread:itemLoaded(4306, nothing))
+    assert.is_false(reread:itemLoaded(4306, nothing)) -- reported twice
+    assert.is_false(reread:itemLoaded(9999, nothing)) -- not one we asked for
+    assert.is_true(reread:itemLoaded(2589, nothing))
+  end)
+
+  it("counts the rows that came back out of all the main read dropped", function()
+    -- For the "re-read N of M dropped rows" chat line. A row with no itemID can't be
+    -- re-read but still counts as dropped.
+    local noID = row()
+    noID.link = nil
+    local rows = { dropped(2589), dropped(2589), dropped(4306), noID, row() }
+    local reread = Scan.newReread(rows)
+
+    reread:itemLoaded(2589, function()
+      return LINEN
     end)
-    local scan = Scan.build(REQUEST, rows, "Kash")
+    reread:itemLoaded(4306, function()
+      return nil
+    end)
+    local back, droppedCount = reread:counts()
 
-    assert.are.equal(1, reread)
-    assert.are.equal(3, droppedCount)
-    assert.are.equal(2, scan.droppedRows)
-    assert.are.same({ 4306 }, scan.droppedItemIDs)
-    -- Only the dropped rows are read again, not all ~58k.
-    assert.are.same({ 0, 1, 2 }, asked)
+    assert.are.equal(2, back)
+    assert.are.equal(4, droppedCount)
   end)
 
   it("leaves a row dropped when the link it reads now is another item's", function()
     -- The list can change during the wait (another addon's Scan), shifting the indices.
     -- A link for a different item would put one auction's item on another's price.
     local rows = { dropped(4306) }
+    local reread = Scan.newReread(rows)
 
-    local reread = Scan.reread(rows, function()
+    reread:itemLoaded(4306, function()
       return LINEN
     end)
     local scan = Scan.build(REQUEST, rows, "Kash")
 
-    assert.are.equal(0, reread)
+    assert.are.equal(0, (reread:counts()))
     assert.are.same({ 4306 }, scan.droppedItemIDs)
   end)
-
-  it("saves the Scan as read when the Auction House closed before the re-read", function()
-    -- #156: closing the AH mid-wait still saves the Scan. With the list gone, nothing reads.
-    local rows = { row(), dropped(2589), dropped(4306) }
-
-    local reread, droppedCount = Scan.reread(rows, function()
-      return nil
-    end)
-    local scan = Scan.build(REQUEST, rows, "Kash")
-
-    assert.are.equal(0, reread)
-    assert.are.equal(2, droppedCount)
-    assert.are.equal(2, scan.droppedRows)
-    table.sort(scan.droppedItemIDs)
-    assert.are.same({ 2589, 4306 }, scan.droppedItemIDs)
-    assert.are.equal(1, Scan.listingCount(scan))
-  end)
 end)
 
-describe("Scan.missingItemIDs", function()
-  it("lists each dropped row's item once, to request before the re-read", function()
-    -- #156: the Addon asks the game to load these, then waits until all have reported.
-    local noID = row()
-    noID.link = nil
-    local rows = { dropped(2589), row({ itemID = 2680 }), dropped(4306), dropped(2589), noID }
-
-    local itemIDs = Scan.missingItemIDs(rows)
-
-    table.sort(itemIDs)
-    assert.are.same({ 2589, 4306 }, itemIDs)
-    assert.are.same({}, Scan.missingItemIDs({ row() }))
-  end)
-end)

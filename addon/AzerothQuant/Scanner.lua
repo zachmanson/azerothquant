@@ -40,16 +40,18 @@ local QUIET_SECONDS = 2
 local NO_RESPONSE_SECONDS = 60
 -- ~58k rows per Scan; read them over several frames to avoid a long freeze.
 local ROWS_PER_FRAME = 2000
--- How long to wait for the items of dropped rows to load before reading those rows again
--- (#156). The chat line says how many came back, so this can be tuned.
-local REREAD_CAP_SECONDS = 15
+-- The most to wait for the items of dropped rows to load (#156). Each item's rows are read
+-- again as it loads (#226), and the wait ends once all have; the cap is for items that never
+-- report. A Live Scan can drop rows of ~7k items, which all loaded within 30 s in the #226
+-- probe. The chat line says how many came back, so this can be tuned.
+local REREAD_CAP_SECONDS = 60
 
 local db
 local marketFaction -- decided on AUCTION_HOUSE_SHOW, while the auctioneer is the "npc" unit
 local ahOpen = false
 local pending -- the in-flight Scan request, or nil
 local reading = false
-local rereading -- while waiting to re-read dropped rows: { rows, waitingFor, startedAt, capTimer }
+local rereading -- while waiting to re-read dropped rows: { rows, tracker, startedAt, capTimer }
 local debounceTimer, noResponseTimer
 local button, pulse, ticker
 local pingTimer -- the Scan-ready ping (#180)
@@ -195,47 +197,49 @@ local function readLink(index)
   return ok and link or nil
 end
 
--- Reads the dropped rows again in one pass and saves the Scan (#156). Runs once every
--- requested item has reported, at the cap, or when the AH closes mid-wait. A row that still
--- doesn't read stays dropped and recorded.
-local function rereadAndFinish(rows, startedAt)
-  local reread, dropped = Scan.reread(rows, readLink)
-  finish(rows, string.format("re-read %d of %d dropped rows in %.1f s", reread, dropped, GetTime() - startedAt))
-end
-
--- Ends the wait for dropped rows' items and re-reads them.
+-- Ends the wait for dropped rows' items and saves the Scan with the rows re-read so far.
 local function stopWaiting()
   local state = rereading
   rereading = nil
   cancel(state.capTimer)
-  rereadAndFinish(state.rows, state.startedAt)
+  local reread, dropped = state.tracker:counts()
+  finish(state.rows, string.format("re-read %d of %d dropped rows in %.1f s", reread, dropped, GetTime() - state.startedAt))
 end
 
--- Asks the game to load the items of the rows the main read dropped (#156), then waits
--- for them before reading those rows again. With none dropped, saves right away.
+-- Asks the game to load the items of the rows the main read dropped (#156), and reads each
+-- item's rows again the moment it loads (Scan.newReread, #226). With none dropped, saves
+-- right away.
 local function rereadDropped(rows)
-  local itemIDs = Scan.missingItemIDs(rows)
+  local tracker = Scan.newReread(rows)
+  local itemIDs = tracker:itemIDs()
   if #itemIDs == 0 then
     finish(rows)
     return
   end
-  local waitingFor, count = {}, 0
+  local state = { rows = rows, tracker = tracker, startedAt = GetTime() }
+  rereading = state
+  state.capTimer = C_Timer.NewTimer(REREAD_CAP_SECONDS, stopWaiting)
+  Chat.debug(string.format("Waiting up to %d s for %d items to load, to re-read their dropped rows.",
+    REREAD_CAP_SECONDS, #itemIDs))
   for _, itemID in ipairs(itemIDs) do
-    -- GetItemInfo returns nil for an item not loaded yet and asks the server for it;
-    -- GET_ITEM_INFO_RECEIVED fires when it arrives.
-    if getItemInfo(itemID) == nil then
-      waitingFor[itemID] = true
-      count = count + 1
+    local item = Item:CreateFromItemID(itemID)
+    -- pcall: an item the client says doesn't exist errors here; it just waits out the cap
+    -- rather than lose the Scan. An item already loaded calls back inside the pcall, so the
+    -- save goes to the next frame: an error in it must show, not leave the Scan busy.
+    local ok = pcall(item.ContinueOnItemLoad, item, function()
+      if rereading == state and not state.done and state.tracker:itemLoaded(itemID, readLink) then
+        state.done = true
+        C_Timer.After(0, function()
+          if rereading == state then
+            stopWaiting()
+          end
+        end)
+      end
+    end)
+    if not ok then
+      Chat.debug(string.format("Item %d can't be loaded; its dropped rows wait out the cap.", itemID))
     end
   end
-  if count == 0 then
-    rereadAndFinish(rows, GetTime())
-    return
-  end
-  rereading = { rows = rows, waitingFor = waitingFor, startedAt = GetTime() }
-  rereading.capTimer = C_Timer.NewTimer(REREAD_CAP_SECONDS, stopWaiting)
-  Chat.debug(string.format("Waiting up to %d s for %d items to load, to re-read their dropped rows.",
-    REREAD_CAP_SECONDS, count))
 end
 
 local function readRows()
@@ -396,7 +400,6 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("AUCTION_HOUSE_SHOW")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
-frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 frame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
     if arg1 == "AzerothQuant" then
@@ -459,19 +462,10 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     cancel(ticker)
     ticker = nil
     if rereading then
-      -- The rows are read; save with whatever reads now rather than lose the Scan (#156).
+      -- The rows are read; save with those re-read so far rather than lose the Scan (#156).
       stopWaiting()
     elseif pending then
       abort("Auction House closed before the Scan finished; nothing was saved.")
-    end
-  elseif event == "GET_ITEM_INFO_RECEIVED" then
-    -- arg1 is the itemID. It reports even when the item failed to load (arg2 false), and
-    -- then there's nothing more to wait for either.
-    if rereading and rereading.waitingFor[arg1] then
-      rereading.waitingFor[arg1] = nil
-      if next(rereading.waitingFor) == nil then
-        stopWaiting()
-      end
     end
   elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
     -- Ignore updates when we haven't asked. (While we have, another addon's scan is

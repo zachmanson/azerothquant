@@ -162,39 +162,67 @@ function Scan.build(request, rows, playerName, sellPrice, itemInfo)
   }
 end
 
--- The itemIDs of the rows whose link didn't read, once each: what the Addon asks the game to
--- load before Scan.reread (#156).
-function Scan.missingItemIDs(rows)
-  local itemIDs, seen = {}, {}
-  for _, r in ipairs(rows) do
-    if not itemString(r.link) and r.itemID and not seen[r.itemID] then
-      seen[r.itemID] = true
-      itemIDs[#itemIDs + 1] = r.itemID
-    end
-  end
-  return itemIDs
-end
-
--- Reads the link of each row the main read dropped again, once the game has had time to
--- load their items (#156). rows are Scan.build's, in replicate order: rows[i] is replicate
--- index i - 1. readLink(index) is GetReplicateItemLink. A row whose link still doesn't read
--- stays dropped, and Scan.build records it as before. So does one whose link is now another
--- item's: the list changed under the wait, and the index is no longer this auction.
--- Returns how many dropped rows now read, and how many there were.
-function Scan.reread(rows, readLink)
-  local reread, dropped = 0, 0
+-- Tracks the rows the main read dropped, grouped by item, so each item's rows are read again
+-- the moment it loads (#226): the client evicts loaded items again within ~100 s, so a single
+-- re-read after all ~7k have loaded misses most of them. rows are Scan.build's, in replicate
+-- order: rows[i] is replicate index i - 1.
+function Scan.newReread(rows)
+  local byItem = {} -- itemID -> the indices in rows of its dropped rows
+  local waiting = 0 -- items that haven't reported yet
+  local dropped, reread = 0, 0
   for i, r in ipairs(rows) do
     if not itemString(r.link) then
       dropped = dropped + 1
-      local link = readLink(i - 1)
-      local item = itemString(link)
-      if item and r.itemID and tonumber(item:match("^item:(%d+)")) == r.itemID then
-        r.link = link
-        reread = reread + 1
+      if r.itemID then
+        if not byItem[r.itemID] then
+          byItem[r.itemID] = {}
+          waiting = waiting + 1
+        end
+        local indices = byItem[r.itemID]
+        indices[#indices + 1] = i
       end
     end
   end
-  return reread, dropped
+  local reported = {}
+
+  local tracker = {}
+
+  -- The items to ask the game to load, once each.
+  function tracker:itemIDs()
+    local itemIDs = {}
+    for itemID in pairs(byItem) do
+      itemIDs[#itemIDs + 1] = itemID
+    end
+    return itemIDs
+  end
+
+  -- readLink(index) is GetReplicateItemLink. A row whose link still doesn't read stays
+  -- dropped, and Scan.build records it. So does one whose link is now another item's: the
+  -- list changed under the wait, and the index is no longer this auction.
+  -- Returns true once every item has reported: nothing is left to wait for.
+  function tracker:itemLoaded(itemID, readLink)
+    if not byItem[itemID] or reported[itemID] then
+      return waiting == 0
+    end
+    reported[itemID] = true
+    waiting = waiting - 1
+    for _, i in ipairs(byItem[itemID]) do
+      local link = readLink(i - 1)
+      local item = itemString(link)
+      if item and tonumber(item:match("^item:(%d+)")) == itemID then
+        rows[i].link = link
+        reread = reread + 1
+      end
+    end
+    return waiting == 0
+  end
+
+  -- How many dropped rows read again so far, and how many the main read dropped.
+  function tracker:counts()
+    return reread, dropped
+  end
+
+  return tracker
 end
 
 -- How many Listings a built Scan holds, own and packed.
