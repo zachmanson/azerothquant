@@ -3,10 +3,11 @@
 -- top. Under the tabs a banner shows the one next step in the Scan, Reload, Load loop
 -- (NextStep.lua, #161), with the one button that does it.
 -- All shaping happens in RecommendationTable.lua; this file only draws it and talks to the
--- WoW API. It opens next to a faction Auction House (not a Neutral one, whose Market the
--- Brain doesn't recommend for) and /aq recs toggles it anywhere. Its position, size, the tab
--- last picked and each Market's Budget and Days to Sell are saved in AzerothQuantDB;
--- open/closed is not.
+-- WoW API. It opens next to an Auction House and /aq recs toggles it anywhere. At a
+-- Neutral one it shows the Character's faction's Neutral list (#231, ADR-0045): only what
+-- to buy there, with no Post or Cancel undercut, which are about the home Market. Its
+-- position, size, the tab last picked and each Market's Budget and Days to Sell are saved
+-- in AzerothQuantDB; open/closed is not.
 --
 -- The side pane on the right (#160) shows the row under the mouse, or else the selected
 -- (pinned) row: its Action, Note, what to do, its details and any values the table was too
@@ -86,6 +87,7 @@ local tabs = {}
 local selected -- the title of the section on show
 local shown -- the section on show, as built, so a header click knows its columns
 local openedByAuctionHouse = false
+local atNeutral = false -- the AH open is a Neutral one: the table shows the Neutral list (#231)
 local redrawQueued = false
 -- The selected row's id (RecommendationTable.find). It survives a redraw while a row with
 -- the same Item Key and action is on show, and clears otherwise.
@@ -673,10 +675,23 @@ function redraw()
   if not frame or not frame:IsShown() then
     return
   end
-  local recommendations = AzerothQuantRecommendations and AzerothQuantRecommendations.recommendations
+  local saved = AzerothQuantRecommendations
   local realm, faction = GetRealmName(), UnitFactionGroup("player") or ""
-  local marks = BoughtMarks.forMarket(db, recommendations, realm, faction)
-  local view = RecommendationTable.build(
+  local recommendations, build, marks
+  if atNeutral then
+    -- At a Neutral AH, the Neutral list for the Character's faction (#231). Its Bought marks
+    -- are kept apart from home's, under a key of their own, and go once a newer Neutral
+    -- Scan is imported (its asOf is home's Scan, so forMarket is handed neutralAsOf).
+    recommendations, build = saved and saved.neutral, RecommendationTable.buildNeutral
+    local entry = recommendations and recommendations[realm] and recommendations[realm][faction]
+    local key = "Neutral " .. faction
+    local scanned = entry and { [realm] = { [key] = { asOf = entry.neutralAsOf } } }
+    marks = BoughtMarks.forMarket(db, scanned, realm, key)
+  else
+    recommendations, build = saved and saved.recommendations, RecommendationTable.build
+    marks = BoughtMarks.forMarket(db, recommendations, realm, faction)
+  end
+  local view = build(
     recommendations,
     realm,
     faction,
@@ -1284,7 +1299,8 @@ function refreshPost()
     loaded = ahOpen and row and row.record.itemKey and buyKey(row.record.itemKey) ~= nil,
   })
   searchButton:SetShown(ahOpen and searchState ~= nil)
-  postButton:SetShown(ahOpen and searchState == nil)
+  -- No Post at a Neutral AH: the Brain prices Posts for the home Market (ADR-0045).
+  postButton:SetShown(ahOpen and not atNeutral and searchState == nil)
   if searchState then
     postState = nil
     searchButton:SetText(searchState.label)
@@ -1391,13 +1407,15 @@ function refreshCancel()
   if not cancelButton then
     return
   end
-  cancelButton:SetShown(ahOpen)
+  -- Only at a faction AH: an undercut at a Neutral one isn't the home Market's (ADR-0045).
+  local cancelShown = ahOpen and not atNeutral
+  cancelButton:SetShown(cancelShown)
   -- Post or Search sits above Cancel undercut while it shows.
   pane.actions:ClearAllPoints()
-  local bottom = ahOpen and 32 or 4
+  local bottom = cancelShown and 32 or 4
   pane.actions:SetPoint("BOTTOMLEFT", 10, bottom)
   pane.actions:SetPoint("BOTTOMRIGHT", -10, bottom)
-  if not ahOpen then
+  if not cancelShown then
     cancelState = nil
     return
   end
@@ -1662,7 +1680,8 @@ local function show(byAuctionHouse)
   if not frame then
     createFrame()
   end
-  selected = RecommendationTable.openingTab(db.recommendationTab, byAuctionHouse)
+  -- At a Neutral AH the tab last picked may not be on show (#231): Shopping List, as at any AH.
+  selected = RecommendationTable.openingTab(db.recommendationTab, byAuctionHouse or atNeutral)
   if frame:IsShown() then
     selectTab(selected)
     return
@@ -1707,11 +1726,7 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
       db = AzerothQuantDB
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
-    local market = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player"))
-    if market == "Neutral" then
-      return
-    end
-    -- Not at a Neutral AH: its Market isn't the one the Brain priced the Post at for.
+    atNeutral = Scan.marketFaction(UnitGUID("npc"), UnitFactionGroup("player")) == "Neutral"
     ahOpen = true
     -- Already open via /aq recs: switch to the Shopping List but leave it open after the AH.
     if not (frame and frame:IsShown()) then
@@ -1729,7 +1744,9 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
       frame:Hide()
     end
     openedByAuctionHouse = false
-    ahOpen, pending, lastPost, postError, search = false, false, nil, nil, nil
+    ahOpen, atNeutral, pending, lastPost, postError, search = false, false, false, nil, nil, nil
+    -- Left open with /aq recs after a Neutral AH, it goes back to the home Market.
+    queueRedraw()
     resetCancel()
     SearchQueue.clear(queue)
     refreshPost()

@@ -36,9 +36,13 @@ end
 -- budget: the one the player set in the box, nil for all the gold. entry.budget is the one
 -- the Brain sized the options within, which lags it until the next reload. spent: what the
 -- rows marked Bought spent (#97).
-local function header(entry, now, budget, spent)
+local function goldLine(entry, budget, spent)
   local stale = budget ~= entry.budget and " (Reload to re-size)" or ""
   local bought = spent > 0 and ", Bought " .. Money.format(spent) or ""
+  return "Gold " .. Money.format(entry.gold) .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale .. bought
+end
+
+local function header(entry, now, budget, spent)
   -- A young Live Market (#147) says so in plain words instead of its window hours.
   local window = string.format(", Observation Window %.1f h", entry.windowHours)
   if entry.young then
@@ -47,9 +51,16 @@ local function header(entry, now, budget, spent)
   end
   return {
     "as of " .. formatTime(entry.asOf) .. ", " .. age(now - entry.asOf) .. window,
-    "Gold " .. Money.format(entry.gold)
-      .. ", Budget " .. (budget and Money.format(budget) or "all") .. stale .. bought
-      .. ", Prediction buys " .. Money.format(entry.predictionCost),
+    goldLine(entry, budget, spent) .. ", Prediction buys " .. Money.format(entry.predictionCost),
+  }
+end
+
+-- A Neutral list's header (#231): where its rows sell, and how old home's prices are, since
+-- every row is valued at home as of its latest Scan (entry.asOf).
+local function neutralHeader(entry, faction, now, budget, spent)
+  return {
+    "Buy here, sell at the " .. faction .. " AH. " .. faction .. " prices are from " .. age(now - entry.asOf) .. ".",
+    goldLine(entry, budget, spent),
   }
 end
 
@@ -1110,6 +1121,31 @@ function RecommendationTable.build(recommendations, realm, faction, now, nameOf,
       ),
     },
   }
+end
+
+-- Nothing is held, predicted or kept under a Buy Under at a Neutral AH: only what to buy there.
+local NEUTRAL_EMPTY = "No list for this Auction House yet: Scan here, /reload, and let the Brain import."
+local NEUTRAL_TABS = { ["Shopping List"] = true, ["Flips to Craft"] = true, ["Flips to Disenchant"] = true }
+
+-- The table at a Neutral AH (#231, ADR-0045): the Neutral list for the Character's faction,
+-- neutral[realm][faction] as the Brain writes it. Arguments as for build.
+function RecommendationTable.buildNeutral(neutral, realm, faction, now, nameOf, character, budget, marks, gold)
+  local entry = neutral and neutral[realm] and neutral[realm][faction]
+  if not entry then
+    return { empty = NEUTRAL_EMPTY }
+  end
+  -- The entry has a home entry's shape, with only its Shopping List filled.
+  local view = RecommendationTable.build({ [realm] = { [faction] = entry } }, realm, faction, now, nameOf, character, budget, marks, gold)
+  local sections = {}
+  for _, section in ipairs(view.sections) do
+    if NEUTRAL_TABS[section.title] then
+      sections[#sections + 1] = section
+    end
+  end
+  view.title = realm .. " Neutral"
+  view.header = neutralHeader(entry, faction, now, budget, BoughtMarks.spent(marks or {}))
+  view.sections = sections
+  return view
 end
 
 ns.RecommendationTable = RecommendationTable

@@ -1733,3 +1733,46 @@ describe("the Predictions tab (#207)", function()
     assert.is_true(tab.rows[2].markable)
   end)
 end)
+
+-- #231, ADR-0045: at a Neutral AH the table shows the home faction's Neutral list.
+describe("RecommendationTable.buildNeutral", function()
+  local function buildNeutral(neutral, now, budget, marks, gold)
+    return RecommendationTable.buildNeutral(neutral, REALM, FACTION, now or 0, noNames, nil, budget, marks, gold)
+  end
+
+  it("heads the table with where to sell and how old home's prices are", function()
+    local view = buildNeutral(entry({ neutralAsOf = AS_OF + 600 }), AS_OF + 3 * 3600 + 120)
+
+    assert.are.equal("Buy here, sell at the Alliance AH. Alliance prices are from 3 h ago.", view.header[1])
+    assert.are.equal("Gold 17g 54s 71c, Budget all", view.header[2])
+  end)
+
+  it("shows only the Neutral list's Shopping List tabs: nothing held, predicted or under a Buy Under", function()
+    local neutral = entry({
+      neutralAsOf = AS_OF,
+      shoppingList = {
+        { itemKey = "9749", action = "Sell", quantity = 3, price = 1000, postAt = 4200.0, profit = 9450.0, cost = 3000 },
+        flipToCraft(),
+      },
+    })
+
+    local view = buildNeutral(neutral, AS_OF)
+
+    local titles = {}
+    for i, section in ipairs(view.sections) do
+      titles[i] = section.title
+    end
+    assert.are.same({ "Shopping List", "Flips to Craft", "Flips to Disenchant" }, titles)
+    assert.are.equal("item:9749", view.sections[1].rows[1].itemString)
+    assert.are.equal("item:2996", view.sections[2].rows[1].itemString)
+    assert.are.equal("Classic Beta PvP Neutral", view.title)
+  end)
+
+  it("asks for a Scan here when the Brain has no Neutral list for the Character's faction", function()
+    local hordeOnly = { [REALM] = { Horde = entry({ neutralAsOf = AS_OF })[REALM][FACTION] } }
+
+    assert.are.equal("No list for this Auction House yet: Scan here, /reload, and let the Brain import.",
+      buildNeutral(hordeOnly, AS_OF).empty)
+    assert.is_not_nil(buildNeutral(nil, AS_OF).empty)
+  end)
+end)
