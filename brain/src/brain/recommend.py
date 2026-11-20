@@ -924,18 +924,10 @@ def recommend_market(
     else:
         seen = listings(conn, market)
     # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
-    # options are alternatives, so none is assumed (#86).
-    valuer, _ = _valuer(
-        conn,
-        config,
-        market,
-        now,
-        set(under),
-        _unbound_units(holdings),
-        seen,
-        fair_value_cache=fair_value_cache,
-        skills_as_of=as_of,
-        taken=taken,
+    # options are alternatives, so none is assumed (#86). This Valuer is before the Flips:
+    # they're worked out once, after the crafts.
+    valuer = _valuer_at(conn, config, market, now, seen, fair_value_cache, as_of, taken).after(
+        {}, _unbound_units(holdings)
     )
     supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
     vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
@@ -2230,29 +2222,6 @@ def holdings_advice(
     return advice
 
 
-def _valuer(
-    conn: sqlite3.Connection,
-    config: Config,
-    market: Market,
-    at: int | None,
-    under: set[str] = frozenset(),
-    unbound: Mapping[str, int] = MappingProxyType({}),
-    seen: Sequence[Listing] | None = None,
-    fair_value_cache: FairValueCache | None = None,
-    skills_as_of: int | None = None,
-    taken: frozenset[int] = frozenset(),
-) -> tuple["_Valuer", list[_VendorBuy | _FlipToSell]]:
-    """The Market's Valuer as of its Scan requested at `at` (none without one), and the
-    Flips in that Scan, none of them taken as bought (#86). Item Keys `under` a
-    Prediction aren't Flipped. `unbound` is the player's unbound held units by Item Key,
-    which take the Sale Horizon before any Flip to Sell (#67). `seen` as in
-    `market_lots`, and `fair_value_cache` as in `recommend`. The Enchanting skills are
-    the latest, or as of `skills_as_of` (#103). The Listing ids `taken` are left out of
-    the Scan: a Backtest's bought ones (#212)."""
-    valuer = _valuer_at(conn, config, market, at, seen, fair_value_cache, skills_as_of, taken)
-    return valuer.flips(under, unbound)
-
-
 def _valuer_at(
     conn: sqlite3.Connection,
     config: Config,
@@ -2263,7 +2232,11 @@ def _valuer_at(
     skills_as_of: int | None = None,
     taken: frozenset[int] = frozenset(),
 ) -> "_Valuer":
-    """`_valuer` before the Flips: what they're worked out on."""
+    """The Market's Valuer as of its Scan requested at `at` (none without one): what its
+    Flips are worked out on (`_Valuer.flips`). `seen` as in `market_lots`, and
+    `fair_value_cache` as in `recommend`. The Enchanting skills are the latest, or as of
+    `skills_as_of` (#103). The Listing ids `taken` are left out of the Scan: a Backtest's
+    bought ones (#212)."""
     # With a cache, its Listings: what it keeps below is worked out from them (#143).
     cache = fair_value_cache
     if cache is not None:
@@ -2650,14 +2623,15 @@ class _Valuer:
         the held units, with the minimum of Sale Events at that price (#108). A wall only
         clears once all of it is bought. It passes `_flips` the same undercut as its
         `post_by`, which lifts the room limit and the minimum of Sale Events, so the
-        minimum is checked here."""
+        minimum is checked here. The run is at this Auction House even on a Valuer
+        buying at another (#231): it's the wall held units post behind."""
         own = _cheapest(without(self.supply[item_key], self.home_others[item_key]))
         merchant, config = self.merchant.get(item_key), self._config
 
         def undercut(cheapest: int | None) -> float | None:
             return _undercut(cheapest, own, config, merchant)
 
-        flips = self._flips_of(item_key, self.held.get(item_key, 0), undercut)
+        flips = self._flips_of(item_key, self.held.get(item_key, 0), undercut, at_home=True)
         runs = [run for buy in flips if isinstance(buy, _FlipToSell) for run in buy.runs]
         least = self._config.flip_min_sale_events
         return next((run for run in runs if run.sale_events >= least), None)
@@ -2667,19 +2641,24 @@ class _Valuer:
         item_key: str,
         held: int,
         post_by: Callable[[int | None], float | None] | None = None,
+        at_home: bool = False,
     ) -> list[_VendorBuy | _FlipToSell]:
         """`_flips` of an Item Key in this Scan, behind `held` units, posted by `post_by`.
+        They buy the Listings this Valuer buys, or with `at_home` this Auction House's own,
+        even on a Valuer buying at another (#231).
         Its Flip to Sell carries the `long_runs` a long Risky row may come from, with the
         cutoff skipped under the Recent Price (ADR-0041), when they're not its runs. An
         Item Key with no run at all may have a Flip to Sell with only `no_sales_runs`: up
         to `risky_max_units` units with too few Sale Events at their post price, as the
         cutoff counts them (#224, ADR-0043)."""
         cheap, recent = self.cheap(item_key), self.recent_price(item_key)
+        buying_elsewhere = self.elsewhere and not at_home
+        asks = self.home_others if at_home else self.others
 
         def flips(cheap: _Cheap, no_sales: int = 0) -> list[_VendorBuy | _FlipToSell]:
             return _flips(
                 item_key,
-                self.others[item_key],
+                asks[item_key],
                 self.supply.get(item_key, []),
                 self.rates.get(item_key),
                 self.vendor.get(item_id_of(item_key)),
@@ -2694,7 +2673,7 @@ class _Valuer:
                 cheap,
                 recent,
                 no_sales,
-                self.home_others.get(item_key, []) if self.elsewhere else None,
+                self.home_others.get(item_key, []) if buying_elsewhere else None,
             )
 
         buys = flips(cheap)

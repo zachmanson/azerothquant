@@ -188,3 +188,34 @@ def test_held_units_of_an_item_not_up_at_the_neutral_house_dont_stop_the_list(db
     [n] = neutral_lists(db, CONFIG, [])
 
     assert n.home.holdings == []
+
+
+BOLT_LINK = "|cffffffff|Hitem:2996::::::::20:1490:::::::::|h[Bolt of Linen Cloth]|h|r"
+BAG = "item:4238::::::::20:1490"
+BAG_RECIPE = {
+    "recipeID": 3755,
+    "outputItemID": 4238,
+    "quantityMin": 1,
+    "quantityMax": 1,
+    "bindType": 0,
+    "reagents": [{"itemID": 2996, "quantity": 2, "reagentType": 1}],
+}
+
+
+def test_held_reagents_not_up_at_the_neutral_house_are_valued_at_home(db):
+    """A Flip to Craft values the held Bolts it uses at home, where they're up: the
+    Neutral house has only Linen. It was a KeyError for every Neutral list on Live."""
+    home = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=6 - n, unit=5000, item=BAG),
+            row(quantity=6 - n, unit=1000, item=BOLT),
+        )
+        for n in range(3)
+    ]
+    neutral = scan(T0 + 2 * HOUR + 600, row(6, 100), faction="Neutral")
+    held = {"bag": 0, "slot": 1, "link": BOLT_LINK, "count": 2, "isBound": False}
+    reads = [character_read(recipes=[BOLT_RECIPE, BAG_RECIPE], bags=[held])]
+    load(db, [*home, neutral], reads)
+
+    assert neutral_lists(db, CONFIG, [])[0].home.shopping_list

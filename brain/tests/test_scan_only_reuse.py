@@ -25,7 +25,7 @@ from brain.history import (
     scan_times,
 )
 from brain.predictions import Prediction
-from brain.recommend import _others_lows, _others_lows_as_of, recommend
+from brain.recommend import _others_lows, _others_lows_as_of, _Valuer, recommend
 
 LINEN = "|cffffffff|Hitem:2589::::::::20:1490:::::::::|h[Linen Cloth]|h|r"
 WOOL = "|cffffffff|Hitem:2592::::::::20:1490:::::::::|h[Wool Cloth]|h|r"
@@ -247,6 +247,26 @@ def test_a_kept_pass_with_predictions_matches_a_fresh_one(db, config):
         bags = (item(LINEN, count=rng.randint(1, 9)), item(WOOL, count=rng.randint(0, 3), slot=2))
         import_character_reads(db, [read(s["requestedAt"] + 1, bags=bags)], Era.BETA, config)
         assert_kept_pass_matches_a_fresh_one(db, config, cache, predictions)
+
+
+def test_a_pass_works_out_a_markets_flips_once(db, config, monkeypatch):
+    # Holdings and Craft Actions are valued on the Valuer before the Flips, so working the
+    # Flips out for it too was thrown away. On Live it doubled the Flips' cost, most of a
+    # pass with no new Scan.
+    rng = random.Random(116)
+    import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
+    import_scans(db, cheap_flip_scans(rng, scans=6), Era.BETA, config)
+    calls = []
+    real_flips = _Valuer.flips
+
+    def counted_flips(self, *args):
+        calls.append(args)
+        return real_flips(self, *args)
+
+    monkeypatch.setattr(_Valuer, "flips", counted_flips)
+
+    assert recommend(db, config, [], fair_value_cache=FairValueCache())
+    assert len(calls) == 1
 
 
 def test_a_pass_with_no_new_scan_loads_no_listings_with_predictions_held(db, config, monkeypatch):

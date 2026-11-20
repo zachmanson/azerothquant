@@ -27,7 +27,7 @@ from brain.recommend import (
     MatYield,
     _nothing_held,
     _plans,
-    _valuer,
+    _valuer_at,
     _way_out,
     exit_values,
     grades,
@@ -820,7 +820,7 @@ def test_a_way_out_asked_again_in_a_pass_is_the_one_worked_out_afresh(db, monkey
     import_scans(db, scans, Era.BETA, RECOMMEND_CONFIG)
     import_character_reads(db, [enchanter(vendor_prices=prices, recipes=[wand])], Era.BETA, CONFIG)
     now, config = T0 + HOUR, RECOMMEND_CONFIG
-    valuer, _ = _valuer(db, config, MARKET, now)
+    valuer = _valuer_at(db, config, MARKET, now).after({}, {})
     plans = _plans(known_recipes(db, MARKET), now)
     keys = [GREEN, DUST_KEY, "10939", "10978", "7777"]
 
