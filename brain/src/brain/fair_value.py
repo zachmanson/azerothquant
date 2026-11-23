@@ -98,7 +98,8 @@ class FairValueCache:
 
     With `keep_in_history`, as `brain watch` makes it, each Scan's Fair Values are also
     kept in the history, so a restarted Brain loads them rather than working them all out
-    again (#145)."""
+    again (#145). It says so (`keeps_in_history`) and gives the Scan IDs (`scan_ids`) for
+    Sell Rate to keep what it takes from each window there too (#233)."""
 
     def __init__(self, keep_in_history: bool = False) -> None:
         self._keep_in_history = keep_in_history
@@ -120,6 +121,16 @@ class FairValueCache:
         # Set by the caller for a pass: the Fair Values computed or loaded from the history,
         # not found here, are timed in it (#131).
         self.timings: Timings | None = None
+
+    @property
+    def keeps_in_history(self) -> bool:
+        return self._keep_in_history
+
+    def scan_ids(self, conn: sqlite3.Connection, market: Market) -> dict[int, int]:
+        """The Market's Scan IDs by requested_at, as this pass found them (checking its
+        Scans first, once a pass, like every other lookup here)."""
+        self._check_scans(conn, market)
+        return {at: id_ for at, id_, _, _ in self._stamps[market]}
 
     def start_pass(self) -> None:
         self._last_pass, self._this_pass = self._this_pass, {}

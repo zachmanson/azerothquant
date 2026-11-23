@@ -21,7 +21,10 @@ from brain.history import (
     Market,
     Outcome,
     Purchase,
+    WindowScans,
     dropped_item_ids,
+    keep_window_ends,
+    kept_window_ends,
     listings,
     listings_first_seen_in,
     outcomes,
@@ -284,6 +287,12 @@ def _ends_of_windows(
     found = {w: cache.kept_for_window(conn, market, w.start, w.end, fields[w]) for w in windows}
     result = {w: ends for w, ends in found.items() if isinstance(ends, _EndsOfWindow)}
     missing = {w.start: w for w in windows if w not in result}
+    in_history = _KeptWindowEnds(conn, market, config, next_scan, cache)
+    if missing and in_history.used:
+        for w, ends in in_history.load(list(missing.values())).items():
+            result[w] = ends
+            cache.keep_for_window(market, w.start, w.end, fields[w], ends)
+            del missing[w.start]
     if not missing:
         return result
     back: dict[int, list[Listing]] = defaultdict(list)
@@ -315,7 +324,76 @@ def _ends_of_windows(
         kept = [d for d in candidates[w] if id(d) not in missed]
         result[w] = _EndsOfWindow(kept, sales[w.end])
         cache.keep_for_window(market, w.start, w.end, fields[w], result[w])
+    if in_history.used:
+        in_history.keep({w: result[w] for w in missing.values()})
     return result
+
+
+# Bump it whenever a change to `_ends_of_windows` changes what it works out for a window, so
+# a Brain doesn't load what the old code kept in the history (#233).
+WINDOW_ENDS_VERSION = 1
+
+
+class _KeptWindowEnds:
+    """`_EndsOfWindow`s kept in the history (#233), `used` when the cache keeps things
+    there, by each window's Scan IDs and the Scan after it that counts (`next_scan`)."""
+
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        market: Market,
+        config: Config,
+        next_scan: dict[ObservationWindow, int],
+        cache: FairValueCache,
+    ) -> None:
+        self._conn = conn
+        self._next_scan = next_scan
+        self.used = cache.keeps_in_history
+        self._ids = cache.scan_ids(conn, market) if self.used else {}
+        self._worked_out_with = (
+            f"v{WINDOW_ENDS_VERSION} time left {list(config.time_left_max_seconds)}"
+        )
+
+    def _scans(self, w: ObservationWindow) -> WindowScans | None:
+        start, end = self._ids.get(w.start), self._ids.get(w.end)
+        if start is None or end is None:
+            return None
+        if w not in self._next_scan:
+            return start, end, 0
+        next_ = self._ids.get(self._next_scan[w])
+        return None if next_ is None else (start, end, next_)
+
+    def load(self, windows: list[ObservationWindow]) -> dict[ObservationWindow, _EndsOfWindow]:
+        named = {s: w for w in windows if (s := self._scans(w)) is not None}
+        kept = kept_window_ends(self._conn, list(named), self._worked_out_with)
+        return {named[s]: _decoded(named[s], value) for s, value in kept.items()}
+
+    def keep(self, ends: dict[ObservationWindow, _EndsOfWindow]) -> None:
+        named = {s: _encoded(e) for w, e in ends.items() if (s := self._scans(w)) is not None}
+        keep_window_ends(self._conn, named, self._worked_out_with)
+
+
+def _encoded(ends: _EndsOfWindow) -> dict:
+    """`ends` as JSON: each candidate as [Item Key, unit buyout, own, quantity, time left]
+    and each Partial Sale as [Item Key, unit buyout, units]. The rest is the window's."""
+    return {
+        "candidates": [
+            [d.item_key, d.unit_buyout, d.own, d.quantity, d.time_left] for d in ends.candidates
+        ],
+        "partial_sales": [[k, u, n] for k, _, u, n in ends.partial_sales],
+    }
+
+
+def _decoded(w: ObservationWindow, value: dict) -> _EndsOfWindow:
+    """`_encoded`'s value for the window back. Every candidate was last seen at its start
+    and gone at its end, in it, with no time to expire."""
+    return _EndsOfWindow(
+        [
+            Disappearance(k, u, own, q, t, w.start, w.end, in_window=True, expiry_possible=False)
+            for k, u, own, q, t in value["candidates"]
+        ],
+        [(k, w.end, u, n) for k, u, n in value["partial_sales"]],
+    )
 
 
 @dataclass(frozen=True)

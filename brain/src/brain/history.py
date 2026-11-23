@@ -84,6 +84,19 @@ CREATE TABLE IF NOT EXISTS scan_fair_values (
     fair_values TEXT NOT NULL  -- JSON: {item key: Fair Value}
 );
 
+-- What Sell Rate takes from an Observation Window's two Scans, and the Scan after it when
+-- one was seen, kept so a restarted Brain doesn't work it out again (#233). One row per
+-- window and Scan after (0: none seen); `worked_out_with` names the code and config that
+-- made it. A re-match deletes it with any of those Scans.
+CREATE TABLE IF NOT EXISTS window_ends (
+    end_scan_id INTEGER NOT NULL REFERENCES scan (id),
+    next_scan_id INTEGER NOT NULL,
+    start_scan_id INTEGER NOT NULL REFERENCES scan (id),
+    worked_out_with TEXT NOT NULL,
+    ends TEXT NOT NULL,  -- JSON, as observation.py writes it
+    PRIMARY KEY (end_scan_id, next_scan_id)
+);
+
 -- Every Pooled Scan downloaded into the Archive, imported or not, so a pull skips it and a
 -- rollback can find it (#122).
 CREATE TABLE IF NOT EXISTS pooled_scan (
@@ -824,6 +837,11 @@ def _rewind(conn: sqlite3.Connection, market_id: int, since: int) -> None:
     # Not in _SEEN_IN_A_SCAN: it belongs to the Scan alone, with no Listing to rewind.
     conn.execute(f"DELETE FROM scan_dropped_item WHERE scan_id IN ({tail})", in_tail)
     conn.execute(f"DELETE FROM scan_fair_values WHERE scan_id IN ({tail})", in_tail)
+    # A window's start is before its end, so its end or the Scan after it is in the tail.
+    conn.execute(
+        f"DELETE FROM window_ends WHERE end_scan_id IN ({tail}) OR next_scan_id IN ({tail})",
+        (*in_tail, *in_tail),
+    )
     conn.execute(f"DELETE FROM scan WHERE id IN ({tail})", in_tail)
 
 
@@ -1947,6 +1965,48 @@ def keep_fair_values(
             "INSERT OR REPLACE INTO scan_fair_values (scan_id, worked_out_with, fair_values)"
             " VALUES (?, ?, ?)",
             (scan_id, worked_out_with, json.dumps(values)),
+        )
+
+
+# (start Scan ID, end Scan ID, ID of the Scan after or 0 for none): one Observation Window's
+# Scans, as `kept_window_ends` and `keep_window_ends` name them.
+WindowScans = tuple[int, int, int]
+
+
+def kept_window_ends(
+    conn: sqlite3.Connection, windows: Sequence[WindowScans], worked_out_with: str
+) -> dict[WindowScans, object]:
+    """What `keep_window_ends` kept with `worked_out_with`, decoded from JSON, for each of
+    `windows` it has a row for."""
+    wanted = set(windows)
+    found: dict[WindowScans, object] = {}
+    ends = sorted({end for _, end, _ in wanted})
+    rows = conn.execute(
+        "SELECT start_scan_id, end_scan_id, next_scan_id, ends FROM window_ends"
+        f" WHERE worked_out_with = ? AND end_scan_id IN ({', '.join('?' * len(ends))})",
+        (worked_out_with, *ends),
+    )
+    for start, end, next_, kept in rows:
+        if (start, end, next_) in wanted:
+            found[(start, end, next_)] = json.loads(kept)
+    return found
+
+
+def keep_window_ends(
+    conn: sqlite3.Connection, kept: dict[WindowScans, object], worked_out_with: str
+) -> None:
+    """Keep each window's JSON-able value in `kept`, worked out with `worked_out_with`, in
+    place of any it had with the same Scan after, so `kept_window_ends` finds it after a
+    restart (#233)."""
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO window_ends"
+            " (end_scan_id, next_scan_id, start_scan_id, worked_out_with, ends)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                (end, next_, start, worked_out_with, json.dumps(value, separators=(",", ":")))
+                for (start, end, next_), value in kept.items()
+            ],
         )
 
 
