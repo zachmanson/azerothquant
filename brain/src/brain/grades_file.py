@@ -161,10 +161,42 @@ def craft_flip_name(recipe_id: int, scan_at: int) -> str:
     return f"{recipe_id}@{scan_at}"
 
 
+# A file's (modified time, size): the Brain only appends to grades.toml, which grows it,
+# and a hand edit changes its modified time.
+type _Stamp = tuple[int, int]
+# Each file as last parsed, and what `load_frozen` last gave for each of its Markets, with
+# the file's stamp when they were read.
+_parsed_by_file: dict[Path, tuple[_Stamp, dict]] = {}
+_frozen_by_market: dict[tuple[Path, Market], tuple[_Stamp, "Frozen"]] = {}
+
+
 def load_frozen(path: Path | None, market: Market) -> Frozen:
     """What's frozen in `path` for `market`; nothing without a path or before the file is
-    written. A Prediction names Item Keys, not a Market, so each Market has its own."""
-    raw = _load(path)
+    written. A Prediction names Item Keys, not a Market, so each Market has its own.
+
+    Kept until the file changes: a pass loads it ~10 times for each Market, and parsing it
+    each time was ~11% of a pass with no new Scan on Live (#235). Nobody may change what it
+    returns."""
+    if path is None:
+        return _frozen({}, path, market)
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return _frozen({}, path, market)
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    kept = _frozen_by_market.get((path, market))
+    if kept is not None and kept[0] == stamp:
+        return kept[1]
+    parsed = _parsed_by_file.get(path)
+    if parsed is None or parsed[0] != stamp:
+        parsed = stamp, _load(path)
+        _parsed_by_file[path] = parsed
+    frozen = _frozen(parsed[1], path, market)
+    _frozen_by_market[(path, market)] = stamp, frozen
+    return frozen
+
+
+def _frozen(raw: dict, path: Path | None, market: Market) -> Frozen:
     try:
         held = {
             name: tuple(

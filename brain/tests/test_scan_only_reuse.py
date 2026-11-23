@@ -4,6 +4,8 @@ kept."""
 
 import dataclasses
 import random
+import shutil
+import tomllib
 from collections.abc import Sequence
 from datetime import date, timedelta
 from functools import partial
@@ -14,6 +16,7 @@ from test_rematch import CONFIG, MARKET, MINUTE, T0, row, scan, simulated_market
 
 from brain.config import Era
 from brain.fair_value import FairValueCache
+from brain.grades_file import freeze_held
 from brain.history import (
     ENCHANTING,
     import_character_reads,
@@ -24,6 +27,7 @@ from brain.history import (
     roll_back_pooled,
     scan_times,
 )
+from brain.lots import Held, own_listings
 from brain.predictions import Prediction
 from brain.recommend import _others_lows, _others_lows_as_of, _Valuer, recommend
 
@@ -290,3 +294,71 @@ def test_a_pass_with_no_new_scan_loads_no_listings_with_predictions_held(db, con
 
     assert recommend(db, config, predictions, fair_value_cache=cache)
     assert loads == []
+
+
+def test_a_pass_picks_out_own_listings_once_and_again_after_a_new_scan(db, config, monkeypatch):
+    # #235: linking Sold mail and naming Item Keys walked every Listing for the few own ones
+    # ~17 times a pass, ~9% of a pass with no new Scan on Live.
+    rng = random.Random(235)
+    import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=7)
+    import_scans(db, scans[:-1], Era.BETA, config)
+    predictions = [held_prediction(scans), graded_prediction(scans)]
+    cache = FairValueCache()
+    walks = []
+    real_own_listings = own_listings
+    monkeypatch.setattr(
+        "brain.recommend.own_listings", lambda seen: walks.append(1) or real_own_listings(seen)
+    )
+
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert len(walks) == 1
+    walks.clear()
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert walks == []
+    import_scans(db, scans[-1:], Era.BETA, config)
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert len(walks) == 1
+
+
+def test_a_kept_pass_matches_a_fresh_one_after_grades_toml_changes(db, config, tmp_path):
+    # #235: what's frozen is kept until grades.toml changes. Halfway, what a Prediction held
+    # at writing is frozen into it (as another Brain process could); the fresh pass reads a
+    # copy of the file, which nothing has kept.
+    rng = random.Random(235)
+    config = dataclasses.replace(config, grades_path=tmp_path / "grades.toml")
+    cache = FairValueCache()
+    bags = (item(LINEN, count=4), item(WOOL, count=2, slot=2))
+    import_character_reads(db, [read(T0 - 60, bags=bags)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=6)
+    predictions = [held_prediction(scans), graded_prediction(scans)]
+    for n, s in enumerate(scans):
+        import_scans(db, [s], Era.BETA, config)
+        if n == 3:
+            freeze_held(config.grades_path, MARKET, "Cloth", [Held("Cloth", "2589", 4, 123_456)])
+        fresh = dataclasses.replace(config, grades_path=tmp_path / f"fresh-{n}.toml")
+        if config.grades_path.exists():
+            shutil.copy(config.grades_path, fresh.grades_path)
+        kept = recommend(db, config, predictions, fair_value_cache=cache, why_not=True)
+        assert kept
+        assert kept == recommend(db, fresh, predictions, why_not=True)
+
+
+def test_a_pass_with_no_new_scan_reads_grades_toml_at_most_once(db, config, tmp_path, monkeypatch):
+    # #235: a pass loads what's frozen ~10 times; parsing grades.toml each time was ~11% of
+    # a pass with no new Scan on Live.
+    rng = random.Random(235)
+    config = dataclasses.replace(config, grades_path=tmp_path / "grades.toml")
+    cache = FairValueCache()
+    import_character_reads(db, [read(T0 - 60)], Era.BETA, config)
+    scans = cheap_flip_scans(rng, scans=6)
+    import_scans(db, scans, Era.BETA, config)
+    predictions = [held_prediction(scans), graded_prediction(scans)]
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert config.grades_path.exists()
+    reads = []
+    real_load = tomllib.load
+    monkeypatch.setattr(tomllib, "load", lambda f: reads.append(f.name) or real_load(f))
+
+    assert recommend(db, config, predictions, fair_value_cache=cache)
+    assert len(reads) <= 1

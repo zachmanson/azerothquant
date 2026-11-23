@@ -78,6 +78,7 @@ from brain.lots import (
     link_sales,
     lots,
     lots_with_crafts,
+    own_listings,
     scan_before,
     settle,
     start_of,
@@ -1065,8 +1066,9 @@ def recommend_market(
     prediction_buys, crowded_out = _spend_on_predictions(hold_buys, spend, caps)
     stopped |= crowded_out
     market_purchases = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), seen, market_purchases)
-    names = item_names(linked, seen, market_purchases)
+    own = _own_listings(conn, market, seen, fair_value_cache)
+    linked = link_sales(outcomes(conn, market), own, market_purchases)
+    names = item_names(linked, own, market_purchases)
     return MarketRecommendations(
         market,
         now,
@@ -1920,7 +1922,8 @@ def market_lots_with_crafts(
             else fair_value_cache.listings(conn, market)
         )
     market_purchases = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), seen, market_purchases)
+    own = _own_listings(conn, market, seen, fair_value_cache)
+    linked = link_sales(outcomes(conn, market), own, market_purchases)
     held = held_at_writing(conn, config, market, predictions, fair_value_cache)
     kept = split_purchases(conn, config, market, predictions, market_purchases).kept
     return lots_with_crafts(kept, linked, predictions, held, lot_craft_results(conn, market))
@@ -1979,7 +1982,8 @@ def prediction_lots(
             else fair_value_cache.listings(conn, market)
         )
     market_purchases = purchases(conn, market)
-    linked = link_sales(outcomes(conn, market), seen, market_purchases)
+    own = _own_listings(conn, market, seen, fair_value_cache)
+    linked = link_sales(outcomes(conn, market), own, market_purchases)
     held = held_at_writing(conn, config, market, predictions, fair_value_cache)
     under = [p for p in market_purchases if bought_under(p, predictions) is not None]
     return lots(under, linked, predictions, held)
@@ -2271,7 +2275,8 @@ def _valuer_at(
     merchant = _merchant(conn, market)
     cut = auction_cut(market, config)
     # Like Vendor Prices, the latest seen: a deposit rate doesn't move.
-    linked = link_sales(outcomes(conn, market), seen, purchases(conn, market))
+    own = _own_listings(conn, market, seen, cache)
+    linked = link_sales(outcomes(conn, market), own, purchases(conn, market))
     return _Valuer(
         supply,
         others,
@@ -2334,6 +2339,21 @@ def _scan_only[T](
 ) -> T:
     """`work`, kept in the cache's `scan_only` if there's a cache."""
     return work() if cache is None else cache.scan_only(conn, market, what, work)
+
+
+def _own_listings(
+    conn: sqlite3.Connection,
+    market: Market,
+    seen: Sequence[Listing],
+    cache: FairValueCache | None,
+) -> list[Listing]:
+    """The player's own Listings among `seen`. With a cache, among its Listings, as
+    `_valuer_at` takes them, picked out once until the Market's Scans change: a pass links
+    Sold mail ~17 times, and walking every Listing each time was ~9% of a pass with no new
+    Scan on Live (#235)."""
+    if cache is not None:
+        seen = cache.listings(conn, market)
+    return _scan_only(cache, conn, market, ("own_listings",), lambda: own_listings(seen))
 
 
 def _others_lows(

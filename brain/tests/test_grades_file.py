@@ -1,3 +1,6 @@
+import os
+import tomllib
+
 import pytest
 
 from brain.config import Era
@@ -164,3 +167,49 @@ def test_an_entry_edited_into_nonsense_names_the_file(tmp_path):
 
     with pytest.raises(GradesError, match="grades.toml"):
         load_frozen(path, MARKET)
+
+
+def test_an_unchanged_file_is_read_once_for_every_market(tmp_path, monkeypatch):
+    # #235: a pass loads what's frozen ~10 times; parsing grades.toml each time was ~11% of
+    # a pass with no new Scan on Live.
+    path = tmp_path / "grades.toml"
+    freeze_grade(path, MARKET, Grade(QUOTED, 1_790_000_000, 570.0, 564.3, 604))
+    reads = []
+    real_load = tomllib.load
+    monkeypatch.setattr(tomllib, "load", lambda f: reads.append(f.name) or real_load(f))
+
+    horde = Market(realm=MARKET.realm, faction="Horde", era=MARKET.era)
+
+    for _ in range(3):
+        assert load_frozen(path, MARKET).grades == {
+            QUOTED: Grade(QUOTED, 1_790_000_000, 570.0, 564.3, 604)
+        }
+        assert load_frozen(path, horde).grades == {}
+
+    assert len(reads) == 1
+
+
+def test_an_entry_frozen_after_a_load_is_seen_by_the_next(tmp_path):
+    path = tmp_path / "grades.toml"
+    freeze_grade(path, MARKET, Grade(QUOTED, 1_790_000_000, 570.0, 564.3, 604))
+    load_frozen(path, MARKET)
+
+    freeze_held(path, MARKET, ACCENTED, [Held(ACCENTED, "2589", 1, 1)])
+
+    assert load_frozen(path, MARKET).held == {ACCENTED: (Held(ACCENTED, "2589", 1, 1),)}
+
+
+def test_a_file_edited_by_hand_after_a_load_is_read_again(tmp_path):
+    # Same size, so only its modified time tells the edit apart.
+    path = tmp_path / "grades.toml"
+    freeze_grade(path, MARKET, Grade(QUOTED, 1_790_000_000, 570.0, 564.3, 604))
+    load_frozen(path, MARKET)
+    text = path.read_text(encoding="utf-8")
+    edited = text.replace("cost = 604", "cost = 605")
+    assert len(edited) == len(text)
+    stat = path.stat()
+
+    path.write_text(edited, encoding="utf-8", newline="\n")
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+    assert load_frozen(path, MARKET).grades[QUOTED].cost == 605

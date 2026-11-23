@@ -343,6 +343,12 @@ def item_names(
     return {item_key: name for name, item_key in _named(outcomes, listings, purchases)}
 
 
+def own_listings(listings: Sequence[Listing]) -> list[Listing]:
+    """The player's own Listings: only they carry an item name. `link_sales` and
+    `item_names` need no others, so a caller with many Listings can pick these out once."""
+    return [ls for ls in listings if ls.item_name is not None]
+
+
 def _named(
     outcomes: list[Outcome], listings: list[Listing], purchases: list[Purchase]
 ) -> list[tuple[str, str]]:
