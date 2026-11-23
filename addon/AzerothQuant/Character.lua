@@ -149,7 +149,7 @@ local function alertLoot(msg)
   end
   local saved = AzerothQuantRecommendations
   local formats = { single = LOOT_ITEM_SELF, multiple = LOOT_ITEM_SELF_MULTIPLE }
-  local realm, faction = GetRealmName(), UnitFactionGroup("player")
+  local realm, faction = ns.playerRealm(), UnitFactionGroup("player")
   local line = LootAlert.forMessage(saved and saved.recommendations, realm, faction, msg, formats, now)
   if not line then
     return
@@ -250,7 +250,7 @@ frame:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     end
     disenchants:flush()
     crafts:flush()
-    local realm, faction = GetRealmName(), UnitFactionGroup("player")
+    local realm, faction = ns.playerRealm(), UnitFactionGroup("player")
     local market = faction and RecommendationTable.marketKey(realm, faction)
     local read = CharacterRead.build({
       readAt = time(),

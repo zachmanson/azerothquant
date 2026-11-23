@@ -42,8 +42,10 @@ WritButton.lua
 SearchButton.lua
 SearchQueue.lua
 CancelButton.lua
+Realm.lua
 
 # WoW glue (thin; not unit tested)
+PlayerRealm.lua
 DataAddon.lua
 Scanner.lua
 Mailbox.lua

@@ -107,7 +107,7 @@ local getDetailedItemLevelInfo = C_Item and C_Item.GetDetailedItemLevelInfo or G
 
 -- The logged-in Character's Market's key in AzerothQuantDB.budgets and .daysToSell.
 local function marketKey()
-  return RecommendationTable.marketKey(GetRealmName(), UnitFactionGroup("player") or "")
+  return RecommendationTable.marketKey(ns.playerRealm(), UnitFactionGroup("player") or "")
 end
 
 -- That Budget in copper, or nil for all the gold.
@@ -676,7 +676,7 @@ function redraw()
     return
   end
   local saved = AzerothQuantRecommendations
-  local realm, faction = GetRealmName(), UnitFactionGroup("player") or ""
+  local realm, faction = ns.playerRealm(), UnitFactionGroup("player") or ""
   local recommendations, build, marks
   if atNeutral then
     -- At a Neutral AH, the Neutral list for the Character's faction (#231). Its Bought marks

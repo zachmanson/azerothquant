@@ -37,7 +37,7 @@ local function addLines(tooltip, data)
   local saved = AzerothQuantRecommendations
   local recommendations = saved and saved.recommendations
   local excluded = saved and saved.disenchantExcluded
-  local realm, faction = GetRealmName(), UnitFactionGroup("player")
+  local realm, faction = ns.playerRealm(), UnitFactionGroup("player")
   local _, link = tooltip:GetItem()
   local itemID = (link and tonumber(link:match("|Hitem:(%d+)"))) or (data and data.id)
   -- What its Disenchant source group needs to know of the item (#88).

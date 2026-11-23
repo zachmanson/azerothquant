@@ -33,7 +33,7 @@ local function readInbox()
   end
   return MailboxRead.build({
     readAt = time(),
-    realm = GetRealmName(),
+    realm = ns.playerRealm(),
     character = table.concat({ UnitFullName("player") }, "-"),
     shownCount = shown,
     totalCount = total,

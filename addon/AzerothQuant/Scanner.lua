@@ -291,7 +291,7 @@ local function requestScan()
   pending = {
     id = db.nextScanId,
     requestedAt = GetServerTime(),
-    realm = GetRealmName(),
+    realm = ns.playerRealm(),
     character = table.concat({ UnitFullName("player") }, "-"), -- e.g. "Kash-Patel" (spike #1)
     faction = marketFaction,
   }

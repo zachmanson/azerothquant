@@ -72,7 +72,7 @@ local function refresh(row, listingOf, data)
     local saved = AzerothQuantRecommendations
     local recommendations = saved and saved.recommendations
     local excluded = saved and saved.disenchantExcluded
-    local realm, faction = GetRealmName(), UnitFactionGroup("player")
+    local realm, faction = ns.playerRealm(), UnitFactionGroup("player")
     on = BuyUnderMatch.under(recommendations, realm, faction, listingOf(data), nameOf, excluded) ~= nil
   end
   flag(row, on)
