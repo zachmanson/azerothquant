@@ -219,3 +219,28 @@ def test_held_reagents_not_up_at_the_neutral_house_are_valued_at_home(db):
     load(db, [*home, neutral], reads)
 
     assert neutral_lists(db, CONFIG, [])[0].home.shopping_list
+
+
+def test_held_reagents_a_neutral_flip_to_craft_uses_up_are_valued_at_homes_wait_price(db):
+    """#234: home has a Bolt at 300 that a Flip to Sell would buy, so the held Bolt Waits
+    to post at 999 behind it rather than dumping at 299. A Neutral Flip to Craft that uses
+    it up for a Bag gives up what it would bring at home: 999 after the cut, not 299."""
+    home = [
+        scan(
+            T0 + n * HOUR,
+            row(quantity=6 - n, unit=5000, item=BAG),
+            row(quantity=1, unit=300, item=BOLT),
+            row(quantity=6 - n, unit=1000, item=BOLT),
+        )
+        for n in range(3)
+    ]
+    neutral = scan(T0 + 2 * HOUR + 600, row(6, 100), faction="Neutral")
+    held = {"bag": 0, "slot": 1, "link": BOLT_LINK, "count": 1, "isBound": False}
+    reads = [character_read(recipes=[BOLT_RECIPE, BAG_RECIPE], bags=[held])]
+    load(db, [*home, neutral], reads)
+
+    [craft] = neutral_lists(db, CONFIG, [])[0].home.shopping_list
+
+    assert (craft.item_key, craft.quantity, craft.cost) == ("4238", 2, 600)
+    # 2 Bags posted at 4999, less the 6 Linen and the held Bolt's 999 after home's cut.
+    assert craft.profit == pytest.approx(2 * 4999 * 0.95 - 600 - 999 * 0.95)

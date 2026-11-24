@@ -2784,7 +2784,9 @@ class _Valuer:
         posting under them is dumping. None without such a run, or once this Valuer has
         bought some of the Item Key: the run is gone then, and `post_at` is already the
         price after it."""
-        if self.flipped.get(item_key) or not self.home_others.get(item_key):
+        # Units bought at another Auction House (#231) leave this one's run where it is.
+        bought_here = not self.elsewhere and self.flipped.get(item_key)
+        if bought_here or not self.home_others.get(item_key):
             return None
         if item_key not in self._wait_at:
             run = self.clearing_run(item_key)
@@ -2797,8 +2799,9 @@ class _Valuer:
         self, item_key: str, cap: float | None, bought: Supply = ()
     ) -> float | None:
         others = self.home_others.get(item_key, [])
-        # Units bought at another Auction House leave this one's Listings as they are.
-        flipped = [] if self.elsewhere else [*self.flipped.get(item_key, []), *bought]
+        # Units bought at another Auction House leave this one's Listings as they are, but
+        # `bought` is always this one's: a `clearing_run` (#234).
+        flipped = [*bought] if self.elsewhere else [*self.flipped.get(item_key, []), *bought]
         if item_key not in self._own_cheapest:
             self._own_cheapest[item_key] = cheapest_without(self.supply.get(item_key, []), others)
         return _undercut(
