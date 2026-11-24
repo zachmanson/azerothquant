@@ -849,36 +849,42 @@ def neutral_lists(
         home_times, neutral_times = scan_times(conn, home), scan_times(conn, neutral)
         if not home_times or not neutral_times:
             continue
-        neutral_at = neutral_times[-1]
+        neutral_at, home_at = neutral_times[-1], home_times[-1]
         buy_at = BuyAt(
             supply_at(conn, neutral, neutral_at, others_only=True),
             dropped_at(conn, neutral, neutral_at),
         )
-        full = recommend_market(
-            conn,
-            config,
-            home,
-            predictions,
-            home_times[-1],
-            buy_under=False,
-            fair_value_cache=fair_value_cache,
-            loot_alert=False,
-            buy_at=buy_at,
-        )
-        shopping_only = replace(
-            full,
-            holdings=[],
-            prediction_buys=[],
-            prediction_cost=0,
-            predictions=[],
-            grades=[],
-            pooled_return=None,
-            held={},
-            beta_ratios={},
-            scan_count=len(home_times),
-        )
+        work = _groundwork(conn, config, home, predictions, home_at, None, fair_value_cache)
+        shopping_only = _neutral_list(conn, work, buy_at, len(home_times))
         result.append(NeutralList(neutral, neutral_at, shopping_only))
     return result
+
+
+def _neutral_list(
+    conn: sqlite3.Connection, work: "_Groundwork", buy_at: BuyAt, scan_count: int
+) -> MarketRecommendations:
+    """The home Market's Recommendations with only the Shopping List that buys at the
+    Neutral house `buy_at` filled, and what sized it."""
+    under, unbound = set(work.under), _unbound_units(work.crafting.after)
+    # Only the buys are at the other house: held units are valued at home, on `valuer`.
+    valuer = work.valuer.after({}, unbound)
+    buying, cleared = valuer.buying_at(buy_at.others).flips(under, unbound)
+    shop = _shopping(work, valuer, buying, cleared, work.dropped | buy_at.dropped, None)
+    return MarketRecommendations(
+        work.market,
+        work.now,
+        work.gold,
+        budget=work.budget,
+        stake=shop.stake,
+        min_profit=shop.min_profit.least,
+        min_profit_per_click=shop.min_profit.per_click,
+        room=None if shop.risk == NO_CAPS else shop.risk.room,
+        loss_cap=None if shop.risk == NO_CAPS else shop.risk.loss,
+        window_hours=observation_window_hours(conn, work.market, work.config, work.now),
+        scan_count=scan_count,
+        shopping_list=shop.rows,
+        loot_alert=_loot_alert(work.gold, valuer, work.plans, work.config, with_items=False),
+    )
 
 
 def recommend_market(
@@ -896,7 +902,6 @@ def recommend_market(
     gold: int | None = None,
     tied_up: float | None = None,
     taken: frozenset[int] = frozenset(),
-    buy_at: "BuyAt | None" = None,
 ) -> MarketRecommendations:
     """The Market's Recommendations as of its Scan requested at `now`. The Holdings, gold,
     Known Recipes and Enchanting skills are the latest, or as of `as_of` (a past Scan,
@@ -908,63 +913,26 @@ def recommend_market(
     the Characters' gold and the Budget: a Backtest's simulated gold (#167). A `tied_up`
     replaces the own Listings up at cost in the Stake (ADR-0034): a Backtest's unsold
     units, since the Scans show the real player's posts. The Listing ids `taken` are left
-    out of the Scan: those a Backtest bought, still up in the real market (#212). With
-    `buy_at`, the Shopping List buys at another Auction House and values every exit
-    here (#231)."""
-    characters = character_markets(conn).get(market, [])
-    days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
-    config = replace(config, days_to_sell_seconds=days_to_sell)
-    today = date.fromtimestamp(now)
-    active = [p for p in predictions if p.active_on(today)]
-    under = {k: p.name for p in active for k in p.item_keys}
-    by_character = _by_character(conn, market, characters, as_of)
-    holdings = _pooled(by_character)
-    # Loaded once for the whole pass: the Market's every Listing is the bulk of it (#105).
-    if fair_value_cache is not None:
-        seen = fair_value_cache.listings(conn, market)
-    else:
-        seen = listings(conn, market)
-    # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
-    # options are alternatives, so none is assumed (#86). This Valuer is before the Flips:
-    # they're worked out once, after the crafts.
-    valuer = _valuer_at(conn, config, market, now, seen, fair_value_cache, as_of, taken).after(
-        {}, _unbound_units(holdings)
+    out of the Scan: those a Backtest bought, still up in the real market (#212)."""
+    work = _groundwork(
+        conn, config, market, predictions, now, as_of, fair_value_cache, paid, gold, taken
     )
-    supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
-    vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
-    plans = _plans(known_recipes(conn, market, as_of), now)
-    crafting = _crafts(holdings, plans, merchant, valuer, set(under), config)
+    config, active, under, by_character = work.config, work.active, work.under, work.by_character
+    seen, plans, crafting, dropped = work.seen, work.plans, work.crafting, work.dropped
+    gold, budget, paid_lots = work.gold, work.budget, work.paid_lots
+    supply, for_sale, rates = work.valuer.supply, work.valuer.others, work.valuer.rates
+    vendor, merchant, cut = work.valuer.vendor, work.valuer.merchant, work.valuer.cut
     held = crafting.after
-    # The Scan may have missed some Listings of an item it dropped rows of, so the cheapest
-    # it saw may not be the cheapest up (#156).
-    dropped = dropped_at(conn, market, now)
     # The crafts change what's held, so the Flips are sized again after them (#67).
-    unbound = _unbound_units(held)
-    if buy_at is None:
-        valuer, cleared = valuer.flips(set(under), unbound)
-        buying, buy_dropped = valuer, dropped
-    else:
-        # Only the buys are at the other house: held units are valued here, on `valuer`.
-        valuer = valuer.after({}, unbound)
-        buying, cleared = valuer.buying_at(buy_at.others).flips(set(under), unbound)
-        buy_dropped = dropped | buy_at.dropped
-    buys = [b for b in cleared if item_id_of(b.item_key) not in buy_dropped]
-    if gold is None:
-        gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
-        budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
-    else:
-        budget = None
-    spend = _spend(gold, budget)
-    # Without `paid`, a past Scan's Lots may rest on what it named (#55), so the own
-    # Listings up are at Best Exit Value.
-    paid_lots = (
-        market_lots(conn, config, market, predictions, seen, fair_value_cache) if paid else []
+    valuer, cleared = work.valuer.flips(set(under), _unbound_units(held))
+    shop = _shopping(work, valuer, valuer, cleared, dropped, tied_up)
+    spend, stake, risk, min_profit, shopping = (
+        shop.spend,
+        shop.stake,
+        shop.risk,
+        shop.min_profit,
+        shop.rows,
     )
-    if tied_up is None:
-        tied_up = _at_cost(_own_units(supply, for_sale), paid_lots, valuer)
-    stake = gold + tied_up
-    risk = _risk_caps(gold, tied_up, config)
-    min_profit = _min_profit(stake, config)
     ratios = beta_ratios(conn, market, config, now, set(under), fair_value_cache)
     beta = beta_sell_rates(conn, market, config, ratios, fair_value_cache)
     hold_buys: list[_HoldBuy] = []
@@ -990,51 +958,6 @@ def recommend_market(
         hold_buys += found
         if not found and stop is not None:
             stopped[item_key] = stop
-
-    def outlet(plan: _Plan) -> _Outlet:
-        return _outlet(
-            plan.recipe.bind_type in BOUND_ON_CRAFT,
-            supply.get(plan.output, []),
-            for_sale.get(plan.output, []),
-            rates.get(plan.output),
-            vendor.get(item_id_of(plan.output)),
-            merchant.get(plan.output),
-            _unbound(held.get(plan.output, Holding())),
-            valuer.effort(plan.output),
-            valuer.queue(plan.output, flips=True),
-            cut,
-            config,
-        )
-
-    crafts = [
-        _flips_to_craft(
-            plans,
-            crafting,
-            buying.others,
-            merchant,
-            buying,
-            outlet,
-            set(under),
-            spend,
-            config,
-            plan,
-        )
-        for plan in plans
-        # Its output sells here, so only this Scan's dropped rows count against it.
-        if item_id_of(plan.output) not in dropped
-    ]
-    disenchants = _flips_to_disenchant(buying, plans, set(under), buy_dropped, spend, config, risk)
-    shopping = _options(
-        buys,
-        crafts,
-        disenchants,
-        spend,
-        config.shopping_list_rows,
-        config.craft_list_rows,
-        config.disenchant_list_rows,
-        risk,
-        min_profit,
-    )
     crafted = crafting.counts
     disenchanted, left = _disenchants(held, valuer, set(under), _bound_by(by_character))
     # Paid as `_with_roi` shows it: over every held unit, the Disenchanted ones too.
@@ -1108,6 +1031,200 @@ def recommend_market(
         beta_ratios=ratios,
         loot_alert=_loot_alert(gold, valuer, plans, config, with_items=loot_alert),
     )
+
+
+@dataclass(frozen=True)
+class _Groundwork:
+    """What a Market's Recommendations as of one Scan work out before the Flips: the held
+    units valued with nothing bought (#86), their Craft Actions, the gold and the Lots.
+    None of it depends on where the Flips buy, so a Neutral list shares it (#236)."""
+
+    market: Market
+    now: int
+    config: Config  # with the Market's days to sell
+    active: list[Prediction]
+    under: dict[str, str]  # each active Prediction's Item Keys, to its name
+    by_character: dict[str, dict[str, Holding]]
+    seen: list[Listing]
+    valuer: "_Valuer"  # the Holdings', before the Flips
+    plans: list["_Plan"]
+    crafting: "_Crafting"
+    dropped: frozenset[int]
+    gold: int
+    budget: int | None
+    paid_lots: list[Lot]
+
+
+@dataclass(frozen=True)
+class _GroundworkThisPass:
+    """A Market's `_Groundwork` for its latest state, kept for the rest of a pass with the
+    Config and Predictions it was worked out for."""
+
+    config: Config
+    predictions: tuple[Prediction, ...]
+    work: _Groundwork
+
+
+def _groundwork(
+    conn: sqlite3.Connection,
+    config: Config,
+    market: Market,
+    predictions: Sequence[Prediction],
+    now: int,
+    as_of: int | None = None,
+    fair_value_cache: FairValueCache | None = None,
+    paid: bool = True,
+    gold: int | None = None,
+    taken: frozenset[int] = frozenset(),
+) -> _Groundwork:
+    """The Market's `_Groundwork` as `recommend_market` takes its arguments. For the latest
+    Holdings and gold, it's kept in `fair_value_cache` for the rest of the pass: the home
+    Recommendations work it out, and the Neutral list reuses it (#236)."""
+    latest = as_of is None and gold is None and not taken and paid
+    key = (_Groundwork, market)
+    if latest and fair_value_cache is not None:
+        kept = fair_value_cache.this_pass.get(key)
+        if (
+            isinstance(kept, _GroundworkThisPass)
+            and kept.work.now == now
+            and kept.config == config
+            and kept.predictions == tuple(predictions)
+        ):
+            return kept.work
+    characters = character_markets(conn).get(market, [])
+    days_to_sell = market_days_to_sell(conn, market.era, market.realm, market.faction, as_of)
+    for_market = replace(config, days_to_sell_seconds=days_to_sell)
+    today = date.fromtimestamp(now)
+    active = [p for p in predictions if p.active_on(today)]
+    under = {k: p.name for p in active for k in p.item_keys}
+    by_character = _by_character(conn, market, characters, as_of)
+    holdings = _pooled(by_character)
+    # Loaded once for the whole pass: the Market's every Listing is the bulk of it (#105).
+    if fair_value_cache is not None:
+        seen = fair_value_cache.listings(conn, market)
+    else:
+        seen = listings(conn, market)
+    # Holdings and Craft Actions are valued with nothing on the Shopping List bought: its
+    # options are alternatives, so none is assumed (#86). This Valuer is before the Flips:
+    # they're worked out once, after the crafts.
+    valuer = _valuer_at(conn, for_market, market, now, seen, fair_value_cache, as_of, taken).after(
+        {}, _unbound_units(holdings)
+    )
+    plans = _plans(known_recipes(conn, market, as_of), now)
+    crafting = _crafts(holdings, plans, valuer.merchant, valuer, set(under), for_market)
+    if gold is None:
+        gold = pooled_gold(conn, market.era, market.realm, market.faction, as_of)
+        budget = market_budget(conn, market.era, market.realm, market.faction, as_of)
+    else:
+        budget = None
+    # Without `paid`, a past Scan's Lots may rest on what it named (#55), so the own
+    # Listings up are at Best Exit Value.
+    paid_lots = (
+        market_lots(conn, for_market, market, predictions, seen, fair_value_cache) if paid else []
+    )
+    work = _Groundwork(
+        market,
+        now,
+        for_market,
+        active,
+        under,
+        by_character,
+        seen,
+        valuer,
+        plans,
+        crafting,
+        # The Scan may have missed some Listings of an item it dropped rows of, so the
+        # cheapest it saw may not be the cheapest up (#156).
+        dropped_at(conn, market, now),
+        gold,
+        budget,
+        paid_lots,
+    )
+    if latest and fair_value_cache is not None:
+        fair_value_cache.this_pass[key] = _GroundworkThisPass(config, tuple(predictions), work)
+    return work
+
+
+@dataclass(frozen=True)
+class _Shopping:
+    """A Shopping List, and what sized it: the spend, the Stake and the caps on it."""
+
+    rows: list[Row]
+    spend: int
+    stake: float
+    risk: _RiskCaps
+    min_profit: "_MinProfit"
+
+
+def _shopping(
+    work: _Groundwork,
+    valuer: "_Valuer",
+    buying: "_Valuer",
+    cleared: list["_VendorBuy | _FlipToSell"],
+    buy_dropped: frozenset[int],
+    tied_up: float | None,
+) -> _Shopping:
+    """The Shopping List of `work`'s Market: the Flips `cleared` and Flips to Craft and
+    Disenchant that buy what `buying` buys, every exit valued on `valuer`, sized by the
+    gold and the Stake. The Listings `buy_dropped` names may not be the cheapest up (#156).
+    A `tied_up` replaces the own Listings up at cost, as in `recommend_market`."""
+    config, under, plans, crafting = work.config, set(work.under), work.plans, work.crafting
+    supply, for_sale, rates = valuer.supply, valuer.others, valuer.rates
+    vendor, merchant, cut = valuer.vendor, valuer.merchant, valuer.cut
+    held = crafting.after
+    buys = [b for b in cleared if item_id_of(b.item_key) not in buy_dropped]
+    spend = _spend(work.gold, work.budget)
+    if tied_up is None:
+        tied_up = _at_cost(_own_units(supply, for_sale), work.paid_lots, valuer)
+    stake = work.gold + tied_up
+    risk = _risk_caps(work.gold, tied_up, config)
+    min_profit = _min_profit(stake, config)
+
+    def outlet(plan: _Plan) -> _Outlet:
+        return _outlet(
+            plan.recipe.bind_type in BOUND_ON_CRAFT,
+            supply.get(plan.output, []),
+            for_sale.get(plan.output, []),
+            rates.get(plan.output),
+            vendor.get(item_id_of(plan.output)),
+            merchant.get(plan.output),
+            _unbound(held.get(plan.output, Holding())),
+            valuer.effort(plan.output),
+            valuer.queue(plan.output, flips=True),
+            cut,
+            config,
+        )
+
+    crafts = [
+        _flips_to_craft(
+            plans,
+            crafting,
+            buying.others,
+            merchant,
+            buying,
+            outlet,
+            under,
+            spend,
+            config,
+            plan,
+        )
+        for plan in plans
+        # Its output sells here, so only this Scan's dropped rows count against it.
+        if item_id_of(plan.output) not in work.dropped
+    ]
+    disenchants = _flips_to_disenchant(buying, plans, under, buy_dropped, spend, config, risk)
+    rows = _options(
+        buys,
+        crafts,
+        disenchants,
+        spend,
+        config.shopping_list_rows,
+        config.craft_list_rows,
+        config.disenchant_list_rows,
+        risk,
+        min_profit,
+    )
+    return _Shopping(rows, spend, stake, risk, min_profit)
 
 
 def _own_units(supply: Mapping[str, Supply], others: Mapping[str, Supply]) -> dict[str, int]:

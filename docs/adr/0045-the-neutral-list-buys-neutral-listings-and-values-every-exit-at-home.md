@@ -27,7 +27,7 @@ At Everlook the player sees Listings a home Market's Scan never shows, and the B
 
 ## Consequences
 
-- A Live pass with a Neutral Scan works out each home Market's Shopping List twice, so it takes about twice as long.
+- A Live pass with a Neutral Scan works out each home Market's Flips and Shopping List twice. The rest (Holdings, Craft Actions, gold, Lots) is worked out once and shared (#236).
 - CONTEXT.md gains **Neutral list**; **Market**, **Shopping List** and **Recommendation Table** say how a Neutral house fits in. **Purchase**, **Lot** and **Flip Grade** follow once the mail and Flip Grades are built.
 - At the Neutral house, rows marked Bought are kept apart from home's and cleared once a newer Neutral Scan is imported. The Budget box is home's, since it's the same gold.
 - A Backtest of Neutral lists is #232, once there are more Neutral Scans.
