@@ -28,7 +28,7 @@ So the individual rules each look defensible. The owner's point is about the *wh
 - Read `code/` first. Read `design-docs-read-last/` (domain glossary, ADRs, the previous outside review) only after you've formed your own view, then note where you disagree with a past decision and why.
 - Don't edit `code/`. Put scripts in `probes/` and the report in `REVIEW.md` here.
 - Every claim about what the code does or what the data shows needs a probe or a file:line. Say which of your suggestions are guesses.
-- Plain language in the summary at the top. The owner is a physics grad, new to finance and to software.
+- Plain language in the summary at the top. The owner is new to finance.
 
 ## How to run the Brain on the real data
 
