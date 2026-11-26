@@ -29,3 +29,7 @@ You always do the buying and selling yourself. The Addon never buys, bids or tak
 - `docs/adr/`: the design decisions and why.
 - `docs/development.md`: building, testing, running and releasing.
 - `docs/setup-guide.md`: the full player guide (install, first Scan, reading the table, troubleshooting).
+
+## License
+
+MIT, see `LICENSE`. The Claude Code skills in `.claude/skills/` are third-party, see `.claude/skills/THIRD-PARTY-LICENSES.md`.
